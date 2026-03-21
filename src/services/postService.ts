@@ -85,21 +85,49 @@ export class PostService {
         }
     }
 
-    async sendToApproved(text: string, media: MediaItem[]): Promise<void> {
+    async sendToApproved(text: string, media: MediaItem[]): Promise<number | null> {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
         if (media.length > 0) {
             const group = this.mediaService.buildMediaGroup(media, text);
 
-            await this.bot.sendMediaGroup(approvedGroupId, group, {
+            const sent = await this.bot.sendMediaGroup(approvedGroupId, group, {
                 reply_to_message_id: approvedTopicId,
             } as any);
+
+            return sent[0]?.message_id ?? null;
         } else {
-            await this.bot.sendMessage(approvedGroupId, text, {
+            const sent = await this.bot.sendMessage(approvedGroupId, text, {
                 parse_mode: "HTML",
                 reply_to_message_id: approvedTopicId,
             } as any);
+
+            return sent.message_id;
+        }
+    }
+
+    async markSoldInGroup(approvedMessageId: number, soldText: string, hasMedia: boolean): Promise<boolean> {
+        const approvedGroupId = this.config.approvedGroupId;
+
+        try {
+            if (hasMedia) {
+                await this.bot.editMessageCaption(soldText, {
+                    chat_id: approvedGroupId,
+                    message_id: approvedMessageId,
+                    parse_mode: "HTML",
+                });
+            } else {
+                await this.bot.editMessageText(soldText, {
+                    chat_id: approvedGroupId,
+                    message_id: approvedMessageId,
+                    parse_mode: "HTML",
+                });
+            }
+            return true;
+        } catch (err) {
+            console.error("[ERROR - markSoldInGroup]", (err as Error).message);
+            return false;
         }
     }
 }

@@ -55,6 +55,19 @@ export interface LocaleStrings {
     bumpLimitReached: string;
     bumpNotApproved: string;
     bumpsUsed: string;
+    configUsage: string;
+    configKeyNotFound: string;
+    configInvalidValue: string;
+    configUpdated: string;
+    helpTitle: string;
+    helpStart: string;
+    helpMyPosts: string;
+    helpHelp: string;
+    helpAdminSection: string;
+    helpConfig: string;
+    helpTest: string;
+    soldTag: string;
+    latestPostTag: string;
     [key: string]: string;
 }
 

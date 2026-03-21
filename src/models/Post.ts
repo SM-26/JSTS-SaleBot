@@ -17,6 +17,7 @@ export interface IPost extends Document {
     isExpired: boolean;
     lastBumpAt: Date | null;
     dailyBumpCount: number;
+    approvedMessageId: number | null;
 }
 
 const mediaItemSchema = new Schema<IMediaItem>({
@@ -36,6 +37,7 @@ const postSchema = new Schema<IPost>({
     isExpired: { type: Boolean, default: false },
     lastBumpAt: { type: Date, default: null },
     dailyBumpCount: { type: Number, default: 0 },
+    approvedMessageId: { type: Number, default: null },
 });
 
 export default mongoose.model<IPost>("Post", postSchema);

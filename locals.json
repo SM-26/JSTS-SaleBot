@@ -38,7 +38,20 @@
         "bumpSuccess": "הפוסט קודם בהצלחה.",
         "bumpLimitReached": "הגעת למגבלת הקידומים היומית.",
         "bumpNotApproved": "ניתן לקדם רק פוסטים מאושרים.",
-        "bumpsUsed": "קידומים היום"
+        "bumpsUsed": "קידומים היום",
+        "configUsage": "שימוש: <code>/config key value</code>",
+        "configKeyNotFound": "מפתח לא נמצא בהגדרות.",
+        "configInvalidValue": "ערך לא תקין.",
+        "configUpdated": "ההגדרה עודכנה.",
+        "helpTitle": "<b>פקודות זמינות</b>",
+        "helpStart": "/start - יצירת פוסט מכירה חדש",
+        "helpMyPosts": "/myposts - הצגת הפוסטים שלך",
+        "helpHelp": "/help - הצגת רשימת פקודות",
+        "helpAdminSection": "<b>פקודות מנהל</b>",
+        "helpConfig": "/config - הצגת ועריכת הגדרות",
+        "helpTest": "/test - הרצת בדיקות",
+        "soldTag": "\n\n--- נמכר ---",
+        "latestPostTag": "אחרון"
     },
     "en": {
         "welcome": "Welcome! Let's create a sale post. Please enter a title:",
@@ -79,6 +92,19 @@
         "bumpSuccess": "Post bumped successfully.",
         "bumpLimitReached": "You have reached the daily bump limit.",
         "bumpNotApproved": "Only approved posts can be bumped.",
-        "bumpsUsed": "Bumps today"
+        "bumpsUsed": "Bumps today",
+        "configUsage": "Usage: <code>/config key value</code>",
+        "configKeyNotFound": "Key not found in config.",
+        "configInvalidValue": "Invalid value.",
+        "configUpdated": "Config updated.",
+        "helpTitle": "<b>Available Commands</b>",
+        "helpStart": "/start - Create a new sale post",
+        "helpMyPosts": "/myposts - View your posts",
+        "helpHelp": "/help - Show this command list",
+        "helpAdminSection": "<b>Admin Commands</b>",
+        "helpConfig": "/config - View and edit settings",
+        "helpTest": "/test - Run test cases",
+        "soldTag": "\n\n--- SOLD ---",
+        "latestPostTag": "Latest"
     }
 }

@@ -85,7 +85,10 @@ export class ModerationService {
             firstName: user.firstName || undefined,
         });
 
-        await this.postService.sendToApproved(postText, post.media);
+        const messageId = await this.postService.sendToApproved(postText, post.media);
+        if (messageId) {
+            await postRepository.setApprovedMessageId(postId, messageId);
+        }
 
         this.bot.sendMessage(Number(post.userId), this.locals[this.lang].postApproved);
         this.bot.answerCallbackQuery(query.id, { text: "✅ Approved" });

@@ -30,17 +30,20 @@ export class MyPostsService {
         let text = this.locals[this.lang].myPostsTitle + "\n\n";
         const buttons: TelegramBot.InlineKeyboardButton[][] = [];
 
-        for (const post of posts) {
+        for (let i = 0; i < posts.length; i++) {
+            const post = posts[i];
             const status = this.statusLabel(post.status);
-            text += `- <b>${post.title}</b>  |  ${post.price}  |  ${status}`;
+            const latest = i === 0 ? `  [${this.locals[this.lang].latestPostTag}]` : "";
+            text += `- <b>${post.title}</b>  |  ${post.price}  |  ${status}${latest}`;
 
             if (post.status === "approved") {
                 const used = post.dailyBumpCount || 0;
                 const limit = this.config.dailyBumpLimit;
                 text += `  |  ${this.locals[this.lang].bumpsUsed}: ${used}/${limit}`;
+                const tag = i === 0 ? ` [${this.locals[this.lang].latestPostTag}]` : "";
                 buttons.push([
-                    { text: `${this.locals[this.lang].markSoldButton} — ${post.title}`, callback_data: `sold_${post._id}` },
-                    { text: `${this.locals[this.lang].bumpButton} — ${post.title}`, callback_data: `bump_${post._id}` },
+                    { text: `${this.locals[this.lang].markSoldButton} ${post.title}${tag}`, callback_data: `sold_${post._id}` },
+                    { text: `${this.locals[this.lang].bumpButton} ${post.title}${tag}`, callback_data: `bump_${post._id}` },
                 ]);
             }
 
@@ -92,6 +95,24 @@ export class MyPostsService {
 
         await postRepository.updateStatus(postId, "sold");
         await this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].postMarkedSold });
+
+        // Edit the message in the approved group
+        if (post.approvedMessageId) {
+            const user = await userRepository.findByUserId(post.userId);
+            const postText = this.postService.formatPostText({
+                title: post.title,
+                description: post.description,
+                price: post.price,
+                location: post.location,
+                media: post.media,
+                userId: Number(post.userId),
+                username: user?.userName || undefined,
+                firstName: user?.firstName || "User",
+            });
+            const soldText = postText + this.locals[this.lang].soldTag;
+            await this.postService.markSoldInGroup(post.approvedMessageId, soldText, post.media.length > 0);
+        }
+
         await this.refreshMessage(query);
     }
 
@@ -143,10 +164,13 @@ export class MyPostsService {
             firstName: user?.firstName || "User",
         });
 
-        await this.postService.sendToApproved(postText, post.media);
+        const newMessageId = await this.postService.sendToApproved(postText, post.media);
 
-        // Update bump tracking
+        // Update bump tracking and store new message ID
         await postRepository.updateBump(postId, bumpCount + 1);
+        if (newMessageId) {
+            await postRepository.setApprovedMessageId(postId, newMessageId);
+        }
 
         await this.refreshMessage(query);
     }

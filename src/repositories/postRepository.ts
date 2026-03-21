@@ -7,7 +7,7 @@ class PostRepository {
     }
 
     findByUserId(userId: string) {
-        return Post.find({ userId });
+        return Post.find({ userId }).sort({ createdAt: -1 });
     }
 
     findById(postId: string) {
@@ -16,6 +16,10 @@ class PostRepository {
 
     updateStatus(postId: string, status: IPost["status"]) {
         return Post.findByIdAndUpdate(postId, { status }, { new: true });
+    }
+
+    setApprovedMessageId(postId: string, approvedMessageId: number | null) {
+        return Post.findByIdAndUpdate(postId, { approvedMessageId }, { new: true });
     }
 
     updateBump(postId: string, dailyBumpCount: number) {
@@ -28,6 +32,10 @@ class PostRepository {
 
     getPending() {
         return Post.find({ status: "pending" });
+    }
+
+    getSold() {
+        return Post.find({ status: "sold", approvedMessageId: { $ne: null } });
     }
 
     deleteById(postId: string) {

@@ -9,6 +9,7 @@ import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
 import { MyPostsService } from "../services/myPostsService";
+import { AdminService } from "../services/adminService";
 import userRepository from "../repositories/userRepository";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
@@ -27,6 +28,7 @@ export class BotController {
     private moderationService: ModerationService;
     private userService: UserService;
     private myPostsService: MyPostsService;
+    private adminService: AdminService;
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
@@ -39,6 +41,37 @@ export class BotController {
         this.moderationService = new ModerationService(bot, this.config, this.locals, this.postService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(bot, this.config, this.locals, this.postService);
+        this.adminService = new AdminService(bot, this.config, this.locals);
+    }
+
+    async syncSoldPosts(): Promise<void> {
+        try {
+            const soldPosts = await postRepository.getSold();
+            let synced = 0;
+            for (const post of soldPosts) {
+                const user = await userRepository.findByUserId(post.userId);
+                const postText = this.postService.formatPostText({
+                    title: post.title,
+                    description: post.description,
+                    price: post.price,
+                    location: post.location,
+                    media: post.media,
+                    userId: Number(post.userId),
+                    username: user?.userName || undefined,
+                    firstName: user?.firstName || "User",
+                });
+                const soldText = postText + this.locals[this.config.lang].soldTag;
+                const success = await this.postService.markSoldInGroup(post.approvedMessageId!, soldText, post.media.length > 0);
+                if (success) {
+                    synced++;
+                } else {
+                    await postRepository.setApprovedMessageId(String(post._id), null);
+                }
+            }
+            console.log(`Synced ${synced}/${soldPosts.length} sold post(s) in approved group.`);
+        } catch (err) {
+            console.error("[ERROR - syncSoldPosts]", (err as Error).message);
+        }
     }
 
     getSession(userId: number): UserSession {
@@ -121,9 +154,32 @@ export class BotController {
         }
     }
 
+    async showHelp(msg: TelegramBot.Message): Promise<void> {
+        const lang = this.config.lang;
+        const lines = [
+            this.locals[lang].helpTitle,
+            "",
+            this.locals[lang].helpStart,
+            this.locals[lang].helpMyPosts,
+            this.locals[lang].helpHelp,
+        ];
+
+        const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
+        if (isAdmin) {
+            lines.push("");
+            lines.push(this.locals[lang].helpAdminSection);
+            lines.push(this.locals[lang].helpConfig);
+            lines.push(this.locals[lang].helpTest);
+        }
+
+        await this.bot.sendMessage(msg.chat.id, lines.join("\n"), { parse_mode: "HTML" });
+    }
+
     registerRoutes(): void {
         this.bot.onText(/\/start/, (msg) => this.HandleStart(msg));
         this.bot.onText(/\/myposts/, (msg) => this.myPostsService.showPosts(msg));
+        this.bot.onText(/\/help/, (msg) => this.showHelp(msg));
+        this.bot.onText(/\/config(.*)/, (msg, match) => this.adminService.handleConfig(msg, match?.[1] ?? ""));
 
         // --- /test command: comment out to disable ---
         this.bot.onText(/\/test/, async (msg) => {

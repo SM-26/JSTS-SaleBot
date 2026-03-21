@@ -16,18 +16,9 @@ async function main() {
 
     const controller = new BotController(bot);
     controller.registerRoutes();
+    await controller.syncSoldPosts();
 
     console.log("Bot is running...");
-
-    // /help command
-    bot.onText(/\/help/, (msg) => {
-        const helpText = [
-            "/start  - Start the bot",
-            "/help   - Show this help message",
-        ].join("\n");
-
-        bot.sendMessage(msg.chat.id, helpText);
-    });
 
     // Graceful shutdown
     process.on("SIGINT", () => {
