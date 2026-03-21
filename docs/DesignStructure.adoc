@@ -1,0 +1,125 @@
+= GoSaleBot Design Structure
+:toc:
+:toc-title: Table of Contents
+:sectnums:
+
+== Background
+
+GoSaleBot is a Telegram bot written in Go that facilitates peer-to-peer item sales through Telegram groups. Users interact with the bot to create a sale post, providing details such as title, description, price, location, and images. The bot acts as an intermediary between users and two Telegram groups: Group 1 for moderation and Group 2 for approved posts. The bot is deployed as a Docker container and uses SQLite for persistent storage.
+
+== Requirements Overview
+
+* Users submit sale posts via structured questions (title, description, price, location, images).
+* Posts are sent to a configured moderation group (Group 1) and monitored for up to 24 hours.
+* Moderation via reaction (✅ = approve, reply = reject) with status updates and forwarding logic.
+* Persistent storage of all post/group/message/user metadata and reliable time-based event processing.
+* Configurable timeout duration and group IDs.
+* Admin commands for querying and configuration (optional).
+
+== Architecture Overview
+
+The bot architecture consists of the following components:
+
+[plantuml]
+----
+@startuml
+actor User
+actor Admin
+participant "Telegram Bot (Go)" as Bot
+database SQLite
+
+User -> Bot : Start sale post
+Bot -> User : Ask for details
+User -> Bot : Provide details
+Bot -> SQLite : Save draft post
+Bot -> Group1 : Send post to moderation
+Group1 -> Bot : ✅ reaction
+Bot -> SQLite : Mark post as approved
+Bot -> Group1 : Delete post
+Bot -> Group2 : Forward post
+Group1 -> Bot : Reply
+Bot -> SQLite : Mark post as rejected
+Bot -> Group1 : Delete post
+Bot -> User : Forward reply
+@enduml
+----
+
+== Data Model (SQLite)
+
+```sql
+CREATE TABLE posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+    title TEXT,
+    description TEXT,
+    price TEXT,
+    location TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME
+);
+
+CREATE TABLE photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    file_id TEXT NOT NULL
+);
+
+CREATE TABLE config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+```
+
+== Message Handling Logic
+
+The bot follows a finite state machine approach to collect post data step-by-step and transition post status:
+
+. User Interaction Flow
+* `/start` shows menu.
+* Selecting "Sale Post" starts a wizard to ask:
+** Title
+** Description
+** Price
+** Location
+** One or more Photos
+* Once complete, a preview is sent to Group 1 with `status = 'pending'`.
+* `expires_at = created_at + 24 hours`
+
+. Moderation Handling
+* ✅ Reaction on the Group 1 message:
+** Set `status = 'approved'`
+** Forward the post (with photos) to Group 2
+** Delete the original message from Group 1
+* 🗨️ Reply on the Group 1 message:
+** Set `status = 'rejected'`
+** Forward the reply to the user
+** Delete the original message from Group 1
+
+. Timeout Handling
+* Background worker runs every N minutes (e.g., 5 min interval)
+* SELECT all posts where:
+** `status = 'pending'`
+** `expires_at < NOW()`
+* No action is taken (post remains), but system can expose this for admin review if needed
+
+. Configuration
+* Group 1 ID, Group 2 ID, and timeout duration (default 24h) are stored in the `config` table and read at startup
+
+== Telegram Integration Details
+
+* Uses the Telegram Bot API (long polling preferred for simplicity)
+* Message IDs and file IDs are stored to allow editing/deleting/forwarding
+* Uses inline keyboard buttons to confirm submission before posting to Group 1
+* Optional: Admin-only commands to query active/pending posts or change group config
+
+== Deployment
+
+The bot is packaged as a Docker container and can be deployed on any cloud or VPS. Environment variables and configuration are managed via Docker Compose and SQLite.
+
+== Extensibility
+
+* The design supports additional admin commands, configurable timeouts, and persistent storage backends.
+* The modular architecture allows for future enhancements, such as public marketplace browsing or payment integration (not in scope).
