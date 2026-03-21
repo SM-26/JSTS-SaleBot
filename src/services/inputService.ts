@@ -1,5 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals } from "../types";
+import { BotConfig, Locals, MediaItem } from "../types";
 
 export class InputService {
     constructor(
@@ -42,13 +42,13 @@ export class InputService {
         }
     }
 
-    inputPhotos(msg: TelegramBot.Message, onPhoto: (fileId: string) => Promise<string | null>): Promise<string[]> {
-        const photoPaths: string[] = [];
-        const doneCallbackData = `done_photos_${msg.from!.id}`;
+    inputMedia(msg: TelegramBot.Message): Promise<MediaItem[]> {
+        const items: MediaItem[] = [];
+        const doneCallbackData = `done_media_${msg.from!.id}`;
 
         return new Promise((resolve) => {
             const cbListener = (query: TelegramBot.CallbackQuery) => {
-                if (!query.data || !query.data.startsWith("done_photos_")) return;
+                if (!query.data || !query.data.startsWith("done_media_")) return;
                 if (query.from.id !== msg.from!.id) return;
 
                 this.bot.removeListener("message", msgListener);
@@ -62,16 +62,17 @@ export class InputService {
                     );
                 }
 
-                resolve(photoPaths);
+                resolve(items);
             };
 
-            const msgListener = async (reply: TelegramBot.Message) => {
+            const msgListener = (reply: TelegramBot.Message) => {
                 if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
 
                 if (reply.photo && reply.photo.length > 0) {
                     const fileId = reply.photo[reply.photo.length - 1].file_id;
-                    const savedPath = await onPhoto(fileId);
-                    if (savedPath) photoPaths.push(savedPath);
+                    items.push({ fileId, type: "photo" });
+                } else if (reply.video) {
+                    items.push({ fileId: reply.video.file_id, type: "video" });
                 }
             };
 
@@ -80,18 +81,18 @@ export class InputService {
         });
     }
 
-    async promptPhotos(msg: TelegramBot.Message, onPhoto: (fileId: string) => Promise<string | null>): Promise<string[]> {
-        const photosPromise = this.inputPhotos(msg, onPhoto);
+    async promptMedia(msg: TelegramBot.Message): Promise<MediaItem[]> {
+        const mediaPromise = this.inputMedia(msg);
 
-        await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].enterPhotos, {
+        await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].enterMedia, {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: this.locals[this.lang].donePhotosButton, callback_data: `done_photos_${msg.from!.id}` },
+                    { text: this.locals[this.lang].doneMediaButton, callback_data: `done_media_${msg.from!.id}` },
                 ]],
             },
         });
 
-        return photosPromise;
+        return mediaPromise;
     }
 
     confirmAction(msg: TelegramBot.Message): Promise<boolean> {
