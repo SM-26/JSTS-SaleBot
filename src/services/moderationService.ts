@@ -26,6 +26,12 @@ export class ModerationService {
         const postId = query.data.replace(/^(approve_|reject_)/, "");
 
         try {
+            const isAdmin = await userRepository.isAdmin(String(query.from.id));
+            if (!isAdmin) {
+                this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].notAdmin, show_alert: true });
+                return;
+            }
+
             const post = await postRepository.findById(postId);
             if (!post) {
                 this.bot.answerCallbackQuery(query.id, { text: "Post not found" });

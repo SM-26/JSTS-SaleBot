@@ -8,6 +8,8 @@ import { PhotoService } from "../services/photoService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
+import userRepository from "../repositories/userRepository";
+import { runTests } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
 const config: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -118,6 +120,16 @@ export class BotController {
 
     registerRoutes(): void {
         this.bot.onText(/\/start/, (msg) => this.HandleStart(msg));
+
+        // --- /test command: comment out to disable ---
+        this.bot.onText(/\/test/, async (msg) => {
+            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
+            if (!isAdmin) {
+                this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].notAdmin);
+                return;
+            }
+            runTests(this.bot, this.config, this.locals, this.postService, this.userService, msg);
+        });
 
         this.bot.on("callback_query", (query) => {
             if (!query.data) return;

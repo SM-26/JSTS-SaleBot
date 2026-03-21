@@ -34,6 +34,7 @@ export interface LocaleStrings {
     rejectReasonPrompt: string;
     skipReasonButton: string;
     postRejectedWithReason: string;
+    notAdmin: string;
     [key: string]: string;
 }
 

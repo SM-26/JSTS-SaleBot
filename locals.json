@@ -23,6 +23,34 @@
         "statusRejected": "❌ נדחה",
         "rejectReasonPrompt": "הכנס סיבת דחייה (או לחץ דלג):",
         "skipReasonButton": "⏩ דלג",
-        "postRejectedWithReason": "הפוסט שלך נדחה.\nסיבה: "
+        "postRejectedWithReason": "הפוסט שלך נדחה.\nסיבה: ",
+        "notAdmin": "אין לך הרשאה לבצע פעולה זו."
+    },
+    "en": {
+        "welcome": "Welcome! Let's create a sale post. Please enter a title:",
+        "enterDescription": "Please enter a description:",
+        "enterPrice": "Please enter a price:",
+        "enterPhotos": "Please send photos. Press the button when you're done.",
+        "donePhotosButton": "✅ Done",
+        "enterLocation": "Please enter a location:",
+        "postCreated": "Your post was created successfully! It will be sent to moderation for review before publishing.",
+        "postApproved": "Your post has been approved and published!",
+        "postRejected": "Your post was rejected by moderation. Please try again with different details.",
+        "invalidPrice": "Invalid price. Please enter a valid number.",
+        "notEnoughPhotos": "Not enough photos were sent. Please send at least one photo.",
+        "generalError": "An error occurred. Please try again later.",
+        "preview": "Post preview:",
+        "confirmButton": "✅ Confirm & Send",
+        "cancelButton": "❌ Cancel",
+        "postCancelled": "Post cancelled.",
+        "approveButton": "✅ Approve",
+        "rejectButton": "❌ Reject",
+        "moderationPrompt": "👆 Approve or reject:",
+        "statusApproved": "✅ Approved",
+        "statusRejected": "❌ Rejected",
+        "rejectReasonPrompt": "Enter rejection reason (or press skip):",
+        "skipReasonButton": "⏩ Skip",
+        "postRejectedWithReason": "Your post was rejected.\nReason: ",
+        "notAdmin": "You do not have permission to perform this action."
     }
 }
