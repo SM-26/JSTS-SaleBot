@@ -1,4 +1,4 @@
-# 🛍️ GoSaleBot
+# 🛍️ NodeSaleBot
 
 A Telegram sales bot that lets users create sale listings through a guided conversational flow. Posts go through admin moderation before being published to a public sales group.
 
