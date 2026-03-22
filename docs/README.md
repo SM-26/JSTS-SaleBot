@@ -1,5 +1,7 @@
 # 🛍️ JSTS Sale Bot
-
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](LICENSE)  
+[![Version](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SM-26/d0f70dbe1fa864c035f90ddf5fcce2a5/raw/version_JSTS-SaleBot.json)](VERSION.md)  
+  
 (pronounced as "Just Sale Bot") is a Telegram sales bot that lets users create sale listings through a guided conversational flow. Posts go through admin moderation before being published to a public sales group.
 
 Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB**.
@@ -50,6 +52,26 @@ src/
 
 ## ⚡ Quick Start
 
+### 🐳 Run with Docker (Recommended)
+The easiest way to get the bot, database, and database management UI running is via Docker. This ensures all services are networked correctly out of the box.
+
+#### Configure Environment:
+Ensure your .env is set up. For Docker, use:
+``` env
+MONGO_URI=mongodb://mongodb:27017/SalesBotDB
+```
+
+#### Launch Services:
+
+```bash
+docker compose up -d
+```
+#### Monitor & Manage:
+
+Bot Logs: `docker compose logs -f bot`
+
+Database UI: Access Mongo Express at `http://localhost:8081` to manage your collections. username is `admin` and password is `pass`
+
 ### Prerequisites
 
 - **Node.js** 18+
@@ -59,8 +81,8 @@ src/
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/Mishkile/SMISHKI-SALES-BOT.git
-cd SMISHKI-SALES-BOT
+git clone https://https://github.com/SM-26/JSTS-SaleBot.git
+cd JSTS-SaleBot
 npm install
 ```
 
@@ -88,7 +110,6 @@ Edit `config.json`:
   "approvedGroupId": -100XXXXXXXXXX,
   "moderationTopicId": 15,
   "approvedTopicId": 73,
-  "timeOut": 1440,
   "validatePrice": true,
   "minimumPhotos": 0
 }
@@ -101,7 +122,7 @@ Edit `config.json`:
 | `approvedGroupId`   | Telegram group where approved posts are published |
 | `moderationTopicId` | Forum topic ID for moderation messages            |
 | `approvedTopicId`   | Forum topic ID for published posts                |
-| `timeOut`           | Post expiration timeout in minutes                |
+| ~~`timeOut`~~           | ~~Post expiration timeout in minutes~~                |
 | `validatePrice`     | Require numeric price input                       |
 | `minimumPhotos`     | Minimum photos required per post (0 = optional)   |
 
@@ -152,3 +173,18 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 ## 📜 License
 
 See [LICENSE.txt](../docs/LICENSE.txt) for details.
+
+## Todo list
+- [ ] make a logo for this project
+- [ ] better readme.md
+- [ ] wrap this project in docker
+- [ ] double check translations and all of the strings
+- [ ] make sure that the /test is working from docker
+- [ ] make sure we implement an expiration mechanism somehow
+- [ ] setup .github folder with everything like the old project.
+- [ ] add an admin only command: /pending that will list to the admin all of the pending post. after /pending the admin should have someway to approve/reject each post.either by inline buttons or by link to the mod group.
+- [ ] add an admin only command: /clearpending to mark all of the pending post as expired. they can not be published anymore.
+- [ ] maybe set up a logging channel?
+- [ ] handle idle state
+- [ ] fix `[ERROR - HandleStart]  Post validation failed: price: Cast to Number failed for value "NaN" (type number) at path "price"`
+
