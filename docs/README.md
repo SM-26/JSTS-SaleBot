@@ -183,13 +183,13 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 See [LICENSE.txt](../docs/LICENSE.txt) for details.
 
 ## Todo list
+- [x] wrap this project in docker
+- [x] make sure that the /test is working from docker
+- [x] setup .github folder with everything like the old project.
+- [x] double check translations and all of the strings
 - [ ] make a logo for this project
 - [ ] better readme.md
-- [x] wrap this project in docker
-- [ ] double check translations and all of the strings
-- [x] make sure that the /test is working from docker
 - [ ] make sure we implement an expiration mechanism somehow
-- [x] setup .github folder with everything like the old project.
 - [ ] add an admin only command: /pending that will list to the admin all of the pending post. after /pending the admin should have someway to approve/reject each post.either by inline buttons or by link to the mod group.
 - [ ] add an admin only command: /clearpending to mark all of the pending post as expired. they can not be published anymore.
 - [ ] maybe set up a logging channel?

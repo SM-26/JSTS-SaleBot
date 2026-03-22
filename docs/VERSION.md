@@ -9,11 +9,11 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 - **PATCH** version: Backward-compatible bug fixes
 
 ## Current Version
-0.0.1
+0.0.2
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history and release notes.
+See [CHANGELOG.md](../docs/CHANGELOG.md) for the full version history and release notes.
 
 ## How to update
 
