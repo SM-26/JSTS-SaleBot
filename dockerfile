@@ -1,5 +1,5 @@
 # --- Base Stage ---
-FROM node:24-alpine AS base
+FROM node:25-alpine AS base
 WORKDIR /app
 COPY package*.json ./
 
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # --- Production Stage ---
-FROM node:24-alpine AS production
+FROM node:25-alpine AS production
 # Set to production for optimization in some libraries (like Mongoose/Express)
 ENV NODE_ENV=production
 WORKDIR /app
