@@ -1,0 +1,91 @@
+name: "🐛 Bug Report"
+description: Report a bug or unexpected behavior in GoSaleBot.
+title: "[BUG] - <Brief, descriptive title>"
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+        Please provide as much detail as possible to help us understand and resolve the issue quickly.
+
+  - type: checkboxes
+    id: pre-check
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched the [existing issues](https://github.com/SM-26/GoSaleBot/issues) and confirmed that this bug has not already been reported.
+          required: true
+        - label: I have checked the [GoSaleBot documentation/README](https://github.com/SM-26/GoSaleBot/blob/main/README.md) for potential solutions or common issues.
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 📝 Description of the Bug
+      description: A clear and concise description of what the bug is. What happened, and what did you expect to happen instead?
+      placeholder: Describe the bug here...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 👣 Steps to Reproduce
+      description: Provide a clear, step-by-step description of how to reproduce the unexpected behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: ✅ Expected Behavior
+      description: What did you expect to happen when following the reproduction steps?
+      placeholder: Describe what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 📸 Screenshots
+      description: If applicable, add screenshots to help explain your problem. You can drag and drop images directly into this field.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 💻 Environment (please complete the following information);
+      description: This helps us understand where the bug occurred.
+      value: |
+        - **GoSaleBot Version:** [e.g. v1.0.0 or commit hash if built from source]
+        - **Operating System:** [e.g. Windows 10, macOS Ventura, Ubuntu 22.04]
+        - **Go Version:** [e.g. go1.22.4]
+        - **Browser (if applicable):** [e.g. Chrome, Firefox, Edge]
+        - **Other relevant software/dependencies:**
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 📄 Relevant Log Output (if applicable)
+      description: Please copy and paste any relevant log output, error messages, or stack traces. Use code blocks (` ``` `) for formatting.
+      render: bash
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: ➕ Additional Context
+      description: Add any other context about the problem here (e.g., specific setup, previous attempts to fix, related issues).
+    validations:
+      required: false

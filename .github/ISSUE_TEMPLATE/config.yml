@@ -1,0 +1,6 @@
+blank_issues_enabled: false # forces users to use issue templates
+contact_links:
+  - name: Direct developer support
+    url: https://t.me/SM_26
+    icon: telegram
+    about: My Telegram if you have any questions, please don't flood

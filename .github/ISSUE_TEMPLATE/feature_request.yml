@@ -1,0 +1,35 @@
+name: "🚀 Feature Request"
+description: "I have a specific suggestion for GoSaleBot!"
+labels: ["needs triage", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Thanks for taking the time to suggest a new feature!** Please make sure you read our [issue guidelines]() first, then fill out the fields below.
+
+  - type: textarea
+    attributes:
+      label: What problem are you trying to solve?
+      description: A concise description of what the problem is.
+      placeholder: "e.g. I want to …"
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "Describe the solution you’d like"
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "Describe any alternatives you’ve considered"
+      description: |
+        If you have considered other solutions or approaches, please describe them here.
+        This helps us understand the context of your request and why you believe your solution is the best fit.
+
+  - type: textarea
+    attributes:
+      label: "Documentation, Adoption, Migration Strategy"
+      description: |
+        If you can, explain how users will be able to use this and how it might be documented. Maybe a mock-up?

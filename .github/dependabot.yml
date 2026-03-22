@@ -1,0 +1,35 @@
+version: 2
+updates:
+  # Maintain npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Groups types with their core packages to avoid broken builds
+      telegram-stack:
+        patterns:
+          - "node-telegram-bot-api"
+          - "@types/node-telegram-bot-api"
+      database:
+        patterns:
+          - "mongoose"
+      development-tooling:
+        patterns:
+          - "typescript"
+          - "@types/node"
+          - "ts-node"
+          - "nodemon"
+
+  # Maintain GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Maintain Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
