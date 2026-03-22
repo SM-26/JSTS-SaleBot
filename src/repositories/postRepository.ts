@@ -18,6 +18,10 @@ class PostRepository {
         return Post.findByIdAndUpdate(postId, { status }, { new: true });
     }
 
+    updateBump(postId: string, dailyBumpCount: number) {
+        return Post.findByIdAndUpdate(postId, { lastBumpAt: new Date(), dailyBumpCount }, { new: true });
+    }
+
     getAll() {
         return Post.find();
     }

@@ -1,13 +1,13 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals } from "../types";
-import { PhotoService } from "./photoService";
+import { BotConfig, Locals, MediaItem } from "../types";
+import { MediaService } from "./photoService";
 
 export interface PostData {
     title: string;
     description: string;
     price: number;
     location: string;
-    photos: string[];
+    media: MediaItem[];
     userId: number;
     username?: string;
     firstName: string;
@@ -18,7 +18,7 @@ export class PostService {
         private bot: TelegramBot,
         private config: BotConfig,
         private locals: Locals,
-        private photoService: PhotoService
+        private mediaService: MediaService
     ) {}
 
     private get lang() {
@@ -41,18 +41,18 @@ export class PostService {
         ].join("\n");
     }
 
-    async sendPreview(chatId: number, text: string, photos: string[]): Promise<void> {
+    async sendPreview(chatId: number, text: string, media: MediaItem[]): Promise<void> {
         const previewText = `${this.locals[this.lang].preview}\n${text}`;
 
-        if (photos.length > 0) {
-            const media = this.photoService.buildMediaGroup(photos, previewText);
-            await this.bot.sendMediaGroup(chatId, media);
+        if (media.length > 0) {
+            const group = this.mediaService.buildMediaGroup(media, previewText);
+            await this.bot.sendMediaGroup(chatId, group);
         } else {
             await this.bot.sendMessage(chatId, previewText, { parse_mode: "HTML" });
         }
     }
 
-    async sendToModeration(postId: string, text: string, photos: string[]): Promise<void> {
+    async sendToModeration(postId: string, text: string, media: MediaItem[]): Promise<void> {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
@@ -65,10 +65,10 @@ export class PostService {
             },
         };
 
-        if (photos.length > 0) {
-            const media = this.photoService.buildMediaGroup(photos, text);
+        if (media.length > 0) {
+            const group = this.mediaService.buildMediaGroup(media, text);
 
-            await this.bot.sendMediaGroup(moderationGroupId, media, {
+            await this.bot.sendMediaGroup(moderationGroupId, group, {
                 reply_to_message_id: moderationTopicId,
             } as any);
 
@@ -85,14 +85,14 @@ export class PostService {
         }
     }
 
-    async sendToApproved(text: string, photos: string[]): Promise<void> {
+    async sendToApproved(text: string, media: MediaItem[]): Promise<void> {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        if (photos.length > 0) {
-            const media = this.photoService.buildMediaGroup(photos, text);
+        if (media.length > 0) {
+            const group = this.mediaService.buildMediaGroup(media, text);
 
-            await this.bot.sendMediaGroup(approvedGroupId, media, {
+            await this.bot.sendMediaGroup(approvedGroupId, group, {
                 reply_to_message_id: approvedTopicId,
             } as any);
         } else {

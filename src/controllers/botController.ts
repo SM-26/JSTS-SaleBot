@@ -4,12 +4,13 @@ import * as path from "path";
 import postRepository from "../repositories/postRepository";
 import { BotConfig, Locals, UserSession } from "../types";
 import { InputService } from "../services/inputService";
-import { PhotoService } from "../services/photoService";
+import { MediaService } from "../services/photoService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
+import { MyPostsService } from "../services/myPostsService";
 import userRepository from "../repositories/userRepository";
-import { runTests } from "../tests/testCases"; // Comment out to disable tests
+import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
 const config: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -21,10 +22,11 @@ export class BotController {
     private sessions: Map<number, UserSession> = new Map();
 
     private inputService: InputService;
-    private photoService: PhotoService;
+    private mediaService: MediaService;
     private postService: PostService;
     private moderationService: ModerationService;
     private userService: UserService;
+    private myPostsService: MyPostsService;
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
@@ -32,10 +34,11 @@ export class BotController {
         this.config = config;
 
         this.inputService = new InputService(bot, this.config, this.locals);
-        this.photoService = new PhotoService(bot);
-        this.postService = new PostService(bot, this.config, this.locals, this.photoService);
+        this.mediaService = new MediaService();
+        this.postService = new PostService(bot, this.config, this.locals, this.mediaService);
         this.moderationService = new ModerationService(bot, this.config, this.locals, this.postService);
         this.userService = new UserService();
+        this.myPostsService = new MyPostsService(bot, this.config, this.locals, this.postService);
     }
 
     getSession(userId: number): UserSession {
@@ -64,10 +67,10 @@ export class BotController {
             const description = await this.inputService.inputWithPrompt(msg, this.locals[lang].enterDescription);
             const price = await this.inputService.inputPrice(msg);
             const location = await this.inputService.inputWithPrompt(msg, this.locals[lang].enterLocation);
-            const photos = await this.inputService.promptPhotos(msg, (fileId) => this.photoService.downloadPhoto(fileId));
+            const media = await this.inputService.promptMedia(msg);
 
-            if (photos.length < this.config.minimumPhotos) {
-                this.bot.sendMessage(msg.chat.id, this.locals[lang].notEnoughPhotos);
+            if (media.length < this.config.minimumMedia) {
+                this.bot.sendMessage(msg.chat.id, this.locals[lang].notEnoughMedia);
                 session.isIdle = true;
                 return;
             }
@@ -78,7 +81,7 @@ export class BotController {
                 description,
                 price,
                 location,
-                photos,
+                media,
                 userId: msg.from!.id,
                 username: msg.from!.username,
                 firstName: msg.from!.first_name,
@@ -86,7 +89,7 @@ export class BotController {
             const postText = this.postService.formatPostText(postData);
 
             // Preview & confirm
-            await this.postService.sendPreview(msg.chat.id, postText, photos);
+            await this.postService.sendPreview(msg.chat.id, postText, media);
 
             const confirmed = await this.inputService.confirmAction(msg);
             if (!confirmed) {
@@ -101,12 +104,12 @@ export class BotController {
                 title,
                 description,
                 price,
-                photos,
+                media,
                 location,
                 createdAt: new Date(),
             });
 
-            await this.postService.sendToModeration(String(post._id), postText, photos);
+            await this.postService.sendToModeration(String(post._id), postText, media);
 
             this.bot.sendMessage(msg.chat.id, this.locals[lang].postCreated);
             session.isIdle = true;
@@ -120,6 +123,7 @@ export class BotController {
 
     registerRoutes(): void {
         this.bot.onText(/\/start/, (msg) => this.HandleStart(msg));
+        this.bot.onText(/\/myposts/, (msg) => this.myPostsService.showPosts(msg));
 
         // --- /test command: comment out to disable ---
         this.bot.onText(/\/test/, async (msg) => {
@@ -128,14 +132,56 @@ export class BotController {
                 this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].notAdmin);
                 return;
             }
-            runTests(this.bot, this.config, this.locals, this.postService, this.userService, msg);
+            const buttons = Object.entries(TEST_CASES).map(([key, tc]) => ([
+                { text: tc.label, callback_data: `test_${key}` },
+            ]));
+            buttons.push([{ text: "🚀 Run All", callback_data: "test_all" }]);
+            this.bot.sendMessage(msg.chat.id, "Select a test case:", {
+                reply_markup: { inline_keyboard: buttons },
+            });
         });
 
-        this.bot.on("callback_query", (query) => {
+        this.bot.on("callback_query", async (query) => {
             if (!query.data) return;
 
-            if (query.data.startsWith("approve_") || query.data.startsWith("reject_")) {
-                this.moderationService.handleCallback(query);
+            try {
+                if (query.data.startsWith("test_")) {
+                    const key = query.data.replace("test_", "");
+                    if (!query.message) return;
+                    this.bot.answerCallbackQuery(query.id);
+                    this.bot.editMessageReplyMarkup(
+                        { inline_keyboard: [] },
+                        { chat_id: query.message.chat.id, message_id: query.message.message_id }
+                    );
+                    const fakeMsg = { ...query.message, from: query.from } as TelegramBot.Message;
+
+                    if (key === "all") {
+                        for (const tc of Object.values(TEST_CASES)) {
+                            await tc.run(this.bot, this.config, this.locals, this.postService, this.userService, fakeMsg);
+                        }
+                    } else {
+                        const tc = TEST_CASES[key];
+                        if (!tc) return;
+                        tc.run(this.bot, this.config, this.locals, this.postService, this.userService, fakeMsg);
+                    }
+                    return;
+                }
+
+                if (query.data.startsWith("approve_") || query.data.startsWith("reject_")) {
+                    await this.moderationService.handleCallback(query);
+                    return;
+                }
+
+                if (query.data.startsWith("sold_")) {
+                    await this.myPostsService.handleSoldCallback(query);
+                    return;
+                }
+
+                if (query.data.startsWith("bump_")) {
+                    await this.myPostsService.handleBumpCallback(query);
+                }
+            } catch (err) {
+                console.error("[ERROR - callback_query]", (err as Error).message);
             }
         });
     }

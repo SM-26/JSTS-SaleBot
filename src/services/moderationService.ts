@@ -79,13 +79,13 @@ export class ModerationService {
             description: post.description,
             price: post.price,
             location: post.location,
-            photos: post.photos,
+            media: post.media,
             userId: Number(user.userId),
             username: user.userName || undefined,
             firstName: user.firstName || undefined,
         });
 
-        await this.postService.sendToApproved(postText, post.photos);
+        await this.postService.sendToApproved(postText, post.media);
 
         this.bot.sendMessage(Number(post.userId), this.locals[this.lang].postApproved);
         this.bot.answerCallbackQuery(query.id, { text: "✅ Approved" });
