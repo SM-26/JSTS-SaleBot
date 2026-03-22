@@ -107,23 +107,23 @@ export class ModerationService {
         }
     }
 
-    askRejectReason(query: TelegramBot.CallbackQuery): Promise<string | null> {
+    async askRejectReason(query: TelegramBot.CallbackQuery): Promise<string | null> {
         const chatId = query.message!.chat.id;
         const topicId = (query.message as any)?.message_thread_id;
         const adminId = query.from.id;
 
         const skipCallbackData = `skip_reason_${adminId}_${Date.now()}`;
 
-        return new Promise(async (resolve) => {
-            const sentMsg = await this.bot.sendMessage(chatId, this.locals[this.lang].rejectReasonPrompt, {
-                ...(topicId ? { reply_to_message_id: topicId } : {}),
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: this.locals[this.lang].skipReasonButton, callback_data: skipCallbackData },
-                    ]],
-                },
-            } as any);
+        const sentMsg = await this.bot.sendMessage(chatId, this.locals[this.lang].rejectReasonPrompt, {
+            ...(topicId ? { reply_to_message_id: topicId } : {}),
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: this.locals[this.lang].skipReasonButton, callback_data: skipCallbackData },
+                ]],
+            },
+        } as any);
 
+        return new Promise((resolve) => {
             const cbListener = (cb: TelegramBot.CallbackQuery) => {
                 if (cb.from.id !== adminId) return;
                 if (cb.data !== skipCallbackData) return;

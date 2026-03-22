@@ -5,14 +5,12 @@ COPY package*.json ./
 
 # --- Development Stage ---
 FROM base AS development
-# Using install here is fine for dev as you might add packages frequently
 RUN npm install
 COPY . .
 CMD ["npm", "run", "dev"]
 
 # --- Build Stage ---
 FROM base AS build
-# ci is faster and more reliable for automated builds
 RUN npm ci
 COPY . .
 RUN npm run build
@@ -28,7 +26,7 @@ COPY --from=build /app/package*.json ./
 COPY --from=build /app/dist ./dist
 
 # Install only production dependencies
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --quiet
 
 # Security: Run as a non-privileged user
 USER node

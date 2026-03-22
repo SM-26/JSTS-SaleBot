@@ -6,7 +6,7 @@ export class InputService {
         private bot: TelegramBot,
         private config: BotConfig,
         private locals: Locals
-    ) {}
+    ) { }
 
     private get lang() {
         return this.config.lang;
@@ -95,20 +95,20 @@ export class InputService {
         return mediaPromise;
     }
 
-    confirmAction(msg: TelegramBot.Message): Promise<boolean> {
-        return new Promise(async (resolve) => {
-            const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
-            const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
+    async confirmAction(msg: TelegramBot.Message): Promise<boolean> {
+        const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
+        const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
 
-            const sentMsg = await this.bot.sendMessage(msg.chat.id, "👆", {
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: this.locals[this.lang].confirmButton, callback_data: callbackId },
-                        { text: this.locals[this.lang].cancelButton, callback_data: cancelId },
-                    ]],
-                },
-            });
+        const sentMsg = await this.bot.sendMessage(msg.chat.id, "👆", {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: this.locals[this.lang].confirmButton, callback_data: callbackId },
+                    { text: this.locals[this.lang].cancelButton, callback_data: cancelId },
+                ]],
+            },
+        });
 
+        return new Promise((resolve) => {
             const listener = (query: TelegramBot.CallbackQuery) => {
                 if (query.from.id !== msg.from!.id) return;
                 if (query.data !== callbackId && query.data !== cancelId) return;
