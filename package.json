@@ -23,7 +23,9 @@
   "license": "ISC",
   "overrides": {
     "form-data": "^4.0.4",
-    "@cypress/request": "^3.0.0"
+    "@cypress/request": "^3.0.0",
+    "qs": "^6.14.2",
+    "tough-cookie": "^4.1.3"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
