@@ -21,6 +21,12 @@
   "homepage": "https://github.com/SM-26/JSTS-SaleBot/blob/master/docs/README.md",
   "author": "SM26",
   "license": "ISC",
+  "auditLevel": "low",
+  "auditConfig": {
+    "ignore": [
+      "npm:request@2.88.2"
+    ]
+  },
   "overrides": {
     "form-data": "^4.0.4",
     "@cypress/request": "^3.0.0",
