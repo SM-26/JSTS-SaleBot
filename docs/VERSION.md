@@ -19,6 +19,7 @@ See [CHANGELOG.md](../docs/CHANGELOG.md) for the full version history and releas
 
 - Bump the version in this file and in release notes when making changes.
 - Tag releases in git using `git tag vX.Y.Z`.
+- push with `git push --tags`.
 
 ---
 

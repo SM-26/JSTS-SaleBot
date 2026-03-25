@@ -8,7 +8,8 @@ on:
     paths:
       - "docs/VERSION.md"
   workflow_dispatch:
-
+permissions:
+  contents: read
 jobs:
   version_badge:
     runs-on: ubuntu-latest
