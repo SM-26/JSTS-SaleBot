@@ -52,7 +52,7 @@ export class PostService {
         }
     }
 
-    async sendToModeration(postId: string, text: string, media: MediaItem[]): Promise<void> {
+    async sendToModeration(postId: string, text: string, media: MediaItem[]): Promise<number | null> {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
@@ -68,7 +68,7 @@ export class PostService {
         if (media.length > 0) {
             const group = this.mediaService.buildMediaGroup(media, text);
 
-            await this.bot.sendMediaGroup(moderationGroupId, group, {
+            const sentMsgs = await this.bot.sendMediaGroup(moderationGroupId, group, {
                 reply_to_message_id: moderationTopicId,
             } as any);
 
@@ -76,12 +76,16 @@ export class PostService {
                 reply_to_message_id: moderationTopicId,
                 ...approveRejectMarkup,
             } as any);
+
+            return sentMsgs[0]?.message_id || null;
         } else {
-            await this.bot.sendMessage(moderationGroupId, text, {
+            const sentMsg = await this.bot.sendMessage(moderationGroupId, text, {
                 parse_mode: "HTML",
                 reply_to_message_id: moderationTopicId,
                 ...approveRejectMarkup,
             } as any);
+
+            return sentMsg.message_id;
         }
     }
 

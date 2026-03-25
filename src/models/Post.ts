@@ -18,6 +18,8 @@ export interface IPost extends Document {
     lastBumpAt: Date | null;
     dailyBumpCount: number;
     approvedMessageId: number | null;
+    moderationMessageId: number | null;
+    rejectionReason?: string;
 }
 
 const mediaItemSchema = new Schema<IMediaItem>({
@@ -38,6 +40,8 @@ const postSchema = new Schema<IPost>({
     lastBumpAt: { type: Date, default: null },
     dailyBumpCount: { type: Number, default: 0 },
     approvedMessageId: { type: Number, default: null },
+    moderationMessageId: { type: Number, default: null },
+    rejectionReason: { type: String, default: null },
 });
 
 export default mongoose.model<IPost>("Post", postSchema);

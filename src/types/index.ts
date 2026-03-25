@@ -66,6 +66,8 @@ export interface LocaleStrings {
     helpHelp: string;
     helpAdminSection: string;
     helpConfig: string;
+    helpPending: string;
+    helpClearPending: string;
     helpTest: string;
     helpDonate: string;
     donateTitle: string;
@@ -79,6 +81,10 @@ export interface LocaleStrings {
     donationSuccess: string;
     soldTag: string;
     latestPostTag: string;
+    adminPendingTitle: string;
+    adminPendingEmpty: string;
+    adminPendingLink: string;
+    adminClearPendingSuccess: string;
     [key: string]: string;
 }
 

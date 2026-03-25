@@ -15,6 +15,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Media Upload** — Multi-photo and video support
 - **Live Preview** — Users see a formatted preview before submitting
 - **Admin Moderation** — Posts sent to a moderation group with approve/reject buttons
+- **Pending Management** — Admins can list (`/pending`) and bulk-expire (`/clearpending`) posts
 - **Rejection Reasons** — Admins can provide an optional reason when rejecting
 - **Post Bumping** — Users can bump their approved posts to the top (subject to daily limits)
 - **Donations** — Users can support the bot via Telegram Stars (`/donate`)
@@ -22,6 +23,26 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Forum Topics** — Moderation and approved posts target specific group topics
 - **Multi Localization** — All UI strings externalized in `locals.json` (default En)
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
+
+---
+
+## 🤖 Commands
+
+### 👤 User Commands
+| Command | Description |
+| :--- | :--- |
+| `/start` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). |
+| `/myposts` | View your active posts, bump them to the top, or mark them as sold. |
+| `/donate` | Support the bot by donating Telegram Stars. |
+| `/help` | Show the list of available commands. |
+
+### 🛡️ Admin Commands
+| Command | Description |
+| :--- | :--- |
+| `/pending` | View a list of posts waiting for approval with inline Approve/Reject buttons. |
+| `/clearpending` | Bulk expire (reject) all currently pending posts. |
+| `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
+| `/test` | Run built-in test scenarios to verify bot functionality. |
 
 ---
 

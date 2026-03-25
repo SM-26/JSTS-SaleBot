@@ -22,6 +22,10 @@ class PostRepository {
         return Post.findByIdAndUpdate(postId, { approvedMessageId }, { new: true });
     }
 
+    setModerationMessageId(postId: string, moderationMessageId: number | null) {
+        return Post.findByIdAndUpdate(postId, { moderationMessageId }, { new: true });
+    }
+
     updateBump(postId: string, dailyBumpCount: number) {
         return Post.findByIdAndUpdate(postId, { lastBumpAt: new Date(), dailyBumpCount }, { new: true });
     }
@@ -32,6 +36,17 @@ class PostRepository {
 
     getPending() {
         return Post.find({ status: "pending" });
+    }
+
+    getPendingPosts() {
+        return Post.find({ status: "pending" }).sort({ createdAt: 1 });
+    }
+
+    expireAllPendingPosts() {
+        return Post.updateMany(
+            { status: "pending" },
+            { $set: { status: "rejected", rejectionReason: "Expired via /clearpending" } }
+        );
     }
 
     getSold() {

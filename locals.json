@@ -56,6 +56,8 @@
         "helpHelp": "/help - Show this command list",
         "helpAdminSection": "<b>Admin Commands</b>",
         "helpConfig": "/config - View and edit settings",
+        "helpPending": "/pending - List posts awaiting approval",
+        "helpClearPending": "/clearpending - Expire all pending posts",
         "helpTest": "/test - Run test cases",
         "helpDonate": "/donate - Support the bot",
         "donateTitle": "<b>Donate to support the bot!</b>",
@@ -68,7 +70,11 @@
         "donationDisabled": "Donations are currently disabled.",
         "donationSuccess": "🙏 Thank you for your donation of {amount} Stars!",
         "soldTag": "\n\n--- SOLD ---",
-        "latestPostTag": "Latest"
+        "latestPostTag": "Latest",
+        "adminPendingTitle": "<b>Pending Posts</b>",
+        "adminPendingEmpty": "No pending posts found.",
+        "adminPendingLink": "Review",
+        "adminClearPendingSuccess": "All pending posts have been marked as expired (rejected)."
     },
     "he": {
         "welcome": "ברוך הבא! בוא ניצור פוסט מכירה. אנא הכנס כותרת:",
@@ -127,6 +133,8 @@
         "helpHelp": "/help - הצגת רשימת פקודות",
         "helpAdminSection": "<b>פקודות מנהל</b>",
         "helpConfig": "/config - הצגת ועריכת הגדרות",
+        "helpPending": "/pending - הצגת פוסטים ממתינים",
+        "helpClearPending": "/clearpending - ביטול כל הפוסטים הממתינים",
         "helpTest": "/test - הרצת בדיקות",
         "helpDonate": "/donate - תרומה לבוט",
         "donateTitle": "<b>תרומה לבוט!</b>",
@@ -139,6 +147,10 @@
         "donationDisabled": "התרומות כבויות כרגע.",
         "donationSuccess": "🙏 תודה רבה על תרומתך בסך {amount} כוכבים!",
         "soldTag": "\n\n--- נמכר ---",
-        "latestPostTag": "אחרון"
+        "latestPostTag": "אחרון",
+        "adminPendingTitle": "<b>פוסטים ממתינים</b>",
+        "adminPendingEmpty": "לא נמצאו פוסטים ממתינים.",
+        "adminPendingLink": "לביקורת",
+        "adminClearPendingSuccess": "כל הפוסטים הממתינים סומנו כפגי תוקף (נדחו)."
     }
 }

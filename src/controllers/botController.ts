@@ -2,6 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
+import userRepository from "../repositories/userRepository";
 import { BotConfig, Locals, UserSession } from "../types";
 import { InputService } from "../services/inputService";
 import { MediaService } from "../services/photoService";
@@ -10,8 +11,8 @@ import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
 import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
+import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
-import userRepository from "../repositories/userRepository";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -30,6 +31,7 @@ export class BotController {
     private userService: UserService;
     private myPostsService: MyPostsService;
     private adminService: AdminService;
+    private pendingService: PendingService;
     private paymentService: PaymentService;
 
     constructor(bot: TelegramBot) {
@@ -44,6 +46,7 @@ export class BotController {
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(bot, this.config, this.locals, this.postService);
         this.adminService = new AdminService(bot, this.config, this.locals);
+        this.pendingService = new PendingService(bot, this.config, this.locals, this.postService, this.mediaService);
         this.paymentService = new PaymentService(bot, this.config, this.locals);
     }
 
@@ -145,7 +148,10 @@ export class BotController {
                 createdAt: new Date(),
             });
 
-            await this.postService.sendToModeration(String(post._id), postText, media);
+            const modMsgId = await this.postService.sendToModeration(String(post._id), postText, media);
+            if (modMsgId) {
+                await postRepository.setModerationMessageId(String(post._id), modMsgId);
+            }
 
             this.bot.sendMessage(msg.chat.id, this.locals[lang].postCreated);
             session.isIdle = true;
@@ -176,6 +182,8 @@ export class BotController {
             lines.push("");
             lines.push(this.locals[lang].helpAdminSection);
             lines.push(this.locals[lang].helpConfig);
+            lines.push(this.locals[lang].helpPending);
+            lines.push(this.locals[lang].helpClearPending);
             lines.push(this.locals[lang].helpTest);
         }
 
@@ -210,8 +218,8 @@ export class BotController {
         this.bot.onText(/\/myposts/, (msg) => this.myPostsService.showPosts(msg));
         this.bot.onText(/\/help/, (msg) => this.showHelp(msg));
         this.bot.onText(/\/config(.*)/, (msg, match) => this.adminService.handleConfig(msg, match?.[1] ?? ""));
-
-        // --- /test command: comment out to disable ---
+        this.bot.onText(/\/pending/, (msg) => this.pendingService.handlePending(msg));
+        this.bot.onText(/\/clearpending/, (msg) => this.pendingService.handleClearPending(msg));
         this.bot.onText(/\/test/, async (msg) => {
             const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
             if (!isAdmin) {
