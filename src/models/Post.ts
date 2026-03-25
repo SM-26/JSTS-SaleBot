@@ -8,7 +8,7 @@ export interface IMediaItem {
 export interface IPost extends Document {
     userId: string;
     status: "pending" | "approved" | "rejected" | "sold";
-    price: number;
+    price: string;
     title: string;
     description: string;
     location: string;
@@ -30,7 +30,7 @@ const mediaItemSchema = new Schema<IMediaItem>({
 const postSchema = new Schema<IPost>({
     userId: { type: String, required: true },
     status: { type: String, enum: ["pending", "approved", "rejected", "sold"], default: "pending" },
-    price: { type: Number, required: true },
+    price: { type: String, required: true },
     title: { type: String, required: true },
     description: { type: String, default: "" },
     location: { type: String, default: "" },

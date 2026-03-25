@@ -251,12 +251,12 @@ export class BotController {
 
                     if (key === "all") {
                         for (const tc of Object.values(TEST_CASES)) {
-                            await tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, fakeMsg);
+                            await tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                         }
                     } else {
                         const tc = TEST_CASES[key];
                         if (!tc) return;
-                        tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, fakeMsg);
+                        tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                     }
                     return;
                 }

@@ -5,7 +5,7 @@ import { MediaService } from "./photoService";
 export interface PostData {
     title: string;
     description: string;
-    price: number;
+    price: string;
     location: string;
     media: MediaItem[];
     userId: number;

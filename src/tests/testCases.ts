@@ -3,6 +3,7 @@ import postRepository from "../repositories/postRepository";
 import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
+import { InputService } from "../services/inputService";
 import { BotConfig, Locals, MediaItem } from "../types";
 
 /**
@@ -23,6 +24,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     no_media: { label: "📝 No media", run: testCase2_NoMedia },
     one_photo: { label: "🖼 One photo", run: testCase3_OnePhoto },
     simulate_donation: { label: "💰 Simulate Donation (50 Stars)", run: testCase_SimulateDonation },
+    free_text_price: { label: "🏷 Free text price", run: testCase_FreeTextPrice },
 };
 
 type TestCaseFn = (
@@ -32,6 +34,7 @@ type TestCaseFn = (
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
+    inputService: InputService,
     msg: TelegramBot.Message
 ) => Promise<void>;
 
@@ -45,6 +48,7 @@ async function testCase1_FullPost(
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
+    inputService: InputService,
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
@@ -54,9 +58,14 @@ async function testCase1_FullPost(
 
     const title = "טסט - אייפון 15 פרו";
     const description = "מכשיר במצב מעולה, שנה שימוש, עם כיסוי וזכוכית.";
-    const price = 3500;
+    const price = "3500";
     const location = "תל אביב";
     const media = TEST_MEDIA;
+
+    if (!inputService.validatePriceValue(price)) {
+        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        return;
+    }
 
     const postText = postService.formatPostText({
         title, description, price, location, media,
@@ -85,6 +94,7 @@ async function testCase2_NoMedia(
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
+    inputService: InputService,
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
@@ -94,9 +104,14 @@ async function testCase2_NoMedia(
 
     const title = "טסט - שולחן כתיבה";
     const description = "שולחן עץ, 120x60, במצב טוב.";
-    const price = 200;
+    const price = "200";
     const location = "חיפה";
     const media: MediaItem[] = [];
+
+    if (!inputService.validatePriceValue(price)) {
+        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        return;
+    }
 
     const postText = postService.formatPostText({
         title, description, price, location, media,
@@ -125,6 +140,7 @@ async function testCase3_OnePhoto(
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
+    inputService: InputService,
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
@@ -134,9 +150,14 @@ async function testCase3_OnePhoto(
 
     const title = "טסט - אוזניות אלחוטיות";
     const description = "Sony WH-1000XM5, כמו חדש עם קופסה.";
-    const price = 900;
+    const price = "900";
     const location = "ירושלים";
     const media = [TEST_MEDIA[0]];
+
+    if (!inputService.validatePriceValue(price)) {
+        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        return;
+    }
 
     const postText = postService.formatPostText({
         title, description, price, location, media,
@@ -165,6 +186,7 @@ async function testCase_SimulateDonation(
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
+    inputService: InputService,
     msg: TelegramBot.Message
 ): Promise<void> {
     // Create a fake successful payment message
@@ -186,4 +208,50 @@ async function testCase_SimulateDonation(
 
     // Send confirmation of test
     bot.sendMessage(msg.chat.id, "✅ Simulated donation event triggered. You should see the 'Thank you' message above.");
+}
+
+/**
+ * CASE 5: Free text price (e.g. for when validation is disabled).
+ */
+async function testCase_FreeTextPrice(
+    bot: TelegramBot,
+    config: BotConfig,
+    locals: Locals,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: TelegramBot.Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    const user = msg.from;
+
+    await userService.ensureUser(user);
+
+    const title = "טסט - מחיר טקסט חופשי";
+    const description = "בדיקה של מחיר שאינו מספר (למשל 'בחינם' או 'צור קשר').";
+    const price = "צור קשר בפרטי"; // "Contact privately"
+    const location = "פתח תקווה";
+    const media: MediaItem[] = [];
+
+    if (!inputService.validatePriceValue(price)) {
+        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        return;
+    }
+
+    const postText = postService.formatPostText({
+        title, description, price, location, media,
+        userId: user.id,
+        username: user.username,
+        firstName: user.first_name,
+    });
+
+    const post = await postRepository.createPost({
+        userId: user.id.toString(),
+        title, description, price, media, location,
+        createdAt: new Date(),
+    });
+
+    await postService.sendToModeration(String(post._id), postText, media);
+    bot.sendMessage(msg.chat.id, `✅ Test post (free text price) sent to moderation (ID: ${post._id})`);
 }

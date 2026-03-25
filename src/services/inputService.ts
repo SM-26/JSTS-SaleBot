@@ -31,13 +31,17 @@ export class InputService {
         return this.input(msg);
     }
 
-    async inputPrice(msg: TelegramBot.Message): Promise<number> {
+    validatePriceValue(priceInput: string): boolean {
+        if (!this.config.validatePrice) return true;
+        const price = Number(priceInput);
+        return !isNaN(price) && price > 0;
+    }
+
+    async inputPrice(msg: TelegramBot.Message): Promise<string> {
         await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].enterPrice);
 
         while (true) {
-            const priceInput = await this.input(msg);
-            const price = Number(priceInput);
-            if (!this.config.validatePrice || (!isNaN(price) && price > 0)) return price;
+            const priceInput = await this.input(msg); if (this.validatePriceValue(priceInput)) return priceInput;
             this.bot.sendMessage(msg.chat.id, this.locals[this.lang].invalidPrice);
         }
     }
