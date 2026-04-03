@@ -121,6 +121,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/start`  | All users | Begins the post creation wizard                  |
 | `/myposts`| All users | Lists user's own posts with bump/sold actions    |
 | `/lang`   | All users | Change language preference                       |
+| `/faq`    | All users | View airsoft FAQ and frequently asked questions  |
 | `/help`   | All users | Shows available commands (admins see extra items)|
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |

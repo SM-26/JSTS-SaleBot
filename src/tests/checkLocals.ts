@@ -82,6 +82,29 @@ function runCheck() {
         Object.keys(data).forEach(key => allKeys.add(key));
     }
 
+    // 5. Validate FAQ files (faq.json)
+    console.log(`[INFO] Validating FAQ files for ${languages.length} languages...`);
+    for (const lang of languages) {
+        const faqPath = path.join(LOCALES_DIR, lang, 'faq.json');
+        if (!fs.existsSync(faqPath)) {
+            console.error(`[ERROR] faq.json not found for language ${lang}!`);
+            hasError = true;
+            continue;
+        }
+
+        try {
+            const faqContent = fs.readFileSync(faqPath, 'utf-8');
+            const faqData = JSON.parse(faqContent);
+            if (!faqData.nodes || typeof faqData.nodes !== 'object') {
+                console.error(`[ERROR] Invalid FAQ structure in ${lang}/faq.json - missing 'nodes' object`);
+                hasError = true;
+            }
+        } catch (e) {
+            console.error(`[ERROR] Invalid JSON in ${lang}/faq.json: ${e}`);
+            hasError = true;
+        }
+    }
+
     const sortedKeys = Array.from(allKeys).sort();
 
     // 2. Bidirectional Check: Ensure every language has every key

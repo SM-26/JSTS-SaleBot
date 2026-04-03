@@ -41,6 +41,7 @@
     "helpClearPending": "/clearpending - Expire all pending posts",
     "helpConfig": "/config - View and edit settings",
     "helpDonate": "/donate - Support the bot",
+    "helpFaq": "/faq - Airsoft FAQ and information",
     "helpHelp": "/help - Show this command list",
     "helpLang": "/lang - Change your language preference",
     "helpMyPosts": "/myposts - View your posts",

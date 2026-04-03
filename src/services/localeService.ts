@@ -95,6 +95,18 @@ class LocaleServiceImpl implements LocaleService {
 
         return text;
     }
+
+    getFaqs(locale: string): Record<string, string> {
+        try {
+            const filePath = path.join(this.localesDir, locale, 'faq.json');
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const faqData = JSON.parse(content);
+            return faqData.nodes || {};
+        } catch (error) {
+            console.error(`[ERROR - LocaleService] Failed to load FAQ for ${locale}:`, error);
+            return {};
+        }
+    }
 }
 
 export const localeService = new LocaleServiceImpl();

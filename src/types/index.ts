@@ -102,6 +102,7 @@ export interface Locals {
 export interface LocaleService {
     resolveUserLocale(user: any): string;
     getMessages(locale: string, namespace?: string): Record<string, string>;
+    getFaqs(locale: string): Record<string, string>;
     t(locale: string, key: string, params?: Record<string, any>): string;
     availableLocales: string[];
 }

@@ -1,0 +1,25 @@
+{
+    "meta": {
+        "locale": "en"
+    },
+    "nodes": {
+        "1": "Age requirement",
+        "1.1": "You can start playing from age 13. However, until age 18 you must have a supervising adult aged 18+ who takes responsibility and remains on the field (does not need to play) until the end of the session",
+        "2": "Types of ammunition",
+        "2.1": "Plastic PVC",
+        "2.1.1": "These balls are made of plastic compressed under high pressure. However, there are also specially heavy balls where aluminum sawdust is added to the plastic to increase the ball's weight",
+        "2.2": "Tracer BBs",
+        "2.2.1": "Tracer BBs are balls with a coating of material that glows in the dark. They work with a tracer unit that illuminates the ball as it exits the weapon",
+        "2.3": "Biodegradable BBs",
+        "2.3.1": "Bio BBs are balls that break down in nature after use. More environmentally friendly but with drawbacks. Storage time is limited to about six months",
+        "3": "Types of Airsoft weapons",
+        "3.1": "Electric weapons",
+        "3.1.1": "Electric weapons are electro-mechanical tools powered by a motor and battery",
+        "3.2": "Gas weapons",
+        "3.2.1": "Gas weapons (GBB or GBBR) are tools that use compressed gas like propane. These weapons are more realistic compared to real firearms",
+        "3.3": "Air weapons",
+        "3.3.1": "Air weapons use compressed air pressure also called HPA. These weapons are more reliable for maintenance but require additional equipment to start playing",
+        "3.4": "Spring weapons",
+        "3.4.1": "Spring weapons use a spring mechanism inside the tool. Usually these are sniper rifles or cheap pistols from the flee market unrelated to the Airsoft industry"
+    }
+}
