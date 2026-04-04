@@ -15,7 +15,7 @@ export class PendingService {
     ) { }
 
     async handlePending(msg: TelegramBot.Message): Promise<void> {
-        console.info('[INFO - pendingService.handlePending]', { userId: msg.from?.id, chatId: msg.chat.id });
+        console.debug('[DEBUG - pendingService.handlePending]', { userId: msg.from?.id, name: msg.from?.username, chatId: msg.chat.id });
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
 

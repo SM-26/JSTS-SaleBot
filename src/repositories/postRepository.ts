@@ -15,19 +15,19 @@ class PostRepository {
     }
 
     updateStatus(postId: string, status: IPost["status"]) {
-        return Post.findByIdAndUpdate(postId, { status }, { new: true });
+        return Post.findByIdAndUpdate(postId, { status }, { returnDocument: 'after' });
     }
 
     setApprovedMessageId(postId: string, approvedMessageId: number | null) {
-        return Post.findByIdAndUpdate(postId, { approvedMessageId }, { new: true });
+        return Post.findByIdAndUpdate(postId, { approvedMessageId }, { returnDocument: 'after' });
     }
 
     setModerationMessageId(postId: string, moderationMessageId: number | null) {
-        return Post.findByIdAndUpdate(postId, { moderationMessageId }, { new: true });
+        return Post.findByIdAndUpdate(postId, { moderationMessageId }, { returnDocument: 'after' });
     }
 
     updateBump(postId: string, dailyBumpCount: number) {
-        return Post.findByIdAndUpdate(postId, { lastBumpAt: new Date(), dailyBumpCount }, { new: true });
+        return Post.findByIdAndUpdate(postId, { lastBumpAt: new Date(), dailyBumpCount }, { returnDocument: 'after' });
     }
 
     getAll() {

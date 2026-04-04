@@ -8,5 +8,9 @@
     "validatePrice": true,
     "minimumPhotos": 1,
     "dailyBumpLimit": 2,
-    "donationsEnabled": true
+    "donationsEnabled": true,
+    "enableFaq": true,
+    "faqAllowInGroups": boolean,
+    "faqMaxButtonsPerRow": 3,
+    "faqMaxDepth": null
 }

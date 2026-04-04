@@ -25,6 +25,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     one_photo: { label: "🖼 One photo", run: testCase3_OnePhoto },
     simulate_donation: { label: "💰 Simulate Donation (50 Stars)", run: testCase_SimulateDonation },
     free_text_price: { label: "🏷 Free text price", run: testCase_FreeTextPrice },
+    faq_view: { label: "❓ View FAQ", run: testCase_FaqView },
 };
 
 type TestCaseFn = (
@@ -254,4 +255,40 @@ async function testCase_FreeTextPrice(
 
     await postService.sendToModeration(String(post._id), postText, media);
     bot.sendMessage(msg.chat.id, `✅ Test post (free text price) sent to moderation (ID: ${post._id})`);
+}
+
+/**
+ * TEST CASE: View FAQ command.
+ */
+async function testCase_FaqView(
+    bot: TelegramBot,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: TelegramBot.Message
+): Promise<void> {
+    try {
+        const locale = localeService.resolveUserLocale(msg.from as any);
+        const faqs = localeService.getFaqs(locale);
+
+        if (!faqs || Object.keys(faqs).length === 0) {
+            await bot.sendMessage(msg.chat.id, "❌ No FAQ data found for your locale");
+            return;
+        }
+
+        let faqText = "<b>📋 FAQ Test Result</b>\n\n";
+        const keys = Object.keys(faqs).slice(0, 5);
+        for (const key of keys) {
+            faqText += `<b>${key}</b>: ${faqs[key].substring(0, 50)}...\n\n`;
+        }
+        faqText += `✅ Total FAQ entries: ${Object.keys(faqs).length}`;
+
+        await bot.sendMessage(msg.chat.id, faqText, { parse_mode: "HTML" });
+    } catch (err) {
+        console.error("[ERROR - testCase_FaqView]", (err as Error).message);
+        await bot.sendMessage(msg.chat.id, "❌ FAQ test failed: " + (err as Error).message);
+    }
 }

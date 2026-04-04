@@ -13,6 +13,7 @@ import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
+import { FaqService } from "../services/faqService";
 import { localeService } from "../services/localeService";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
@@ -33,6 +34,7 @@ export class BotController {
     private adminService: AdminService;
     private pendingService: PendingService;
     private paymentService: PaymentService;
+    private faqService: FaqService;
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
@@ -47,6 +49,7 @@ export class BotController {
         this.adminService = new AdminService(bot, this.config);
         this.pendingService = new PendingService(bot, this.config, this.postService, this.mediaService);
         this.paymentService = new PaymentService(bot, this.config);
+        this.faqService = new FaqService(bot, this.config);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -169,11 +172,14 @@ export class BotController {
             localeService.t(locale, 'helpStart'),
             localeService.t(locale, 'helpMyPosts'),
             localeService.t(locale, 'helpLang'),
-            localeService.t(locale, 'helpHelp'),
+            localeService.t(locale, 'helpHelp')
         ];
 
+        if (this.config.enableFaq !== false) {
+            lines.push(localeService.t(locale, 'helpFaq'));
+        }
         if (this.config.donationsEnabled !== false) {
-            lines.splice(3, 0, localeService.t(locale, 'helpDonate'));
+            lines.push(localeService.t(locale, 'helpDonate'));
         }
 
         const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
@@ -239,6 +245,9 @@ export class BotController {
         this.bot.onText(/\/myposts/, (msg) => this.myPostsService.showPosts(msg));
         this.bot.onText(/\/help/, (msg) => this.showHelp(msg));
         this.bot.onText(/\/lang/, (msg) => this.handleLang(msg));
+        if (this.config.enableFaq !== false) {
+            this.bot.onText(/\/faq/, (msg) => this.faqService.handleFaq(msg));
+        }
         this.bot.onText(/\/config(.*)/, (msg, match) => this.adminService.handleConfig(msg, match?.[1] ?? ""));
         this.bot.onText(/\/pending/, (msg) => this.pendingService.handlePending(msg));
         this.bot.onText(/\/clearpending/, (msg) => this.pendingService.handleClearPending(msg));
@@ -280,6 +289,11 @@ export class BotController {
                         if (!tc) return;
                         await tc.run(this.bot, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                     }
+                    return;
+                }
+
+                if (query.data.startsWith("faq_")) {
+                    await this.faqService.handleCallback(query);
                     return;
                 }
 
