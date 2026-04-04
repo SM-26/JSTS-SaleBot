@@ -43,11 +43,15 @@
 │   │   ├── postRepository.ts     # Post CRUD + status query helpers
 │   │   └── userRepository.ts     # User lookup and admin-check helpers
 │   ├── types/
-│   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, Locals, UserSession, etc.)
-│   └── tests/
-│       ├── checkLocals.ts        # Validates locals.json keys are complete
-│       └── testCases.ts          # In-bot /test command suite (admin-only)
-├── locals.json                   # All UI strings, keyed by language code (e.g. "en", "he")
+│   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, LocaleService, UserSession, etc.)
+│   ├── tests/
+│   │   ├── checkLocals.ts        # Validates locale keys are complete for src/locales
+│   │   └── testCases.ts          # In-bot /test command suite (admin-only)
+│   └locales/
+│       ├── en/
+│       │   └── common.json       # English locale strings
+│       └── he/
+│           └── common.json       # Hebrew locale strings
 ├── config.json.example           # Runtime config template (copy to config.json)
 ├── .env.example                  # Environment variable template (copy to .env)
 ├── dockerfile                    # Multi-stage Docker build (development + production targets)
@@ -73,7 +77,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 
 | Key                 | Type    | Description                                              |
 |---------------------|---------|----------------------------------------------------------|
-| `lang`              | string  | Active locale key from `locals.json` (e.g. `"en"`)      |
+| `lang`              | string  | Default locale key from `src/locales/` (e.g. `"en"`)      |
 | `moderationGroupId` | number  | Telegram group ID for the moderation channel             |
 | `approvedGroupId`   | number  | Telegram group ID where approved posts are published     |
 | `moderationTopicId` | number  | Forum topic ID within the moderation group (optional)    |
@@ -106,7 +110,7 @@ User sends /start
 Each Telegram user has an in-memory `UserSession` (stored in a `Map<number, UserSession>` on `BotController`). The `isIdle` flag prevents overlapping conversations. Always check and reset `session.isIdle` around async flows.
 
 ### Localization
-All user-facing strings live in `locals.json` at the root, keyed first by language code then by string key (matching `LocaleStrings` in `src/types/index.ts`). The active language is set via `config.lang`. When adding new strings, update **every** language block and run `npm run check-locals` to validate completeness.
+All user-facing strings live in `src/locales/<lang>/common.json` files, where `<lang>` is the language code (e.g., `en`, `he`). Each language has its own directory containing a `common.json` file with key-value pairs (matching `LocaleStrings` in `src/types/index.ts`). The `LocaleService` handles user-specific language preferences with fallback logic: `preferredLocale` → `languageCode` → default language. When adding new strings, update **every** language's `common.json` file and run `npm run check-locals` to validate completeness and syntax.
 
 ---
 
@@ -116,6 +120,7 @@ All user-facing strings live in `locals.json` at the root, keyed first by langua
 |-----------|-----------|--------------------------------------------------|
 | `/start`  | All users | Begins the post creation wizard                  |
 | `/myposts`| All users | Lists user's own posts with bump/sold actions    |
+| `/lang`   | All users | Change language preference                       |
 | `/help`   | All users | Shows available commands (admins see extra items)|
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
@@ -150,7 +155,7 @@ npm start        # Runs dist/bot.js
 ### Linting & Testing
 ```bash
 npm run lint         # ESLint check
-npm run test         # Validates locals.json key completeness
+npm run test         # Validates src/locales key completeness
 ```
 
 ---
@@ -159,7 +164,7 @@ npm run test         # Validates locals.json key completeness
 
 ### Do
 - **Follow the existing service layer pattern**: business logic belongs in `src/services/`, database access in `src/repositories/`, type definitions in `src/types/index.ts`.
-- **Always update `locals.json`** for all language keys when adding new user-facing messages. Validate with `npm run check-locals`.
+- **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `npm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Check `session.isIdle`** before starting any new async input flow, and always reset it (including in `catch` blocks) to prevent users getting stuck.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
@@ -179,13 +184,14 @@ npm run test         # Validates locals.json key completeness
 ### Adding a New Command
 1. Add the handler method to an appropriate service (or create a new one in `src/services/`).
 2. Register the route in `BotController.registerRoutes()` in `src/controllers/botController.ts`.
-3. Add help strings to `locals.json` for all languages and reference them in `showHelp()`.
+3. Add help strings to `src/locales/<lang>/common.json` for all languages and reference them in `showHelp()`.
 4. Update the `/help` display in `botController.ts` if the command is user-facing.
 
 ### Adding a New Locale
-1. Add a new top-level key to `locals.json` (e.g. `"ru": { ... }`), filling in all keys from `LocaleStrings`.
-2. Run `npm run check-locals` — it will error on any missing keys.
-3. Set `"lang": "ru"` in `config.json` to activate it.
+1. Create a new directory `src/locales/<lang>/` (e.g., `src/locales/ru/`).
+2. Add a `common.json` file in the new directory, filling in all keys from `LocaleStrings`.
+3. Run `npm run check-locals` — it will error on any missing keys.
+4. Set `"lang": "<lang>"` in `config.json` to activate it as default (users can override with `/lang`).
 
 ---
 
@@ -204,5 +210,5 @@ npm run test         # Validates locals.json key completeness
 | `src/models/Post.ts` | Post Mongoose schema |
 | `src/models/User.ts` | User Mongoose schema |
 | `src/types/index.ts` | All shared TypeScript interfaces |
-| `locals.json` | All localized UI strings |
+| `src/locales/` | Directory containing localized UI strings by language |
 | `config.json` | Runtime bot configuration |

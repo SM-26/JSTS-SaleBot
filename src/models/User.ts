@@ -6,6 +6,8 @@ export interface IUser extends Document {
     lastName: string | null;
     userName: string | null;
     isAdmin: boolean;
+    languageCode?: string;
+    preferredLocale?: string;
 }
 
 const userSchema = new Schema<IUser>(
@@ -15,6 +17,8 @@ const userSchema = new Schema<IUser>(
         lastName: { type: String, default: null },
         userName: { type: String, default: null },
         isAdmin: { type: Boolean, default: false },
+        languageCode: { type: String, default: null },
+        preferredLocale: { type: String, default: null },
     },
     { timestamps: true, versionKey: false }
 );

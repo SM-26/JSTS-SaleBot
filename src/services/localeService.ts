@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { LocaleService } from '../types/index.js';
+import { LocaleService, BotConfig } from '../types/index.js';
+
+const configPath = path.join(process.cwd(), 'config.json');
+const config: BotConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
 class LocaleServiceImpl implements LocaleService {
     private localesDir = path.join(process.cwd(), 'src', 'locales');
@@ -34,12 +37,13 @@ class LocaleServiceImpl implements LocaleService {
     }
 
     resolveUserLocale(user: any): string {
-        // console.info('[INFO - LocaleService] resolveUserLocale called', { preferredLocale: user?.preferredLocale, languageCode: user?.languageCode });
+        const userIdentifier = user?.userName || user?.userId || 'unknown';
+        console.info('[INFO - LocaleService] resolveUserLocale called', { user: userIdentifier, preferredLocale: user?.preferredLocale, languageCode: user?.languageCode });
         // user.preferredLocale > user.languageCode normalized > config default
         if (user?.preferredLocale) {
             const normalized = this.normalizeLocale(user.preferredLocale);
             if (normalized) {
-                // console.info('[INFO - LocaleService] resolved locale from preferredLocale', normalized);
+                console.info('[INFO - LocaleService] resolved locale from preferredLocale', normalized);
                 return normalized;
             }
             console.warn('[WARN - LocaleService] preferredLocale unsupported', user.preferredLocale);
@@ -47,14 +51,13 @@ class LocaleServiceImpl implements LocaleService {
         if (user?.languageCode) {
             const normalized = this.normalizeLocale(user.languageCode);
             if (normalized) {
-                // console.info('[INFO - LocaleService] resolved locale from languageCode', normalized);
+                console.info('[INFO - LocaleService] resolved locale from languageCode', normalized);
                 return normalized;
             }
             console.warn('[WARN - LocaleService] languageCode unsupported', user.languageCode);
         }
-        // Fallback to config default, assume 'en' for now, but should be from config
-        console.warn('[WARN - LocaleService] falling back to default locale', 'en');
-        return 'en'; // TODO: get from config
+        console.warn('[WARN - LocaleService] falling back to default locale', config.lang);
+        return config.lang;
     }
 
     getMessages(locale: string, namespace: string = 'common'): Record<string, string> {
@@ -62,7 +65,7 @@ class LocaleServiceImpl implements LocaleService {
         // console.info('[INFO - LocaleService] getMessages', { locale, namespace, key });
 
         if (this.messagesCache.has(key)) {
-            // console.info('[INFO - LocaleService] getMessages cache hit', key);
+            console.info('[INFO - LocaleService] getMessages cache hit', key);
             return this.messagesCache.get(key)!;
         }
 
@@ -79,6 +82,7 @@ class LocaleServiceImpl implements LocaleService {
     }
 
     t(locale: string, key: string, params?: Record<string, any>): string {
+        // console.info('[INFO - LocaleService] translation requested', { locale, key });
         const messages = this.getMessages(locale);
         let text = messages[key];
 
@@ -94,18 +98,6 @@ class LocaleServiceImpl implements LocaleService {
         }
 
         return text;
-    }
-
-    getFaqs(locale: string): Record<string, string> {
-        try {
-            const filePath = path.join(this.localesDir, locale, 'faq.json');
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const faqData = JSON.parse(content);
-            return faqData.nodes || {};
-        } catch (error) {
-            console.error(`[ERROR - LocaleService] Failed to load FAQ for ${locale}:`, error);
-            return {};
-        }
     }
 }
 

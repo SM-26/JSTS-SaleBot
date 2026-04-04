@@ -4,7 +4,7 @@ import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
-import { BotConfig, Locals, MediaItem } from "../types";
+import { BotConfig, MediaItem, LocaleService } from "../types";
 
 /**
  * Test cases for HandleStart flow.
@@ -30,7 +30,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
 type TestCaseFn = (
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
@@ -44,7 +44,7 @@ type TestCaseFn = (
 async function testCase1_FullPost(
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
@@ -90,7 +90,7 @@ async function testCase1_FullPost(
 async function testCase2_NoMedia(
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
@@ -136,7 +136,7 @@ async function testCase2_NoMedia(
 async function testCase3_OnePhoto(
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
@@ -182,7 +182,7 @@ async function testCase3_OnePhoto(
 async function testCase_SimulateDonation(
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,
@@ -216,7 +216,7 @@ async function testCase_SimulateDonation(
 async function testCase_FreeTextPrice(
     bot: TelegramBot,
     config: BotConfig,
-    locals: Locals,
+    localeService: LocaleService,
     postService: PostService,
     userService: UserService,
     paymentService: PaymentService,

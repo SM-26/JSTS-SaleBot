@@ -1,14 +1,14 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals } from "../types";
+import { BotConfig } from "../types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService } from "./postService";
+import { localeService } from "./localeService";
 
 export class ModerationService {
     constructor(
         private bot: TelegramBot,
         private config: BotConfig,
-        private locals: Locals,
         private postService: PostService
     ) { }
 
@@ -25,40 +25,51 @@ export class ModerationService {
 
         const postId = query.data.replace(/^(approve_|reject_)/, "");
 
+        const adminUser = await userRepository.findByUserId(String(query.from.id));
+        const locale = localeService.resolveUserLocale(adminUser);
+
         try {
+            console.info('[INFO - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
+
             const isAdmin = await userRepository.isAdmin(String(query.from.id));
             if (!isAdmin) {
-                this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].notAdmin, show_alert: true });
+                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'notAdmin'), show_alert: true });
                 return;
             }
 
             const post = await postRepository.findById(postId);
             if (!post) {
-                this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminPostNotFound });
+                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminPostNotFound') });
+                return;
+            }
+
+            if (String(post.userId) === String(query.from.id)) {
+                console.warn("[WARN - ModerationService.handleCallback]", "Admin attempted to moderate own post", { adminId: query.from.id, postId });
+                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminError'), show_alert: true });
                 return;
             }
 
             if (post.status !== "pending") {
-                this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminPostHandled });
+                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminPostHandled') });
                 return;
             }
 
-            const user = await userRepository.findByUserId(post.userId);
-            if (!user) {
-                this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminUserNotFound });
+            const postAuthor = await userRepository.findByUserId(post.userId);
+            if (!postAuthor) {
+                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminUserNotFound') });
                 return;
             }
 
             if (isApprove) {
-                await this.handleApproval(query, postId, post, user);
+                await this.handleApproval(query, postId, post, postAuthor, locale);
             } else {
-                await this.handleRejection(query, postId, post);
+                await this.handleRejection(query, postId, post, postAuthor, locale);
             }
 
             if (query.message) {
                 const statusText = isApprove
-                    ? this.locals[this.lang].statusApproved
-                    : this.locals[this.lang].statusRejected;
+                    ? localeService.t(locale, 'statusApproved')
+                    : localeService.t(locale, 'statusRejected');
 
                 this.bot.editMessageText(statusText, {
                     chat_id: query.message.chat.id,
@@ -66,12 +77,12 @@ export class ModerationService {
                 });
             }
         } catch (err) {
-            console.error("[ERROR - handleModerationCallback]", (err as Error).message);
-            this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminError });
+            console.error("[ERROR - ModerationService.handleCallback]", (err as Error).message);
+            this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminError') });
         }
     }
 
-    private async handleApproval(query: TelegramBot.CallbackQuery, postId: string, post: any, user: any): Promise<void> {
+    private async handleApproval(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
         await postRepository.updateStatus(postId, "approved");
 
         const postText = this.postService.formatPostText({
@@ -80,9 +91,9 @@ export class ModerationService {
             price: post.price,
             location: post.location,
             media: post.media,
-            userId: Number(user.userId),
-            username: user.userName || undefined,
-            firstName: user.firstName || undefined,
+            userId: Number(postAuthor.userId),
+            username: postAuthor.userName || undefined,
+            firstName: postAuthor.firstName || undefined,
         });
 
         const messageId = await this.postService.sendToApproved(postText, post.media);
@@ -90,20 +101,23 @@ export class ModerationService {
             await postRepository.setApprovedMessageId(postId, messageId);
         }
 
-        this.bot.sendMessage(Number(post.userId), this.locals[this.lang].postApproved);
-        this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminApproved });
+        const authorLocale = localeService.resolveUserLocale(postAuthor);
+        this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postApproved'));
+        this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminApproved') });
     }
 
-    private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: any): Promise<void> {
+    private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
         await postRepository.updateStatus(postId, "rejected");
-        this.bot.answerCallbackQuery(query.id, { text: this.locals[this.lang].adminRejected });
+        this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminRejected') });
 
         const reason = await this.askRejectReason(query);
 
+        const authorLocale = localeService.resolveUserLocale(postAuthor);
+
         if (reason) {
-            this.bot.sendMessage(Number(post.userId), this.locals[this.lang].postRejectedWithReason + reason);
+            this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postRejectedWithReason') + reason);
         } else {
-            this.bot.sendMessage(Number(post.userId), this.locals[this.lang].postRejected);
+            this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postRejected'));
         }
     }
 
@@ -114,11 +128,11 @@ export class ModerationService {
 
         const skipCallbackData = `skip_reason_${adminId}_${Date.now()}`;
 
-        const sentMsg = await this.bot.sendMessage(chatId, this.locals[this.lang].rejectReasonPrompt, {
+        const sentMsg = await this.bot.sendMessage(chatId, localeService.t(this.config.lang, 'rejectReasonPrompt'), {
             ...(topicId ? { reply_to_message_id: topicId } : {}),
             reply_markup: {
                 inline_keyboard: [[
-                    { text: this.locals[this.lang].skipReasonButton, callback_data: skipCallbackData },
+                    { text: localeService.t(this.config.lang, 'skipReasonButton'), callback_data: skipCallbackData },
                 ]],
             },
         } as any);

@@ -1,16 +1,12 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals, MediaItem } from "../types";
+import { BotConfig, MediaItem } from "../types";
+import { localeService } from "./localeService";
 
 export class InputService {
     constructor(
         private bot: TelegramBot,
-        private config: BotConfig,
-        private locals: Locals
+        private config: BotConfig
     ) { }
-
-    private get lang() {
-        return this.config.lang;
-    }
 
     input(msg: TelegramBot.Message): Promise<string> {
         return new Promise((resolve) => {
@@ -37,12 +33,12 @@ export class InputService {
         return !isNaN(price) && price > 0;
     }
 
-    async inputPrice(msg: TelegramBot.Message): Promise<string> {
-        await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].enterPrice);
+    async inputPrice(msg: TelegramBot.Message, locale: string): Promise<string> {
+        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterPrice'));
 
         while (true) {
             const priceInput = await this.input(msg); if (this.validatePriceValue(priceInput)) return priceInput;
-            this.bot.sendMessage(msg.chat.id, this.locals[this.lang].invalidPrice);
+            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'invalidPrice'));
         }
     }
 
@@ -85,13 +81,13 @@ export class InputService {
         });
     }
 
-    async promptMedia(msg: TelegramBot.Message): Promise<MediaItem[]> {
+    async promptMedia(msg: TelegramBot.Message, locale: string): Promise<MediaItem[]> {
         const mediaPromise = this.inputMedia(msg);
 
-        await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].enterMedia, {
+        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterMedia'), {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: this.locals[this.lang].doneMediaButton, callback_data: `done_media_${msg.from!.id}` },
+                    { text: localeService.t(locale, 'doneMediaButton'), callback_data: `done_media_${msg.from!.id}` },
                 ]],
             },
         });
@@ -99,15 +95,15 @@ export class InputService {
         return mediaPromise;
     }
 
-    async confirmAction(msg: TelegramBot.Message): Promise<boolean> {
+    async confirmAction(msg: TelegramBot.Message, locale: string): Promise<boolean> {
         const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
         const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
 
         const sentMsg = await this.bot.sendMessage(msg.chat.id, "👆", {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: this.locals[this.lang].confirmButton, callback_data: callbackId },
-                    { text: this.locals[this.lang].cancelButton, callback_data: cancelId },
+                    { text: localeService.t(locale, 'confirmButton'), callback_data: callbackId },
+                    { text: localeService.t(locale, 'cancelButton'), callback_data: cancelId },
                 ]],
             },
         });

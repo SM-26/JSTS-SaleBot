@@ -1,16 +1,16 @@
 import TelegramBot from "node-telegram-bot-api";
 import * as fs from "fs";
 import * as path from "path";
-import { BotConfig, Locals } from "../types";
+import { BotConfig } from "../types";
 import userRepository from "../repositories/userRepository";
+import { localeService } from "./localeService";
 
 const configPath = path.join(__dirname, "../../config.json");
 
 export class AdminService {
     constructor(
         private bot: TelegramBot,
-        private config: BotConfig,
-        private locals: Locals
+        private config: BotConfig
     ) { }
 
     private get lang() {
@@ -18,9 +18,12 @@ export class AdminService {
     }
 
     async handleConfig(msg: TelegramBot.Message, args: string): Promise<void> {
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const locale = localeService.resolveUserLocale(user);
+
         const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
         if (!isAdmin) {
-            await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].notAdmin);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
             return;
         }
 
@@ -28,7 +31,7 @@ export class AdminService {
 
         // /config — show all settings
         if (!args.trim()) {
-            await this.showConfig(msg.chat.id);
+            await this.showConfig(msg.chat.id, locale);
             return;
         }
 
@@ -36,24 +39,24 @@ export class AdminService {
         if (parts.length >= 2) {
             const key = parts[0];
             const rawValue = parts.slice(1).join(" ");
-            await this.updateConfig(msg.chat.id, key, rawValue);
+            await this.updateConfig(msg.chat.id, key, rawValue, locale);
             return;
         }
 
-        await this.bot.sendMessage(msg.chat.id, this.locals[this.lang].configUsage, { parse_mode: "HTML" });
+        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'configUsage'), { parse_mode: "HTML" });
     }
 
-    private async showConfig(chatId: number): Promise<void> {
+    private async showConfig(chatId: number, locale: string): Promise<void> {
         const lines = Object.entries(this.config).map(
             ([key, value]) => `<b>${key}</b>: <code>${value}</code>`
         );
-        const text = `${this.locals[this.lang].configTitle}\n\n${lines.join("\n")}`;
+        const text = `${localeService.t(locale, 'configTitle')}\n\n${lines.join("\n")}`;
         await this.bot.sendMessage(chatId, text, { parse_mode: "HTML" });
     }
 
-    private async updateConfig(chatId: number, key: string, rawValue: string): Promise<void> {
+    private async updateConfig(chatId: number, key: string, rawValue: string, locale: string): Promise<void> {
         if (!(key in this.config)) {
-            await this.bot.sendMessage(chatId, this.locals[this.lang].configKeyNotFound);
+            await this.bot.sendMessage(chatId, localeService.t(locale, 'configKeyNotFound'));
             return;
         }
 
@@ -64,13 +67,13 @@ export class AdminService {
             if (rawValue === "true") parsed = true;
             else if (rawValue === "false") parsed = false;
             else {
-                await this.bot.sendMessage(chatId, this.locals[this.lang].configInvalidValue);
+                await this.bot.sendMessage(chatId, localeService.t(locale, 'configInvalidValue'));
                 return;
             }
         } else if (typeof currentValue === "number") {
             parsed = Number(rawValue);
             if (isNaN(parsed)) {
-                await this.bot.sendMessage(chatId, this.locals[this.lang].configInvalidValue);
+                await this.bot.sendMessage(chatId, localeService.t(locale, 'configInvalidValue'));
                 return;
             }
         } else {
@@ -84,7 +87,7 @@ export class AdminService {
 
         await this.bot.sendMessage(
             chatId,
-            `${this.locals[this.lang].configUpdated}\n<b>${key}</b>: <code>${parsed}</code>`,
+            `${localeService.t(locale, 'configUpdated')}\n<b>${key}</b>: <code>${parsed}</code>`,
             { parse_mode: "HTML" }
         );
     }

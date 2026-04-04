@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
-import { BotConfig, Locals, UserSession } from "../types";
+import { BotConfig, UserSession } from "../types";
 import { InputService } from "../services/inputService";
 import { MediaService } from "../services/photoService";
 import { PostService } from "../services/postService";
@@ -13,6 +13,7 @@ import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
+import { localeService } from "../services/localeService";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -20,7 +21,6 @@ const config: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
 export class BotController {
     private bot: TelegramBot;
-    private locals: Locals;
     private config: BotConfig;
     private sessions: Map<number, UserSession> = new Map();
 
@@ -36,18 +36,17 @@ export class BotController {
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
-        this.locals = this.loadLocals();
         this.config = config;
 
-        this.inputService = new InputService(bot, this.config, this.locals);
+        this.inputService = new InputService(bot, this.config);
         this.mediaService = new MediaService();
-        this.postService = new PostService(bot, this.config, this.locals, this.mediaService);
-        this.moderationService = new ModerationService(bot, this.config, this.locals, this.postService);
+        this.postService = new PostService(bot, this.config, this.mediaService);
+        this.moderationService = new ModerationService(bot, this.config, this.postService);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(bot, this.config, this.locals, this.postService);
-        this.adminService = new AdminService(bot, this.config, this.locals);
-        this.pendingService = new PendingService(bot, this.config, this.locals, this.postService, this.mediaService);
-        this.paymentService = new PaymentService(bot, this.config, this.locals);
+        this.myPostsService = new MyPostsService(bot, this.config, this.postService);
+        this.adminService = new AdminService(bot, this.config);
+        this.pendingService = new PendingService(bot, this.config, this.postService, this.mediaService);
+        this.paymentService = new PaymentService(bot, this.config);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -66,7 +65,7 @@ export class BotController {
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "User",
                 });
-                const soldText = postText + this.locals[this.config.lang].soldTag;
+                const soldText = postText + localeService.t(this.config.lang, 'soldTag');
                 const success = await this.postService.markSoldInGroup(post.approvedMessageId!, soldText, post.media.length > 0);
                 if (success) {
                     synced++;
@@ -87,29 +86,26 @@ export class BotController {
         return this.sessions.get(userId)!;
     }
 
-    private loadLocals(): Locals {
-        const localsPath = path.join(__dirname, "../../locals.json");
-        return JSON.parse(fs.readFileSync(localsPath, "utf-8"));
-    }
-
     async HandleStart(msg: TelegramBot.Message): Promise<void> {
-        const lang = this.config.lang;
+        console.info('[INFO - HandleStart]', { userId: msg.from?.id, chatId: msg.chat.id });
         const session = this.getSession(msg.from!.id);
 
         try {
             session.isIdle = false;
 
             await this.userService.ensureUser(msg.from!);
+            const user = await userRepository.findByUserId(String(msg.from!.id));
+            const locale = localeService.resolveUserLocale(user);
 
             // Collect post details
-            const title = await this.inputService.inputWithPrompt(msg, this.locals[lang].welcome);
-            const description = await this.inputService.inputWithPrompt(msg, this.locals[lang].enterDescription);
-            const price = await this.inputService.inputPrice(msg);
-            const location = await this.inputService.inputWithPrompt(msg, this.locals[lang].enterLocation);
-            const media = await this.inputService.promptMedia(msg);
+            const title = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'welcome'));
+            const description = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterDescription'));
+            const price = await this.inputService.inputPrice(msg, locale);
+            const location = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterLocation'));
+            const media = await this.inputService.promptMedia(msg, locale);
 
             if (media.length < this.config.minimumMedia) {
-                this.bot.sendMessage(msg.chat.id, this.locals[lang].notEnoughMedia);
+                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));
                 session.isIdle = true;
                 return;
             }
@@ -128,11 +124,11 @@ export class BotController {
             const postText = this.postService.formatPostText(postData);
 
             // Preview & confirm
-            await this.postService.sendPreview(msg.chat.id, postText, media);
+            await this.postService.sendPreview(msg.chat.id, postText, media, locale);
 
-            const confirmed = await this.inputService.confirmAction(msg);
+            const confirmed = await this.inputService.confirmAction(msg, locale);
             if (!confirmed) {
-                this.bot.sendMessage(msg.chat.id, this.locals[lang].postCancelled);
+                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCancelled'));
                 session.isIdle = true;
                 return;
             }
@@ -153,57 +149,82 @@ export class BotController {
                 await postRepository.setModerationMessageId(String(post._id), modMsgId);
             }
 
-            this.bot.sendMessage(msg.chat.id, this.locals[lang].postCreated);
+            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCreated'));
             session.isIdle = true;
 
         } catch (err) {
             console.error("[ERROR - HandleStart] ", (err as Error).message);
-            this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].generalError);
+            this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
             session.isIdle = true;
         }
     }
 
     async showHelp(msg: TelegramBot.Message): Promise<void> {
-        const lang = this.config.lang;
+        await this.userService.ensureUser(msg.from!);
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const locale = localeService.resolveUserLocale(user);
         const lines = [
-            this.locals[lang].helpTitle,
+            localeService.t(locale, 'helpTitle'),
             "",
-            this.locals[lang].helpStart,
-            this.locals[lang].helpMyPosts,
-            this.locals[lang].helpHelp,
+            localeService.t(locale, 'helpStart'),
+            localeService.t(locale, 'helpMyPosts'),
+            localeService.t(locale, 'helpLang'),
+            localeService.t(locale, 'helpHelp'),
         ];
 
         if (this.config.donationsEnabled !== false) {
-            lines.splice(3, 0, this.locals[lang].helpDonate);
+            lines.splice(3, 0, localeService.t(locale, 'helpDonate'));
         }
 
         const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
         if (isAdmin) {
             lines.push("");
-            lines.push(this.locals[lang].helpAdminSection);
-            lines.push(this.locals[lang].helpConfig);
-            lines.push(this.locals[lang].helpPending);
-            lines.push(this.locals[lang].helpClearPending);
-            lines.push(this.locals[lang].helpTest);
+            lines.push(localeService.t(locale, 'helpAdminSection'));
+            lines.push(localeService.t(locale, 'helpConfig'));
+            lines.push(localeService.t(locale, 'helpPending'));
+            lines.push(localeService.t(locale, 'helpClearPending'));
+            lines.push(localeService.t(locale, 'helpTest'));
         }
 
         await this.bot.sendMessage(msg.chat.id, lines.join("\n"), { parse_mode: "HTML" });
     }
 
+    async handleLang(msg: TelegramBot.Message): Promise<void> {
+        const userIdentifier = msg.from?.username || msg.from?.id || 'unknown';
+        console.info('[INFO - handleLang]', { user: userIdentifier });
+        await this.userService.ensureUser(msg.from!);
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const currentLocale = localeService.resolveUserLocale(user);
+        const availableLocales = localeService.availableLocales;
+
+        const buttons = availableLocales.map(lang => ({
+            text: lang.toUpperCase(),
+            callback_data: `lang_${lang}`
+        }));
+
+        const text = localeService.t(currentLocale, 'langMenu', { lang: currentLocale.toUpperCase() });
+
+        await this.bot.sendMessage(msg.chat.id, text, {
+            reply_markup: { inline_keyboard: [buttons] }
+        });
+    }
+
     async handleDonate(msg: TelegramBot.Message): Promise<void> {
         if (this.config.donationsEnabled === false) {
-            await this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].donationDisabled);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'donationDisabled'));
             return;
         }
 
-        const lang = this.config.lang;
-        const text = `${this.locals[lang].donateTitle}\n${this.locals[lang].donateChooseAmount}`;
+        await this.userService.ensureUser(msg.from!);
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const locale = localeService.resolveUserLocale(user);
+        const text = `${localeService.t(locale, 'donateTitle')}\n${localeService.t(locale, 'donateChooseAmount')}`;
 
         const buttons = [
             [
                 { text: "⭐ 50", callback_data: "donate_50" },
                 { text: "⭐ 150", callback_data: "donate_150" },
-                { text: this.locals[lang].donateOther, callback_data: "donate_other" }
+                { text: localeService.t(locale, 'donateOther'), callback_data: "donate_other" }
             ]
         ];
 
@@ -217,13 +238,14 @@ export class BotController {
         this.bot.onText(/\/start/, (msg) => this.HandleStart(msg));
         this.bot.onText(/\/myposts/, (msg) => this.myPostsService.showPosts(msg));
         this.bot.onText(/\/help/, (msg) => this.showHelp(msg));
+        this.bot.onText(/\/lang/, (msg) => this.handleLang(msg));
         this.bot.onText(/\/config(.*)/, (msg, match) => this.adminService.handleConfig(msg, match?.[1] ?? ""));
         this.bot.onText(/\/pending/, (msg) => this.pendingService.handlePending(msg));
         this.bot.onText(/\/clearpending/, (msg) => this.pendingService.handleClearPending(msg));
         this.bot.onText(/\/test/, async (msg) => {
             const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
             if (!isAdmin) {
-                this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].notAdmin);
+                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
                 return;
             }
             const buttons = Object.entries(TEST_CASES).map(([key, tc]) => ([
@@ -251,12 +273,12 @@ export class BotController {
 
                     if (key === "all") {
                         for (const tc of Object.values(TEST_CASES)) {
-                            await tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
+                            await tc.run(this.bot, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                         }
                     } else {
                         const tc = TEST_CASES[key];
                         if (!tc) return;
-                        await tc.run(this.bot, this.config, this.locals, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
+                        await tc.run(this.bot, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                     }
                     return;
                 }
@@ -276,6 +298,14 @@ export class BotController {
                     return;
                 }
 
+                if (query.data.startsWith("lang_")) {
+                    const lang = query.data.replace("lang_", "");
+                    await userRepository.updateUser(String(query.from!.id), { preferredLocale: lang });
+                    this.bot.answerCallbackQuery(query.id);
+                    this.bot.sendMessage(query.message!.chat.id, `Language set to ${lang.toUpperCase()}`);
+                    return;
+                }
+
                 // --- Donation Callbacks ---
                 if (query.data.startsWith("donate_")) {
                     const action = query.data.replace("donate_", "");
@@ -289,7 +319,7 @@ export class BotController {
                     if (action === "other") {
                         const session = this.getSession(query.from.id);
                         session.awaitingDonation = true;
-                        this.bot.sendMessage(chatId, this.locals[this.config.lang].donateEnterAmount);
+                        this.bot.sendMessage(chatId, localeService.t(this.config.lang, 'donateEnterAmount'));
                     } else {
                         const amount = parseInt(action, 10);
                         if (!isNaN(amount)) {
@@ -330,7 +360,7 @@ export class BotController {
                         session.awaitingDonation = false; // Reset state
                         await this.paymentService.sendDonationInvoice(msg.chat.id, amount);
                     } else {
-                        await this.bot.sendMessage(msg.chat.id, this.locals[this.config.lang].donateInvalidAmount);
+                        await this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'donateInvalidAmount'));
                     }
                     return;
                 }

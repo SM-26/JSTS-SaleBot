@@ -21,8 +21,33 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Donations** — Users can support the bot via Telegram Stars (`/donate`)
 - **Auto-Publish** — Approved posts are forwarded to a public sales group
 - **Forum Topics** — Moderation and approved posts target specific group topics
-- **Multi Localization** — All UI strings externalized in `locals.json` (default En)
+- **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
+
+### 🌐 How Multi Localization Works
+
+1. Locale definition
+   - Each language has its own `src/locales/{lang}/common.json` file (e.g., `en/common.json`, `he/common.json`).
+   - Translation keys are shared across locales (same keys, different values).
+
+2. Locale resolution
+   - When a user interacts with the bot, `UserService.ensureUser()` writes or updates the user profile.
+   - `localeService.resolveUserLocale(user)` prefers:
+     - `user.preferredLocale` (from `/lang` selection)
+     - `user.languageCode` (Telegram user language hint)
+     - bot config default (`config.lang`, currently `en`)
+
+3. Message rendering
+   - `localeService.t(locale, key)` loads `common.json` for `locale`, caches it, and returns translation.
+   - Missing keys are fallback to the key string with a warning log.
+
+4. `/lang` command
+   - Sends an inline keyboard with available locales from `localeService.availableLocales`.
+   - Updates `user.preferredLocale` with `userRepository.updateUser(...)`.
+   - Future replies use chosen locale.
+
+5. Configuration tests
+   - `src/tests/checkLocals.ts` validates matching keys across `src/locales/*/common.json` and reports missing entries.
 
 ---
 
@@ -33,6 +58,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | :--- | :--- |
 | `/start` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). |
 | `/myposts` | View your active posts, bump them to the top, or mark them as sold. |
+| `/lang` | Set your preferred language for bot interactions. |
 | `/donate` | Support the bot by donating Telegram Stars. |
 | `/help` | Show the list of available commands. |
 
@@ -151,7 +177,7 @@ Edit `config.json`:
 
 | Field                | Description                                       |
 |----------------------|---------------------------------------------------|
-| `lang`               | Locale key (matches `locals.json`)                |
+| `lang`               | Locale key (matches `src/locales/<lang>/common.json`)                |
 | `moderationGroupId`  | Telegram group where posts are reviewed           |
 | `approvedGroupId`    | Telegram group where approved posts are published |
 | `moderationTopicId`  | Forum topic ID for moderation messages (Optional: set to null if not using topics) |

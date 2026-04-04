@@ -1,17 +1,19 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals } from "../types";
+import { BotConfig } from "../types";
+import { localeService } from "./localeService";
+import userRepository from "../repositories/userRepository";
 
 export class PaymentService {
     constructor(
         private bot: TelegramBot,
-        private config: BotConfig,
-        private locals: Locals
+        private config: BotConfig
     ) { }
 
     async sendDonationInvoice(chatId: number, amount: number) {
-        const lang = this.config.lang;
-        const title = this.locals[lang].donateInvoiceTitle;
-        const description = this.locals[lang].donateInvoiceDesc;
+        const user = await userRepository.findByUserId(String(chatId));
+        const locale = localeService.resolveUserLocale(user);
+        const title = localeService.t(locale, 'donateInvoiceTitle');
+        const description = localeService.t(locale, 'donateInvoiceDesc');
         const payload = JSON.stringify({ type: "donation", amount });
         const providerToken = ""; // Empty for Telegram Stars
         const currency = "XTR";
@@ -38,12 +40,14 @@ export class PaymentService {
     }
 
     async handleSuccessfulPayment(msg: TelegramBot.Message) {
-        const lang = this.config.lang;
         const payment = msg.successful_payment;
 
         if (!payment) return;
 
-        const text = this.locals[lang].donationSuccess.replace("{amount}", String(payment.total_amount));
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const locale = localeService.resolveUserLocale(user);
+
+        const text = localeService.t(locale, 'donationSuccess').replace("{amount}", String(payment.total_amount));
         await this.bot.sendMessage(msg.chat.id, text);
     }
 }

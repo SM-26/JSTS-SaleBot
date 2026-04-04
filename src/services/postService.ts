@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Locals, MediaItem } from "../types";
+import { BotConfig, MediaItem } from "../types";
 import { MediaService } from "./photoService";
+import { localeService } from "./localeService";
 
 export interface PostData {
     title: string;
@@ -17,7 +18,6 @@ export class PostService {
     constructor(
         private bot: TelegramBot,
         private config: BotConfig,
-        private locals: Locals,
         private mediaService: MediaService
     ) { }
 
@@ -41,8 +41,8 @@ export class PostService {
         ].join("\n");
     }
 
-    async sendPreview(chatId: number, text: string, media: MediaItem[]): Promise<void> {
-        const previewText = `${this.locals[this.lang].preview}\n${text}`;
+    async sendPreview(chatId: number, text: string, media: MediaItem[], locale: string): Promise<void> {
+        const previewText = `${localeService.t(locale, 'preview')}\n${text}`;
 
         if (media.length > 0) {
             const group = this.mediaService.buildMediaGroup(media, previewText);
@@ -59,8 +59,8 @@ export class PostService {
         const approveRejectMarkup = {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: this.locals[this.lang].approveButton, callback_data: `approve_${postId}` },
-                    { text: this.locals[this.lang].rejectButton, callback_data: `reject_${postId}` },
+                    { text: localeService.t(this.config.lang, 'approveButton'), callback_data: `approve_${postId}` },
+                    { text: localeService.t(this.config.lang, 'rejectButton'), callback_data: `reject_${postId}` },
                 ]],
             },
         };
@@ -72,7 +72,7 @@ export class PostService {
                 reply_to_message_id: moderationTopicId,
             } as any);
 
-            await this.bot.sendMessage(moderationGroupId, this.locals[this.lang].moderationPrompt, {
+            await this.bot.sendMessage(moderationGroupId, localeService.t(this.config.lang, 'moderationPrompt'), {
                 reply_to_message_id: moderationTopicId,
                 ...approveRejectMarkup,
             } as any);
