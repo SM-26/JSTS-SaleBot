@@ -190,7 +190,8 @@ export class BotController {
     }
 
     async handleLang(msg: TelegramBot.Message): Promise<void> {
-        console.info('[INFO - handleLang]', { userId: msg.from?.id });
+        const userIdentifier = msg.from?.username || msg.from?.id || 'unknown';
+        console.info('[INFO - handleLang]', { user: userIdentifier });
         await this.userService.ensureUser(msg.from!);
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const currentLocale = localeService.resolveUserLocale(user);
@@ -201,7 +202,7 @@ export class BotController {
             callback_data: `lang_${lang}`
         }));
 
-        const text = `Current language: ${currentLocale.toUpperCase()}\nChoose your preferred language:`;
+        const text = localeService.t(currentLocale, 'langMenu', { lang: currentLocale.toUpperCase() });
 
         await this.bot.sendMessage(msg.chat.id, text, {
             reply_markup: { inline_keyboard: [buttons] }
