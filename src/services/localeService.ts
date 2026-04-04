@@ -59,10 +59,10 @@ class LocaleServiceImpl implements LocaleService {
 
     getMessages(locale: string, namespace: string = 'common'): Record<string, string> {
         const key = `${locale}-${namespace}`;
-        console.info('[INFO - LocaleService] getMessages', { locale, namespace, key });
+        // console.info('[INFO - LocaleService] getMessages', { locale, namespace, key });
 
         if (this.messagesCache.has(key)) {
-            console.info('[INFO - LocaleService] getMessages cache hit', key);
+            // console.info('[INFO - LocaleService] getMessages cache hit', key);
             return this.messagesCache.get(key)!;
         }
 
