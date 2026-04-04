@@ -7,7 +7,8 @@ services:
     container_name: jsts-salebot # Easier to find in 'docker ps'
     # command: npm run dev -- --inspect=0.0.0.0:9229
     # command: npx ts-node src/bot.ts --inspect=0.0.0.0:9221
-    command: node --inspect=0.0.0.0:9221 -r ts-node/register src/bot.ts
+    command: node -r ts-node/register src/bot.ts
+    # command: node --inspect=0.0.0.0:9221 -r ts-node/register src/bot.ts
     volumes:
       - .:/app
       - /app/node_modules
