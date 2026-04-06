@@ -130,7 +130,12 @@ export class PostService {
             }
             return true;
         } catch (err) {
-            console.error("[ERROR - markSoldInGroup]", (err as Error).message);
+            const errorMessage = (err as Error).message;
+            if (errorMessage.includes("message is not modified")) {
+                return true;
+            }
+
+            console.error("[ERROR - markSoldInGroup]", errorMessage);
             return false;
         }
     }

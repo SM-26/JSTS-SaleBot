@@ -44,9 +44,7 @@ export class ModerationService {
             }
 
             if (String(post.userId) === String(query.from.id)) {
-                console.warn("[WARN - ModerationService.handleCallback]", "Admin attempted to moderate own post", { adminId: query.from.id, postId });
-                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminError'), show_alert: true });
-                return;
+                console.warn("[WARN - ModerationService.handleCallback]", "Admin is moderating their own post", { adminId: query.from.id, postId });
             }
 
             if (post.status !== "pending") {
