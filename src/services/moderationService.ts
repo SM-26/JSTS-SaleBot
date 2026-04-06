@@ -69,9 +69,11 @@ export class ModerationService {
                     ? localeService.t(locale, 'statusApproved')
                     : localeService.t(locale, 'statusRejected');
 
+                const topicId = (query.message as any)?.message_thread_id;
+
                 this.bot.editMessageText(statusText, {
                     chat_id: query.message.chat.id,
-                    message_id: query.message.message_id,
+                    message_id: query.message.message_id
                 });
             }
         } catch (err) {
@@ -81,8 +83,6 @@ export class ModerationService {
     }
 
     private async handleApproval(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
-        await postRepository.updateStatus(postId, "approved");
-
         const postText = this.postService.formatPostText({
             title: post.title,
             description: post.description,
@@ -99,6 +99,9 @@ export class ModerationService {
             await postRepository.setApprovedMessageId(postId, messageId);
         }
 
+        // Only update status in DB after successful Telegram post
+        await postRepository.updateStatus(postId, "approved");
+
         const authorLocale = localeService.resolveUserLocale(postAuthor);
         this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postApproved'));
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminApproved') });
@@ -113,10 +116,12 @@ export class ModerationService {
     }
 
     private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
-        await postRepository.updateStatus(postId, "rejected");
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminRejected') });
 
         const reason = await this.askRejectReason(query);
+
+        // Only update status in DB after reason is handled
+        await postRepository.updateStatus(postId, "rejected");
 
         const authorLocale = localeService.resolveUserLocale(postAuthor);
 
@@ -152,7 +157,7 @@ export class ModerationService {
             },
         };
 
-        if (topicId) {
+        if (topicId && Number(topicId) !== 1) {
             options.message_thread_id = Number(topicId);
         }
 
@@ -175,7 +180,7 @@ export class ModerationService {
 
             const msgListener = (reply: TelegramBot.Message) => {
                 if (reply.chat.id !== chatId || reply.from!.id !== adminId) return;
-                if (topicId && (reply as any).message_thread_id !== topicId) return;
+                if (topicId && Number(topicId) !== 1 && (reply as any).message_thread_id !== topicId) return;
                 if (reply.text && reply.text.startsWith("/")) return;
 
                 this.bot.removeListener("callback_query", cbListener);

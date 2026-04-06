@@ -24,7 +24,7 @@ export class PendingService {
             : msg.message_thread_id;
 
         const options: any = { parse_mode: "HTML" };
-        if (targetThreadId) {
+        if (targetThreadId && Number(targetThreadId) !== 1) {
             options.message_thread_id = Number(targetThreadId);
         }
 
@@ -78,11 +78,11 @@ export class PendingService {
 
                 if (post.media && post.media.length > 0) {
                     const group = this.mediaService.buildMediaGroup(post.media, postText);
-                    await this.bot.sendMediaGroup(msg.chat.id, group, targetThreadId ? { message_thread_id: Number(targetThreadId) } as any : {});
+                    await this.bot.sendMediaGroup(msg.chat.id, group, (targetThreadId && Number(targetThreadId) !== 1) ? { message_thread_id: Number(targetThreadId) } as any : {});
 
                     // Buttons cannot be attached to a media group, so we send them in a separate message
                     const btnOptions: any = { reply_markup: replyMarkup };
-                    if (targetThreadId) btnOptions.message_thread_id = Number(targetThreadId);
+                    if (targetThreadId && Number(targetThreadId) !== 1) btnOptions.message_thread_id = Number(targetThreadId);
                     await this.bot.sendMessage(msg.chat.id, "👇", btnOptions);
                 } else {
                     const msgOptions: any = { ...options, disable_web_page_preview: true, reply_markup: replyMarkup };
