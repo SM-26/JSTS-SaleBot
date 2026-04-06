@@ -162,6 +162,7 @@ export class PostService {
             const author = await userRepository.findByUserId(post.userId);
             const locale = localeService.resolveUserLocale(author);
 
+            // 1. Send the text notification
             await this.bot.sendMessage(Number(post.userId),
                 `💬 <b>${localeService.t(locale, 'newReplyNotification')}</b>\n` +
                 `Post: <i>${post.title}</i>\n` +
@@ -169,9 +170,22 @@ export class PostService {
                 { parse_mode: "HTML" }
             );
 
-            await this.bot.forwardMessage(Number(post.userId), msg.chat.id, msg.message_id);
+            // 2. Attempt Forward with Copy fallback
+            try {
+                await this.bot.forwardMessage(Number(post.userId), msg.chat.id, msg.message_id);
+            } catch (err) {
+                console.warn('[WARN - PostService.handlePublicReply] Forward failed, attempting copy...', (err as Error).message);
+
+                try {
+                    // copyMessage is much more likely to succeed in protected groups
+                    await this.bot.copyMessage(Number(post.userId), msg.chat.id, msg.message_id);
+                } catch (copyErr) {
+                    console.error('[ERROR - PostService.handlePublicReply] Both forward and copy failed.', (copyErr as Error).message);
+                }
+            }
 
             console.info('[INFO - PostService.handlePublicReply]', { postId: post._id, authorId: post.userId, buyerId: msg.from?.id });
         }
     }
+
 }

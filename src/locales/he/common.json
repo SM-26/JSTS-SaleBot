@@ -51,6 +51,7 @@
     "broadcastUsage": "שימוש: הגב להודעה עם <code>/broadcast</code> או הקלד <code>/broadcast [הודעה]</code> כדי לשלוח לערוץ המאושר.",
     "broadcastEnterCustomMessage": "אנא הקלד את ההודעה שברצונך לשדר (תמיכה בעיצוב HTML):",
     "helpBroadcastTopic": "/broadcast - שליחת הודעה בקבוצה בתור הבוט",
+    "newReplyNotification": "התקבלה תגובה חדשה למודעה שלך!",
     "helpClearPending": "/clearpending - ביטול כל הפוסטים הממתינים",
     "helpConfig": "/config - הצגת ועריכת הגדרות",
     "helpDonate": "/donate - תרומה לבוט",
