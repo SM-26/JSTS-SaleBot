@@ -4,6 +4,7 @@ import * as path from "path";
 import { BotConfig } from "../types";
 import userRepository from "../repositories/userRepository";
 import { localeService } from "./localeService";
+import { PostService } from "./postService";
 
 const configPath = path.join(__dirname, "../../config.json");
 
@@ -106,37 +107,41 @@ export class AdminService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
+        // Setup options once for both scenarios
+        const options: TelegramBot.CopyMessageOptions & TelegramBot.SendMessageOptions = {
+            parse_mode: "HTML"
+        };
+
+        if (approvedTopicId) {
+            (options as any).message_thread_id = Number(approvedTopicId);
+        }
+
         try {
             // Scenario 1: Admin replied to a message
             if (msg.reply_to_message) {
-                // Using copyMessage instead of forwardMessage to remove the "Forwarded from" header
-                // and make it look like the bot's own message.
                 await this.bot.copyMessage(
                     approvedGroupId,
                     msg.chat.id,
                     msg.reply_to_message.message_id,
-                    { message_thread_id: approvedTopicId } as any
+                    options
                 );
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastSuccess'));
-                console.info('[INFO - AdminService.handleBroadcast] Message forwarded to approved group', { adminId: msg.from?.id, originalMessageId: msg.reply_to_message.message_id });
             }
             // Scenario 2: Admin typed a message after /broadcast
             else if (args.trim()) {
-                await this.bot.sendMessage(
-                    approvedGroupId,
-                    args.trim(),
-                    {
-                        parse_mode: "HTML", // Preserve formatting
-                        message_thread_id: approvedTopicId
-                    }
-                );
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastSuccess'));
-                console.info('[INFO - AdminService.handleBroadcast] Message sent to approved group', { adminId: msg.from?.id, messageContent: args.trim().substring(0, 50) + '...' });
+                await this.bot.sendMessage(approvedGroupId, args.trim(), options);
             }
             // Scenario 3: No message to broadcast
             else {
                 await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsage'));
+                return;
             }
+
+            // Common success handling
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastSuccess'));
+            console.info('[INFO - AdminService.handleBroadcast] Broadcast successful', {
+                adminId: msg.from?.id,
+                type: msg.reply_to_message ? 'copy' : 'text'
+            });
         } catch (err) {
             console.error("[ERROR - AdminService.handleBroadcast]", (err as Error).message);
             await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'generalError'));
