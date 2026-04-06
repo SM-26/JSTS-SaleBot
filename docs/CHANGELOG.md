@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 
+0.1.4 - Added Admin Active Users monitoring.
+  - New command `/activeUsers` for admins to monitor users currently in the middle of creating a post.
+  - Displays User ID, Username, and Full Name for all non-idle sessions.
+
+0.1.3 - Enhanced user post management and moderation logging.
+  - Refactored `/myposts` UI: Added a dashboard summary and full message previews for approved posts with dedicated Bump/Sold buttons.
+  - Added bulk management: Users can now clear all "Rejected" or "Sold" posts from their history with a single click.
+  - Improved API resilience: Added specific handling for Telegram "message not modified" and "message not found" errors to ensure database consistency during sync.
+  - Enhanced Admin Auditing: Moderation actions now log detailed metadata including admin details, post content, and author information.
+  - Admin Policy Update: Permitted admins to moderate their own posts (logged with a warning for transparency).
 0.1.2 - added Russian support, small fixes as well.
 0.1.1 - Added FAQ module (issue #20 Phase 1): `/faq` command with structured FAQ data in locales, supports user-specific language resolution, comprehensive validation of FAQ file structure in `checkLocals.ts`, and test cases for FAQ functionality.
 0.1.0 - Refactored locale system to support user-specific language preferences. Migrated from monolithic `locals.json` to structured `src/locales/<lang>/common.json` files, added `/lang` command for users to set their preferred language, and implemented automatic language detection from Telegram user settings.

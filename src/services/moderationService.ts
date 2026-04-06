@@ -29,7 +29,7 @@ export class ModerationService {
         const locale = localeService.resolveUserLocale(adminUser);
 
         try {
-            console.info('[INFO - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
+            console.debug('[DEBUG - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
 
             const isAdmin = await userRepository.isAdmin(String(query.from.id));
             if (!isAdmin) {
@@ -102,6 +102,14 @@ export class ModerationService {
         const authorLocale = localeService.resolveUserLocale(postAuthor);
         this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postApproved'));
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminApproved') });
+
+        console.info('[INFO - ModerationService.handleApproval]', {
+            action: 'APPROVED',
+            postId,
+            postTitle: post.title,
+            admin: { id: query.from.id, username: query.from.username },
+            author: { id: post.userId, username: postAuthor.userName, firstName: postAuthor.firstName }
+        });
     }
 
     private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
@@ -117,6 +125,16 @@ export class ModerationService {
         } else {
             this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postRejected'));
         }
+
+        const actionLabel = reason ? 'REJECTED_WITH_REASON' : 'REJECTED_WITHOUT_REASON';
+        console.info('[INFO - ModerationService.handleRejection]', {
+            action: actionLabel,
+            postId,
+            postTitle: post.title,
+            reason: reason || 'N/A',
+            admin: { id: query.from.id, username: query.from.username },
+            author: { id: post.userId, username: postAuthor.userName, firstName: postAuthor.firstName }
+        });
     }
 
     async askRejectReason(query: TelegramBot.CallbackQuery): Promise<string | null> {

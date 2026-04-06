@@ -26,9 +26,15 @@ export class MyPostsService {
         return map[status] ?? status;
     }
 
-    private buildPostsMessage(posts: any[], locale: string): { text: string; buttons: TelegramBot.InlineKeyboardButton[][] } {
+    private buildSummaryMessage(posts: any[], locale: string): { text: string; buttons: TelegramBot.InlineKeyboardButton[][] } {
         let text = localeService.t(locale, 'myPostsTitle') + "\n\n";
-        const buttons: TelegramBot.InlineKeyboardButton[][] = [];
+
+        const hasRejected = posts.some(p => p.status === 'rejected');
+        const hasSold = posts.some(p => p.status === 'sold');
+
+        const buttons: TelegramBot.InlineKeyboardButton[][] = [[]];
+        if (hasRejected) buttons[0].push({ text: localeService.t(locale, 'clearRejectedButton'), callback_data: 'clear_rejected' });
+        if (hasSold) buttons[0].push({ text: localeService.t(locale, 'clearSoldButton'), callback_data: 'clear_sold' });
 
         for (let i = 0; i < posts.length; i++) {
             const post = posts[i];
@@ -40,13 +46,7 @@ export class MyPostsService {
                 const used = post.dailyBumpCount || 0;
                 const limit = this.config.dailyBumpLimit;
                 text += `  |  ${localeService.t(locale, 'bumpsUsed')}: ${used}/${limit}`;
-                const tag = i === 0 ? ` [${localeService.t(locale, 'latestPostTag')}]` : "";
-                buttons.push([
-                    { text: `${localeService.t(locale, 'markSoldButton')} ${post.title}${tag}`, callback_data: `sold_${post._id}` },
-                    { text: `${localeService.t(locale, 'bumpButton')} ${post.title}${tag}`, callback_data: `bump_${post._id}` },
-                ]);
             }
-
             text += "\n";
         }
 
@@ -64,12 +64,39 @@ export class MyPostsService {
             return;
         }
 
-        const { text, buttons } = this.buildPostsMessage(posts, locale);
+        const { text, buttons } = this.buildSummaryMessage(posts, locale);
 
         await this.bot.sendMessage(msg.chat.id, text, {
             parse_mode: "HTML",
             reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
         });
+
+        // Show full details for approved posts
+        for (const post of posts) {
+            if (post.status === "approved") {
+                await this.sendApprovedPostDetail(msg.chat.id, post, locale);
+            }
+        }
+    }
+
+    private async sendApprovedPostDetail(chatId: number, post: any, locale: string): Promise<void> {
+        const postText = this.postService.formatPostText({
+            ...post,
+            userId: Number(post.userId),
+        });
+
+        const buttons = [[
+            { text: localeService.t(locale, 'markSoldButton'), callback_data: `sold_${post._id}` },
+            { text: localeService.t(locale, 'bumpButton'), callback_data: `bump_${post._id}` },
+        ]];
+
+        if (post.media && post.media.length > 0) {
+            const group = (this.postService as any).mediaService.buildMediaGroup(post.media, postText);
+            await this.bot.sendMediaGroup(chatId, group);
+            await this.bot.sendMessage(chatId, "👇", { reply_markup: { inline_keyboard: buttons } });
+        } else {
+            await this.bot.sendMessage(chatId, postText, { parse_mode: "HTML", reply_markup: { inline_keyboard: buttons } });
+        }
     }
 
     private async refreshMessage(query: TelegramBot.CallbackQuery): Promise<void> {
@@ -78,7 +105,7 @@ export class MyPostsService {
         const user = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user);
         const posts = await postRepository.findByUserId(String(query.from.id));
-        const { text, buttons } = this.buildPostsMessage(posts, locale);
+        const { text, buttons } = this.buildSummaryMessage(posts, locale);
 
         await this.bot.editMessageText(text, {
             chat_id: query.message.chat.id,
@@ -86,6 +113,24 @@ export class MyPostsService {
             parse_mode: "HTML",
             reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
         });
+    }
+
+    async handleClearStatus(query: TelegramBot.CallbackQuery, status: string): Promise<void> {
+        const userId = String(query.from.id);
+        const user = await userRepository.findByUserId(userId);
+        const locale = localeService.resolveUserLocale(user);
+
+        const posts = await postRepository.findByUserId(userId);
+        const toDelete = posts.filter(p => p.status === status);
+
+        for (const post of toDelete) {
+            await postRepository.deleteById(String(post._id));
+        }
+
+        const successKey = status === 'rejected' ? 'clearRejectedSuccess' : 'clearSoldSuccess';
+        await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, successKey) });
+
+        await this.refreshMessage(query);
     }
 
     async handleSoldCallback(query: TelegramBot.CallbackQuery): Promise<void> {

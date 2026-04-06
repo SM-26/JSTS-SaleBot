@@ -73,6 +73,7 @@ export class BotController {
                 if (success) {
                     synced++;
                 } else {
+                    console.warn(`[WARN - syncSoldPosts] Failed to sync sold status for post ${post._id}. Clearing approvedMessageId.`);
                     await postRepository.setApprovedMessageId(String(post._id), null);
                 }
             }
@@ -90,7 +91,7 @@ export class BotController {
     }
 
     async HandleStart(msg: TelegramBot.Message): Promise<void> {
-        console.info('[INFO - HandleStart]', { userId: msg.from?.id, chatId: msg.chat.id });
+        console.info('[INFO - HandleStart] session active', { userId: msg.from?.id, chatId: msg.chat.id });
         const session = this.getSession(msg.from!.id);
 
         try {
@@ -109,6 +110,7 @@ export class BotController {
 
             if (media.length < this.config.minimumMedia) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));
+                console.info('[INFO - HandleStart] session idle (insufficient media)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
             }
@@ -132,6 +134,7 @@ export class BotController {
             const confirmed = await this.inputService.confirmAction(msg, locale);
             if (!confirmed) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCancelled'));
+                console.info('[INFO - HandleStart] session idle (user cancelled)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
             }
@@ -153,11 +156,13 @@ export class BotController {
             }
 
             this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCreated'));
+            console.info('[INFO - HandleStart] session idle (success)', { userId: msg.from?.id });
             session.isIdle = true;
 
         } catch (err) {
             console.error("[ERROR - HandleStart] ", (err as Error).message);
             this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
+            console.info('[INFO - HandleStart] session idle (error)', { userId: msg.from?.id });
             session.isIdle = true;
         }
     }
@@ -187,6 +192,7 @@ export class BotController {
             lines.push("");
             lines.push(localeService.t(locale, 'helpAdminSection'));
             lines.push(localeService.t(locale, 'helpConfig'));
+            lines.push(localeService.t(locale, 'helpActiveUsers'));
             lines.push(localeService.t(locale, 'helpPending'));
             lines.push(localeService.t(locale, 'helpClearPending'));
             lines.push(localeService.t(locale, 'helpTest'));
@@ -196,6 +202,48 @@ export class BotController {
             parse_mode: "HTML",
             message_thread_id: msg.message_thread_id
         });
+    }
+
+    async handleActiveUsers(msg: TelegramBot.Message): Promise<void> {
+        console.debug('[DEBUG - handleActiveUsers] Admin command triggered', { adminId: msg.from?.id });
+        try {
+            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
+            if (!isAdmin) {
+                console.warn('[WARN - handleActiveUsers] Unauthorized access attempt detected', { userId: msg.from?.id });
+                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
+                return;
+            }
+
+            const user = await userRepository.findByUserId(String(msg.from!.id));
+            const locale = localeService.resolveUserLocale(user);
+
+            const activeUsers: string[] = [];
+            for (const [userId, session] of this.sessions.entries()) {
+                if (!session.isIdle) {
+                    const activeUser = await userRepository.findByUserId(String(userId));
+                    if (activeUser) {
+                        const username = activeUser.userName ? `@${activeUser.userName}` : 'N/A';
+                        const firstName = activeUser.firstName || 'N/A';
+                        const lastName = (activeUser as any).lastName || '';
+                        const fullName = `${firstName} ${lastName}`.trim();
+                        activeUsers.push(`• <code>${userId}</code> | ${username} | ${fullName}`);
+                    }
+                }
+            }
+
+            if (activeUsers.length === 0) {
+                console.info('[INFO - handleActiveUsers] Command executed, but no active users found.');
+                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminActiveUsersEmpty'));
+                return;
+            }
+
+            console.info(`[INFO - handleActiveUsers] Reporting ${activeUsers.length} active user(s) to admin ${msg.from?.id}`);
+            const text = `${localeService.t(locale, 'adminActiveUsersTitle')}\n\n${activeUsers.join('\n')}`;
+            await this.bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
+        } catch (err) {
+            console.error('[CRITICAL - handleActiveUsers] System failed to generate active users list', (err as Error).message);
+            this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
+        }
     }
 
     async handleLang(msg: TelegramBot.Message): Promise<void> {
@@ -274,6 +322,10 @@ export class BotController {
             if (!isPrivate(msg)) return;
             this.adminService.handleConfig(msg, match?.[1] ?? "");
         });
+        this.bot.onText(/\/activeUsers/, (msg) => {
+            if (!isPrivate(msg)) return;
+            this.handleActiveUsers(msg);
+        });
         this.bot.onText(/\/pending/, (msg) => this.pendingService.handlePending(msg));
         this.bot.onText(/\/clearpending/, (msg) => {
             if (!isPrivate(msg)) return;
@@ -329,6 +381,16 @@ export class BotController {
 
                 if (query.data.startsWith("approve_") || query.data.startsWith("reject_")) {
                     await this.moderationService.handleCallback(query);
+                    return;
+                }
+
+                if (query.data === "clear_rejected") {
+                    await this.myPostsService.handleClearStatus(query, "rejected");
+                    return;
+                }
+
+                if (query.data === "clear_sold") {
+                    await this.myPostsService.handleClearStatus(query, "sold");
                     return;
                 }
 

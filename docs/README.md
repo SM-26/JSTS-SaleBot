@@ -69,6 +69,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | :--- | :--- |
 | `/pending` | View a list of posts waiting for approval with inline Approve/Reject buttons. |
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
+| `/activeUsers` | List users currently in the process of creating a post. |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
 

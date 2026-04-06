@@ -131,6 +131,11 @@ export class PostService {
             return true;
         } catch (err) {
             const errorMessage = (err as Error).message;
+            if (errorMessage.includes("message to edit not found")) {
+                console.warn("[WARN - markSoldInGroup]", `Message with ID ${approvedMessageId} not found in group ${approvedGroupId}. Clearing approvedMessageId reference.`);
+                return false; // Message not found, so we can't mark it as sold. Let the caller clear the ID.
+            }
+            // Existing logic for "message is not modified"
             if (errorMessage.includes("message is not modified")) {
                 return true;
             }

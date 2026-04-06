@@ -141,7 +141,7 @@ function runCheck() {
         const missing = sortedFaqKeys.filter(k => !currentKeys.includes(k));
 
         if (missing.length > 0) {
-            console.error(`  [ERROR] FAQ Language '${lang}' is missing IDs: ${missing.join(", ")}`);
+            console.warn(`  [WARN] FAQ Language '${lang}' is missing IDs: ${missing.join(", ")}`);
             hasError = true;
         }
     }
