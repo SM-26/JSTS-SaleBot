@@ -332,7 +332,7 @@ export class BotController {
             if (!isPrivate(msg)) return;
             this.pendingService.handleClearPending(msg);
         });
-        this.bot.onText(/\/broadcast(.*)/, (msg, match) => {
+        this.bot.onText(/\/broadcast([\s\S]*)/, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleBroadcast(msg, match?.[1] ?? "");
         });

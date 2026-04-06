@@ -9,6 +9,7 @@ export interface BotConfig {
     approvedGroupId: number;
     moderationTopicId: number;
     approvedTopicId: number;
+    broadcastTopicId?: number | null;
     timeOut: number;
     validatePrice: boolean;
     minimumMedia: number;

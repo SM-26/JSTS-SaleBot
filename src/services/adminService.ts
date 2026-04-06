@@ -104,7 +104,7 @@ export class AdminService {
         }
 
         const approvedGroupId = this.config.approvedGroupId;
-        const broadcastTopicId = (this.config as any).broadcastTopicId;
+        const broadcastTopicId = this.config.broadcastTopicId;
 
         // Setup options once for both scenarios. 
         // We use 'any' for options to safely handle the dynamic addition of message_thread_id
@@ -120,12 +120,18 @@ export class AdminService {
         try {
             // Scenario 1: Admin replied to a message
             if (msg.reply_to_message) {
-                await this.bot.copyMessage(
-                    approvedGroupId,
-                    msg.chat.id,
-                    msg.reply_to_message.message_id,
-                    options
-                );
+                if (msg.reply_to_message.text) {
+                    // For text messages, sendMessage ensures the text is parsed as HTML
+                    await this.bot.sendMessage(approvedGroupId, msg.reply_to_message.text, options);
+                } else {
+                    // For media, copyMessage supports parse_mode for the caption
+                    await this.bot.copyMessage(
+                        approvedGroupId,
+                        msg.chat.id,
+                        msg.reply_to_message.message_id,
+                        options
+                    );
+                }
             }
             // Scenario 2: Admin typed a message after /broadcast
             else if (args.trim()) {
