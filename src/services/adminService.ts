@@ -143,7 +143,15 @@ export class AdminService {
                 type: msg.reply_to_message ? 'copy' : 'text'
             });
         } catch (err) {
-            console.error("[ERROR - AdminService.handleBroadcast]", (err as Error).message);
+            console.error("[ERROR - AdminService.handleBroadcast]", {
+                error: (err as Error).message,
+                stack: (err as Error).stack,
+                sentParams: {
+                    approvedGroupId: `${approvedGroupId} (${typeof approvedGroupId})`,
+                    configTopicId: `${this.config.approvedTopicId} (${typeof this.config.approvedTopicId})`,
+                    optionsThreadId: `${(options as any).message_thread_id} (${typeof (options as any).message_thread_id})`
+                }
+            });
             await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'generalError'));
         }
     }
