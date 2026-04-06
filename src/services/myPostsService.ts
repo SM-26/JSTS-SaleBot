@@ -74,15 +74,21 @@ export class MyPostsService {
         // Show full details for approved posts
         for (const post of posts) {
             if (post.status === "approved") {
-                await this.sendApprovedPostDetail(msg.chat.id, post, locale);
+                await this.sendApprovedPostDetail(msg.chat.id, post, user, locale);
             }
         }
     }
 
-    private async sendApprovedPostDetail(chatId: number, post: any, locale: string): Promise<void> {
+    private async sendApprovedPostDetail(chatId: number, post: any, user: any, locale: string): Promise<void> {
         const postText = this.postService.formatPostText({
-            ...post,
+            title: post.title,
+            description: post.description,
+            price: post.price,
+            location: post.location,
+            media: post.media,
             userId: Number(post.userId),
+            username: user?.userName || undefined,
+            firstName: user?.firstName || "User",
         });
 
         const buttons = [[
