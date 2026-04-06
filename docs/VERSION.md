@@ -12,7 +12,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 > sometime a bug fix will not trigger a version bump.
 
 ## Current Version
-0.1.1
+0.1.2
 
 ## Changelog
 

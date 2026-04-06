@@ -1,6 +1,6 @@
 {
   "name": "sales-bot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "main": "dist/bot.js",
   "description": "JSTS-SaleBot implementation",
   "scripts": {
