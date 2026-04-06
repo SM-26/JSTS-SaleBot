@@ -14,6 +14,10 @@ class PostRepository {
         return Post.findById(postId);
     }
 
+    async findByApprovedMessageId(approvedMessageId: number) {
+        return Post.findOne({ approvedMessageId }).exec();
+    }
+
     updateStatus(postId: string, status: IPost["status"]) {
         return Post.findByIdAndUpdate(postId, { status }, { returnDocument: 'after' });
     }

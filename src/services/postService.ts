@@ -2,6 +2,8 @@ import TelegramBot from "node-telegram-bot-api";
 import { BotConfig, MediaItem } from "../types";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
+import postRepository from "../repositories/postRepository";
+import userRepository from "../repositories/userRepository";
 
 export interface PostData {
     title: string;
@@ -142,6 +144,33 @@ export class PostService {
 
             console.error("[ERROR - markSoldInGroup]", errorMessage);
             return false;
+        }
+    }
+
+    async handlePublicReply(msg: TelegramBot.Message): Promise<void> {
+        // 1. Verify this is a reply in the approved channel
+        if (!msg.reply_to_message || msg.chat.id !== this.config.approvedGroupId) return;
+
+        // 2. Find the post associated with the message being replied to
+        // Note: You need to implement findByApprovedMessageId in your postRepository
+        const post = await postRepository.findByApprovedMessageId(msg.reply_to_message.message_id);
+
+        if (post) {
+            const author = await userRepository.findByUserId(post.userId);
+            const locale = localeService.resolveUserLocale(author);
+
+            // 3. Notify the author
+            await this.bot.sendMessage(Number(post.userId),
+                `💬 <b>${localeService.t(locale, 'newReplyNotification')}</b>\n` +
+                `Post: <i>${post.title}</i>\n` +
+                `From: ${this.formatUserMention(msg.from!.id, msg.from!.username, msg.from!.first_name)}`,
+                { parse_mode: "HTML" }
+            );
+
+            // 4. Forward the actual reply so the seller sees the content
+            await this.bot.forwardMessage(Number(post.userId), msg.chat.id, msg.message_id);
+
+            console.info('[INFO - PostService.handlePublicReply]', { postId: post._id, authorId: post.userId, buyerId: msg.from?.id });
         }
     }
 }

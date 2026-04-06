@@ -451,7 +451,13 @@ export class BotController {
                 return;
             }
 
-            // 2. Handle Custom Donation Amount
+            // 2. Handle Replies in the Approved Group (Buyer to Seller communication)
+            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message) {
+                await this.postService.handlePublicReply(msg);
+                return;
+            }
+
+            // 3. Handle Custom Donation Amount
             if (msg.from) {
                 const session = this.getSession(msg.from.id);
                 if (session.awaitingDonation && msg.text) {
