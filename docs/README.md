@@ -64,15 +64,18 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/donate` | Support the bot by donating Telegram Stars. |
 | `/help` | Show the list of available commands. |
 
-
-### 🛡️ Admin Commands
+### 🛡️ Moderator Commands
 | Command | Description |
 | :--- | :--- |
 | `/pending` | View a list of posts waiting for approval with inline Approve/Reject buttons. |
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
+| `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
+
+### ⚙️ Admin Commands
+| Command | Description |
+| :--- | :--- |
 | `/promote` | Increase a user's authorization level (e.g., User to Moderator, Moderator to Admin). |
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
-| `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
 | `/activeUsers` | List users currently in the process of creating a post. |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/test` | Run built-in test scenarios to verify bot functionality. |

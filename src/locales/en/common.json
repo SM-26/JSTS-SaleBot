@@ -48,6 +48,7 @@
     "enterMedia": "Please send photos or videos. Press the button when you're done.",
     "enterPrice": "Please enter a price:",
     "generalError": "An error occurred. Please try again later.",
+    "helpModSection": "<b>Moderator Commands</b>",
     "helpAdminSection": "<b>Admin Commands</b>",
     "helpActiveUsers": "/activeUsers - List users currently creating a post",
     "helpClearPending": "/clearpending - Expire all pending posts",

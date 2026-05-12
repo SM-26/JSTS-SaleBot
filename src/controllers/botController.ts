@@ -194,6 +194,7 @@ export class BotController {
 
         if (authLevel >= AuthLevel.MOD) {
             lines.push("");
+            lines.push(localeService.t(locale, 'helpModSection'));
             lines.push(localeService.t(locale, 'helpPending'));
             lines.push(localeService.t(locale, 'helpClearPending'));
             lines.push(localeService.t(locale, 'helpAuth'));

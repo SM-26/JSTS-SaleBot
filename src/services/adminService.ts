@@ -20,6 +20,10 @@ export class AdminService {
         return this.config.lang;
     }
 
+    /**
+     * Handle /config command.
+     * Access: ADMIN (Level 2)
+     */
     async handleConfig(msg: TelegramBot.Message, args: string): Promise<void> {
         const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
@@ -95,6 +99,10 @@ export class AdminService {
         );
     }
 
+    /**
+     * Handle /broadcast command.
+     * Access: ADMIN (Level 2)
+     */
     async handleBroadcast(msg: TelegramBot.Message, args: string): Promise<void> {
         const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
@@ -163,6 +171,10 @@ export class AdminService {
         }
     }
 
+    /**
+     * Handle /promote command.
+     * Access: ADMIN (Level 2)
+     */
     async handlePromote(msg: TelegramBot.Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
@@ -211,6 +223,10 @@ export class AdminService {
         );
     }
 
+    /**
+     * Handle /demote command.
+     * Access: ADMIN (Level 2)
+     */
     async handleDemote(msg: TelegramBot.Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
@@ -251,6 +267,10 @@ export class AdminService {
         }
     }
 
+    /**
+     * Handle /auth command.
+     * Access: MOD (Level 1) or ADMIN (Level 2)
+     */
     async handleAuth(msg: TelegramBot.Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
