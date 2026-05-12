@@ -1,11 +1,12 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { AuthLevel } from "../types";
 
 export interface IUser extends Document {
     userId: string;
     firstName: string | null;
     lastName: string | null;
     userName: string | null;
-    isAdmin: boolean;
+    authLevel: AuthLevel;
     languageCode?: string;
     preferredLocale?: string;
 }
@@ -16,7 +17,12 @@ const userSchema = new Schema<IUser>(
         firstName: { type: String, default: null },
         lastName: { type: String, default: null },
         userName: { type: String, default: null },
-        isAdmin: { type: Boolean, default: false },
+        authLevel: {
+            type: Number,
+            enum: [AuthLevel.USER, AuthLevel.MOD, AuthLevel.ADMIN],
+            default: AuthLevel.USER,
+            required: true,
+        },
         languageCode: { type: String, default: null },
         preferredLocale: { type: String, default: null },
     },

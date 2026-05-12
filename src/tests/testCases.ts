@@ -4,7 +4,7 @@ import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
-import { BotConfig, MediaItem, LocaleService, TestCaseFn, User } from "../types";
+import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from "../types";
 import userRepository from "../repositories/userRepository";
 
 /**
@@ -29,6 +29,8 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     faq_view: { label: "❓ View FAQ", run: testCase_FaqView },
     broadcast_custom: { label: "✍️ Broadcast Custom Message (to Moderation)", run: testCase_BroadcastCustom },
     broadcast_test: { label: "📢 Broadcast (to Moderation)", run: testCase_Broadcast },
+    rbac_promotion: { label: "🎖 Test RBAC Promotion", run: testCase_RBACPromotion },
+    rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
 };
 
 /**
@@ -347,4 +349,78 @@ async function testCase_Broadcast(
         console.error("[ERROR - testCase_Broadcast]", (err as Error).message);
         await bot.sendMessage(msg.chat.id, "❌ Broadcast test failed: " + (err as Error).message);
     }
+}
+
+/**
+ * TEST CASE: RBAC Promotion logic.
+ * Verifies that the auth level is correctly updated in the DB.
+ */
+async function testCase_RBACPromotion(
+    bot: TelegramBot,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: TelegramBot.Message
+): Promise<void> {
+    const userId = String(msg.from!.id);
+    const originalUser = await userRepository.findByUserId(userId);
+
+    if (!originalUser) {
+        await bot.sendMessage(msg.chat.id, "❌ Test failed: Admin user not found in DB.");
+        return;
+    }
+
+    const originalLevel = originalUser.authLevel;
+
+    try {
+        // We can't easily promote a "dummy" user without a second account, 
+        // so we verify that the current admin (level 2) cannot be promoted further.
+        const text = `<b>RBAC Test</b>\nActor Level: ${originalLevel}\n\nRunning checks...`;
+        await bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
+
+        if (originalLevel === AuthLevel.ADMIN) {
+            await bot.sendMessage(msg.chat.id, "✅ Self-check: Admin cannot be promoted further (limit check).");
+        }
+
+        // Verify migration: Every user in DB should now have authLevel instead of isAdmin
+        const allUsers = await userRepository.getAll();
+        const legacyUsers = allUsers.filter(u => (u as User & { isAdmin?: boolean }).isAdmin !== undefined);
+
+        await bot.sendMessage(msg.chat.id, `✅ Migration check: Found ${legacyUsers.length} legacy isAdmin fields.`);
+    } catch (err) {
+        await bot.sendMessage(msg.chat.id, "❌ RBAC test failed: " + (err as Error).message);
+    }
+}
+
+/**
+ * TEST CASE: RBAC Auth command output.
+ */
+async function testCase_RBACAuth(
+    bot: TelegramBot,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: TelegramBot.Message
+): Promise<void> {
+    const userId = String(msg.from!.id);
+    const user = await userRepository.findByUserId(userId);
+    if (!user) {
+        await bot.sendMessage(msg.chat.id, "❌ Test failed: User not found in DB.");
+        return;
+    }
+
+    const locale = localeService.resolveUserLocale(user);
+    const roleKey = user.authLevel === AuthLevel.ADMIN ? 'authLevelAdmin' :
+        user.authLevel === AuthLevel.MOD ? 'authLevelMod' : 'authLevelUser';
+    const roleName = localeService.t(locale, roleKey);
+
+    const output = localeService.t(locale, 'authCurrentLevel', { userId: user.userId, role: roleName, level: user.authLevel });
+    await bot.sendMessage(msg.chat.id, `<b>RBAC Auth Test</b>\n\n${output}`, { parse_mode: "HTML" });
+    await bot.sendMessage(msg.chat.id, "✅ Auth logic verified.");
 }

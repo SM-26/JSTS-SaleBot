@@ -9,6 +9,12 @@ export interface MediaItem {
     type: "photo" | "video";
 }
 
+export enum AuthLevel {
+    USER = 0,
+    MOD = 1,
+    ADMIN = 2
+}
+
 export interface BotConfig {
     lang: string;
     moderationGroupId: number;
@@ -85,6 +91,11 @@ export interface LocaleStrings {
     helpClearPending: string;
     helpTest: string;
     helpDonate: string;
+    helpPromote: string;
+    promoteSuccess: string;
+    promoteAlreadyAtLevel: string;
+    promoteLimitReached: string;
+    userNotFound: string;
     donateTitle: string;
     donateChooseAmount: string;
     donateOther: string;
@@ -144,7 +155,7 @@ export interface User {
     lastName?: string | null;
     preferredLocale?: string;
     languageCode?: string;
-    isAdmin?: boolean;
+    authLevel: AuthLevel;
 }
 
 export type TestCaseFn = (

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+0.1.6 - Completed RBAC System
+  - Replaced `isAdmin` boolean with `authLevel` (0: User, 1: Moderator, 2: Admin) in the user model.
+  - Implemented automatic migration of existing users from `isAdmin` to `authLevel`.
+  - Added `/promote` command for admins to increase a user's role by one level.
+  - Added `/demote` command for admins to decrease role level with zero-admin safety warnings.
+  - Added `/auth` command for moderators and admins to view role details.
+  - Centralized authorization checks using a `hasAuthLevel` helper.
+  - Updated `/help` command to display commands based on the user's role.
+  - Added strict audit logging for role changes and failed authorization attempts.
 0.1.5 - Added Admin Broadcast Command.
   - New command `/broadcast` for admins to send messages to the approved channel, either by replying to an existing message or by typing a new message.
   - Admins can also use a test case to test a custom broadcast message, think of it as preview broadcast in the moderation group.

@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { BotConfig } from "../types";
 import userRepository from "../repositories/userRepository";
+import { AuthLevel, User } from "../types";
+import { userService } from "./userService";
 import { localeService } from "./localeService";
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -19,11 +21,11 @@ export class AdminService {
     }
 
     async handleConfig(msg: TelegramBot.Message, args: string): Promise<void> {
-        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
 
-        const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-        if (!isAdmin) {
+        const isAuthorized = await userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN);
+        if (!isAuthorized) {
             await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
             return;
         }
@@ -94,11 +96,11 @@ export class AdminService {
     }
 
     async handleBroadcast(msg: TelegramBot.Message, args: string): Promise<void> {
-        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
 
-        const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-        if (!isAdmin) {
+        const isAuthorized = await userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN);
+        if (!isAuthorized) {
             await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
             return;
         }
@@ -159,5 +161,173 @@ export class AdminService {
             });
             await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'generalError'));
         }
+    }
+
+    async handlePromote(msg: TelegramBot.Message, args: string): Promise<void> {
+        const actorId = String(msg.from!.id);
+        const actor = await this._getUser(msg.from!.id);
+        const locale = localeService.resolveUserLocale(actor);
+
+        const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.ADMIN);
+        if (!isAuthorized) {
+            console.warn(`[WARN - AdminService.handlePromote] Unauthorized attempt by user ${actorId}`);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            return;
+        }
+
+        const targetUser = await this._resolveTargetUser(msg, args);
+
+        if (!targetUser) {
+            console.warn(`[WARN - AdminService.handlePromote] Target user not found for actor ${actorId} with args: ${args}`);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            return;
+        }
+
+        const targetId = String(targetUser.userId);
+
+        if (targetId === actorId) {
+            console.warn(`[WARN - AdminService.handlePromote] Admin ${actorId} attempted to promote themselves.`);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'promoteAlreadyAtLevel'));
+            return;
+        }
+
+        const currentAuthLevel = targetUser.authLevel;
+        if (currentAuthLevel >= AuthLevel.ADMIN) {
+            console.warn(`[WARN - handlePromote] Target user ${targetId} is already ADMIN. Actor: ${actorId}`);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'promoteLimitReached'));
+            return;
+        }
+
+        const newAuthLevel = currentAuthLevel + 1;
+        await userRepository.updateUser(targetId, { authLevel: newAuthLevel });
+
+        const timestamp = new Date().toISOString();
+        console.info(`[INFO - handlePromote] Action: PROMOTE | Actor: ${actorId} | Target: ${targetId} | Old Level: ${currentAuthLevel} | New Level: ${newAuthLevel} | Time: ${timestamp}`);
+
+        await this.bot.sendMessage(
+            msg.chat.id,
+            localeService.t(locale, 'promoteSuccess', { userId: targetId, level: newAuthLevel }),
+            { parse_mode: "HTML" }
+        );
+    }
+
+    async handleDemote(msg: TelegramBot.Message, args: string): Promise<void> {
+        const actorId = String(msg.from!.id);
+        const actor = await this._getUser(msg.from!.id);
+        const locale = localeService.resolveUserLocale(actor);
+
+        const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.ADMIN);
+        if (!isAuthorized) {
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            return;
+        }
+
+        const targetUser = await this._resolveTargetUser(msg, args);
+        if (!targetUser) {
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            return;
+        }
+
+        const targetId = String(targetUser.userId);
+        if (targetUser.authLevel <= AuthLevel.USER) {
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteAlreadyAtLevel'));
+            return;
+        }
+
+        const oldLevel = targetUser.authLevel;
+        const newLevel = oldLevel - 1;
+        await userRepository.updateUser(targetId, { authLevel: newLevel });
+
+        const timestamp = new Date().toISOString();
+        console.info(`[INFO - handleDemote] Action: DEMOTE | Actor: ${actorId} | Target: ${targetId} | Old Level: ${oldLevel} | New Level: ${newLevel} | Time: ${timestamp}`);
+
+        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteSuccess', { userId: targetId, level: newLevel }), { parse_mode: "HTML" });
+
+        if (oldLevel === AuthLevel.ADMIN) {
+            const adminCount = await userRepository.countByAuthLevel(AuthLevel.ADMIN);
+            if (adminCount === 0) {
+                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteAdminWarning'), { parse_mode: "HTML" });
+            }
+        }
+    }
+
+    async handleAuth(msg: TelegramBot.Message, args: string): Promise<void> {
+        const actorId = String(msg.from!.id);
+        const actor = await this._getUser(msg.from!.id);
+        const locale = localeService.resolveUserLocale(actor);
+
+        // Auth command available to MOD and ADMIN
+        const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.MOD);
+        if (!isAuthorized) {
+            console.warn(`[WARN - handleAuth] Unauthorized attempt by user ${actorId}`);
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            return;
+        }
+
+        const targetUser: User | null = (!args.trim() && !msg.reply_to_message && !msg.forward_from)
+            ? actor
+            : await this._resolveTargetUser(msg, args);
+
+        if (!targetUser) {
+            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            return;
+        }
+
+        const roleLabelKey = targetUser.authLevel === AuthLevel.ADMIN ? 'authLevelAdmin' :
+            targetUser.authLevel === AuthLevel.MOD ? 'authLevelMod' : 'authLevelUser';
+        const roleLabel = localeService.t(locale, roleLabelKey);
+
+        await this.bot.sendMessage(
+            msg.chat.id,
+            localeService.t(locale, 'authCurrentLevel', { userId: targetUser.userId, role: roleLabel, level: targetUser.authLevel }),
+            { parse_mode: "HTML" }
+        );
+    }
+
+    private async _resolveTargetUser(msg: TelegramBot.Message, args: string): Promise<User | null> {
+        let targetUserId: string | undefined;
+
+        // 1. Check for replied-to message
+        if (msg.reply_to_message?.from?.id) {
+            targetUserId = String(msg.reply_to_message.from.id);
+        }
+        // 2. Check for forwarded message (if Telegram provides sender metadata)
+        else if (msg.forward_from?.id) {
+            targetUserId = String(msg.forward_from.id);
+        }
+        // 3. Check for arguments (numeric ID or @username)
+        else if (args.trim()) {
+            const arg = args.trim();
+            // Numeric ID
+            if (!isNaN(Number(arg))) {
+                targetUserId = arg;
+            }
+            // @username
+            else if (arg.startsWith('@')) {
+                const username = arg.substring(1);
+                const userByUsername = await userRepository.findByUsername(username);
+                if (userByUsername) {
+                    return userByUsername;
+                }
+                console.warn(`[WARN - _resolveTargetUser] User not found by username: ${username}`);
+                return null;
+            }
+        }
+
+        if (targetUserId) {
+            return userRepository.findByUserId(targetUserId);
+        }
+
+        return null;
+    }
+
+    /**
+     * Helper to get user data, ensuring it exists in DB.
+     * @param userId
+     * @returns
+     */
+    private async _getUser(userId: number): Promise<User | null> {
+        await userService.ensureUser({ id: userId, first_name: 'Unknown', username: 'unknown' }); // Ensure user exists
+        return userRepository.findByUserId(String(userId));
     }
 }

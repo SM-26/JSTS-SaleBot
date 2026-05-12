@@ -15,6 +15,7 @@ import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
 import { localeService } from "../services/localeService";
+import { AuthLevel } from "../types";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -187,14 +188,22 @@ export class BotController {
             lines.push(localeService.t(locale, 'helpDonate'));
         }
 
-        const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-        if (isAdmin) {
+        const authLevel = user?.authLevel ?? AuthLevel.USER;
+
+        if (authLevel >= AuthLevel.MOD) {
+            lines.push("");
+            lines.push(localeService.t(locale, 'helpPending'));
+            lines.push(localeService.t(locale, 'helpClearPending'));
+            lines.push(localeService.t(locale, 'helpAuth'));
+        }
+
+        if (authLevel >= AuthLevel.ADMIN) {
             lines.push("");
             lines.push(localeService.t(locale, 'helpAdminSection'));
             lines.push(localeService.t(locale, 'helpConfig'));
             lines.push(localeService.t(locale, 'helpActiveUsers'));
-            lines.push(localeService.t(locale, 'helpPending'));
-            lines.push(localeService.t(locale, 'helpClearPending'));
+            lines.push(localeService.t(locale, 'helpPromote'));
+            lines.push(localeService.t(locale, 'helpDemote'));
             lines.push(localeService.t(locale, 'helpBroadcastTopic'));
             lines.push(localeService.t(locale, 'helpTest'));
         }
@@ -208,28 +217,28 @@ export class BotController {
     async handleActiveUsers(msg: TelegramBot.Message): Promise<void> {
         console.debug('[DEBUG - handleActiveUsers] Admin command triggered', { adminId: msg.from?.id });
         try {
-            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-            if (!isAdmin) {
+            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
+            const authLevel = user?.authLevel ?? AuthLevel.USER;
+            if (authLevel < AuthLevel.ADMIN) {
                 console.warn('[WARN - handleActiveUsers] Unauthorized access attempt detected', { userId: msg.from?.id });
                 this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
                 return;
             }
 
-            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
             const locale = localeService.resolveUserLocale(user);
 
+            const activeIds = Array.from(this.sessions.entries())
+                .filter(([, session]) => !session.isIdle)
+                .map(([userId]) => String(userId));
+
             const activeUsers: string[] = [];
-            for (const [userId, session] of this.sessions.entries()) {
-                if (!session.isIdle) {
-                    const activeUser: User | null = await userRepository.findByUserId(String(userId));
-                    if (activeUser) { //
-                        const username = activeUser.userName ? `@${activeUser.userName}` : 'N/A';
-                        const firstName = activeUser.firstName || 'N/A';
-                        const lastName = activeUser.lastName || '';
-                        const fullName = `${firstName} ${lastName}`.trim();
-                        activeUsers.push(`• <code>${userId}</code> | ${username} | ${fullName}`);
-                    }
-                }
+            const usersFromDb = await userRepository.findManyByIds(activeIds);
+            for (const activeUser of usersFromDb) {
+                const username = activeUser.userName ? `@${activeUser.userName}` : 'N/A';
+                const firstName = activeUser.firstName || 'N/A';
+                const lastName = activeUser.lastName || '';
+                const fullName = `${firstName} ${lastName}`.trim();
+                activeUsers.push(`• <code>${activeUser.userId}</code> | ${username} | ${fullName}`);
             }
 
             if (activeUsers.length === 0) {
@@ -327,19 +336,44 @@ export class BotController {
             if (!isPrivate(msg)) return;
             this.handleActiveUsers(msg);
         });
-        this.bot.onText(/\/pending/, (msg) => this.pendingService.handlePending(msg));
-        this.bot.onText(/\/clearpending/, (msg) => {
+        this.bot.onText(/\/pending/, async (msg) => {
+            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
+                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
+                return;
+            }
+            this.pendingService.handlePending(msg);
+        });
+        this.bot.onText(/\/clearpending/, async (msg) => {
             if (!isPrivate(msg)) return;
+            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
+                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
+                return;
+            }
             this.pendingService.handleClearPending(msg);
         });
         this.bot.onText(/\/broadcast([\s\S]*)/, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleBroadcast(msg, match?.[1] ?? "");
         });
+        this.bot.onText(/\/promote(.*)/, (msg, match) => {
+            if (!isPrivate(msg)) return;
+            this.adminService.handlePromote(msg, match?.[1] ?? "");
+        });
+        this.bot.onText(/\/demote(.*)/, (msg, match) => {
+            if (!isPrivate(msg)) return;
+            this.adminService.handleDemote(msg, match?.[1] ?? "");
+        });
+        this.bot.onText(/\/auth(.*)/, (msg, match) => {
+            if (!isPrivate(msg)) return;
+            this.adminService.handleAuth(msg, match?.[1] ?? "");
+        });
         this.bot.onText(/\/test/, async (msg) => {
             if (!isPrivate(msg)) return;
-            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-            if (!isAdmin) {
+            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
+            const authLevel = user?.authLevel ?? AuthLevel.USER;
+            if (authLevel < AuthLevel.ADMIN) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
                 return;
             }

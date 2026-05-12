@@ -1,7 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, Post, User } from "../types";
+import { AuthLevel, BotConfig, Post, User } from "../types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
+import { userService } from "./userService";
 import { PostService } from "./postService";
 import { localeService } from "./localeService";
 
@@ -31,8 +32,8 @@ export class ModerationService {
         try {
             console.debug('[DEBUG - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
 
-            const isAdmin = await userRepository.isAdmin(String(query.from.id));
-            if (!isAdmin) {
+            const isAuthorized = await userService.hasAuthLevel(String(query.from.id), AuthLevel.MOD);
+            if (!isAuthorized) {
                 this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'notAdmin'), show_alert: true });
                 return;
             }

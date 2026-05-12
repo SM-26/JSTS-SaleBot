@@ -23,6 +23,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Forum Topics** — Moderation and approved posts target specific group topics
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
+- **Role-Based Access Control (RBAC)** — Granular authorization with User, Moderator, and Admin roles, replacing simple `isAdmin` flags.
 
 ### 🌐 How Multi Localization Works
 
@@ -69,6 +70,9 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | :--- | :--- |
 | `/pending` | View a list of posts waiting for approval with inline Approve/Reject buttons. |
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
+| `/promote` | Increase a user's authorization level (e.g., User to Moderator, Moderator to Admin). |
+| `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
+| `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
 | `/activeUsers` | List users currently in the process of creating a post. |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
