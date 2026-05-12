@@ -7,8 +7,8 @@ export interface IUser extends Document {
     lastName: string | null;
     userName: string | null;
     authLevel: AuthLevel;
-    languageCode?: string;
-    preferredLocale?: string;
+    languageCode: string | null;
+    preferredLocale: string | null;
 }
 
 const userSchema = new Schema<IUser>(

@@ -46,7 +46,7 @@ class LocaleServiceImpl implements LocaleService {
                 // console.info('[INFO - LocaleService] resolved locale from preferredLocale', normalized);
                 return normalized;
             }
-            console.warn('[WARN - LocaleService] preferredLocale unsupported', user.preferredLocale);
+            console.warn(`[WARN - LocaleService] User ${user.userId} preferredLocale '${user.preferredLocale}' unsupported.`);
         }
         if (user?.languageCode) {
             const normalized = this.normalizeLocale(user.languageCode);
@@ -54,9 +54,9 @@ class LocaleServiceImpl implements LocaleService {
                 // console.info('[INFO - LocaleService] resolved locale from languageCode', normalized);
                 return normalized;
             }
-            console.warn('[WARN - LocaleService] languageCode unsupported', user.languageCode);
+            console.warn(`[WARN - LocaleService] User ${user.userId} languageCode '${user.languageCode}' unsupported.`);
         }
-        console.warn('[WARN - LocaleService] falling back to default locale', config.lang);
+        console.warn(`[WARN - LocaleService] Falling back to default locale '${config.lang}' for user ${user?.userId || 'unknown'} as no preferredLocale or languageCode provided.`);
         return config.lang;
     }
 
@@ -93,7 +93,7 @@ class LocaleServiceImpl implements LocaleService {
 
         if (params) {
             for (const [param, value] of Object.entries(params)) {
-                text = text.replace(new RegExp(`\\{${param}\\}`, 'g'), String(value));
+                text = text.split(`{${param}}`).join(String(value));
             }
         }
 
@@ -101,11 +101,18 @@ class LocaleServiceImpl implements LocaleService {
     }
 
     getFaqs(locale: string): Record<string, string> {
+        const cacheKey = `${locale}-faq`;
+        if (this.messagesCache.has(cacheKey)) {
+            return this.messagesCache.get(cacheKey)!;
+        }
+
         try {
             const filePath = path.join(this.localesDir, locale, 'faq.json');
             const content = fs.readFileSync(filePath, 'utf-8');
             const faqData = JSON.parse(content);
-            return faqData.nodes || {};
+            const nodes = faqData.nodes || {};
+            this.messagesCache.set(cacheKey, nodes);
+            return nodes;
         } catch (error) {
             console.error(`[ERROR - LocaleService] Failed to load FAQ for ${locale}:`, error);
             return {};

@@ -19,25 +19,27 @@ class UserRepository {
         // Check if the user exists to handle migration from isAdmin to authLevel
         const existingUser = await User.findOne({ userId }).exec();
 
-        if (existingUser && typeof (existingUser as UserType & { isAdmin?: boolean }).isAdmin === 'boolean' && existingUser.authLevel === undefined) {
-            // Migration logic: if isAdmin exists and authLevel doesn't, set authLevel
-            const isAdmin = (existingUser as UserType & { isAdmin?: boolean }).isAdmin;
-            existingUser.authLevel = isAdmin ? AuthLevel.ADMIN : AuthLevel.USER;
-            // Remove isAdmin field
-            await User.updateOne({ userId }, { $unset: { isAdmin: 1 }, $set: { authLevel: existingUser.authLevel } }).exec();
-            // Update existingUser object to reflect changes
-            existingUser.markModified('authLevel');
-            delete (existingUser as UserType & { isAdmin?: boolean }).isAdmin;
+        const update: any = {
+            $set: setData,
+            $setOnInsert: setOnInsert
+        };
+
+        // Since isAdmin is removed from the schema, we must use .get() to check for its presence in the DB.
+        const isAdminValue = existingUser?.get('isAdmin');
+        if (existingUser && typeof isAdminValue === 'boolean') {
+            const authLevel = isAdminValue ? AuthLevel.ADMIN : AuthLevel.USER;
+            update.$set.authLevel = authLevel;
+            update.$unset = { isAdmin: 1 };
         }
 
         return User.findOneAndUpdate(
             { userId },
-            { $set: setData, $setOnInsert: setOnInsert },
+            update,
             {
-                new: true, // Return the updated document
                 upsert: true,
                 returnDocument: 'after',
-                runValidators: true
+                runValidators: true,
+                strict: false
             }
         ).exec();
     }
@@ -54,8 +56,8 @@ class UserRepository {
             { userId },
             update,
             {
-                new: true, // Return the updated document
-                returnDocument: 'after'
+                returnDocument: 'after',
+                strict: false
             }
         ).exec();
     }

@@ -100,6 +100,7 @@ export class BotController {
 
             await this.userService.ensureUser(msg.from!);
             const user = await userRepository.findByUserId(String(msg.from!.id));
+            console.debug(`[DEBUG - HandleStart] Resolving locale for user: ${msg.from!.id} (lang_code: ${msg.from!.language_code}, pref: ${user?.preferredLocale})`);
             const locale = localeService.resolveUserLocale(user);
 
             // Collect post details
@@ -171,6 +172,7 @@ export class BotController {
     async showHelp(msg: TelegramBot.Message): Promise<void> {
         await this.userService.ensureUser(msg.from!);
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
+        console.debug(`[DEBUG - showHelp] Resolving locale for user: ${msg.from!.id}`);
         const locale = localeService.resolveUserLocale(user);
         const lines = [
             localeService.t(locale, 'helpTitle'),

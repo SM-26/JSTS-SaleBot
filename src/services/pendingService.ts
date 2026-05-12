@@ -1,7 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
-import { BotConfig } from "../types";
+import { AuthLevel, BotConfig } from "../types";
 import { PostService } from "./postService";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
@@ -17,6 +17,7 @@ export class PendingService {
     async handlePending(msg: TelegramBot.Message): Promise<void> {
         console.debug('[DEBUG - pendingService.handlePending]', { userId: msg.from?.id, name: msg.from?.username, chatId: msg.chat.id });
         const user = await userRepository.findByUserId(String(msg.from!.id));
+        console.debug(`[DEBUG - handlePending] Resolving locale for admin/mod: ${msg.from?.id}`);
         const locale = localeService.resolveUserLocale(user);
 
         const targetThreadId = msg.chat.id === this.config.moderationGroupId
@@ -29,8 +30,8 @@ export class PendingService {
         }
 
         try {
-            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-            if (!isAdmin) {
+            const isAuthorized = await userRepository.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
                 console.warn('[WARN - PendingService.handlePending] non-admin attempted access', { userId: msg.from?.id });
                 await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'), options);
                 return;
@@ -109,8 +110,8 @@ export class PendingService {
 
         try {
 
-            const isAdmin = await userRepository.isAdmin(String(msg.from!.id));
-            if (!isAdmin) {
+            const isAuthorized = await userRepository.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
                 await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
                 return;
             }

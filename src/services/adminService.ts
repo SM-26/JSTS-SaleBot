@@ -288,8 +288,12 @@ export class AdminService {
         let targetUserId: string | undefined;
 
         // 1. Check for replied-to message
-        if (msg.reply_to_message?.from?.id) {
-            targetUserId = String(msg.reply_to_message.from.id);
+        if (msg.reply_to_message) {
+            if (msg.reply_to_message.forward_from?.id) {
+                targetUserId = String(msg.reply_to_message.forward_from.id);
+            } else if (msg.reply_to_message.from?.id) {
+                targetUserId = String(msg.reply_to_message.from.id);
+            }
         }
         // 2. Check for forwarded message (if Telegram provides sender metadata)
         else if (msg.forward_from?.id) {
@@ -327,7 +331,11 @@ export class AdminService {
      * @returns
      */
     private async _getUser(userId: number): Promise<User | null> {
-        await userService.ensureUser({ id: userId, first_name: 'Unknown', username: 'unknown' }); // Ensure user exists
-        return userRepository.findByUserId(String(userId));
+        const existing = await userRepository.findByUserId(String(userId));
+        if (!existing) {
+            await userService.ensureUser({ id: userId, first_name: 'Unknown', username: 'unknown' });
+            return userRepository.findByUserId(String(userId));
+        }
+        return existing;
     }
 }

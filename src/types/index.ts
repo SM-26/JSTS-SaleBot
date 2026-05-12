@@ -153,8 +153,8 @@ export interface User {
     userName?: string | null;
     firstName: string | null;
     lastName?: string | null;
-    preferredLocale?: string;
-    languageCode?: string;
+    preferredLocale?: string | null;
+    languageCode?: string | null;
     authLevel: AuthLevel;
 }
 

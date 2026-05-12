@@ -172,6 +172,8 @@ npm run test         # Validates src/locales key completeness
 - **Check `session.isIdle`** before starting any new async input flow, and always reset it (including in `catch` blocks) to prevent users getting stuck.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
 - **Use `async/await`** with `try/catch` for all async operations, logging errors with a `[ERROR - <context>]` prefix to `console.error`.
+- **Avoid Conflicting Update Operators**: In MongoDB upsert operations (`findOneAndUpdate`), never include the same field path in both `$set` and `$setOnInsert`. This triggers a `ConflictingUpdateOperators` (Code 40) error.
+- **Defensive Metadata Updates**: When updating user profiles, only `$set` fields that have valid, non-empty values from Telegram. Avoid overwriting existing database records with placeholder strings (like "Unknown") used during internal service discovery.
 - **Preserve Docker targets** (`development`/`production`) when modifying the `dockerfile`.
 - **Update Documentation**: When implementing new features, always update `README.md` (Features list) and `CHANGELOG.md`.
 - **Add Tests**: When implementing new logic or features, add a relevant test case in `src/tests/testCases.ts` to verify the behavior.
