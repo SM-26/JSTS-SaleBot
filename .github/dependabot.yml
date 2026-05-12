@@ -7,7 +7,6 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      # Groups types with their core packages to avoid broken builds
       telegram-stack:
         patterns:
           - "node-telegram-bot-api"
@@ -15,12 +14,28 @@ updates:
       database:
         patterns:
           - "mongoose"
+          - "mongodb"
       development-tooling:
         patterns:
           - "typescript"
-          - "@types/node"
           - "ts-node"
           - "nodemon"
+          - "@types/*"
+          - "eslint*"
+          - "globals"
+          - "prettier*"
+        update-types:
+          - "minor"
+          - "patch"
+      environment:
+        patterns:
+          - "dotenv*"
+      other-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Maintain GitHub Actions
   - package-ecosystem: "github-actions"
