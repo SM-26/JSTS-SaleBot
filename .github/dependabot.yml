@@ -17,11 +17,12 @@ updates:
           - "mongodb"
       development-tooling:
         patterns:
-          - "typescript"
+          - "typescript*" # Captures typescript and typescript-eslint
           - "ts-node"
           - "nodemon"
           - "@types/*"
-          - "eslint*"
+          - "eslint*" # Captures eslint
+          - "@eslint/*" # Captures @eslint/js (New)
           - "globals"
           - "prettier*"
         update-types:

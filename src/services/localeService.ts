@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { LocaleService, BotConfig } from '../types/index.js';
+import { LocaleService, BotConfig, User } from '../types/index.js';
 
 const configPath = path.join(process.cwd(), 'config.json');
 const config: BotConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -36,7 +36,7 @@ class LocaleServiceImpl implements LocaleService {
         return this._availableLocales.includes(base) ? base : '';
     }
 
-    resolveUserLocale(user: any): string {
+    resolveUserLocale(user: User | null): string {
         // const userIdentifier = user?.userName || user?.userId || 'unknown';
         // console.debug('[DEBUG - LocaleService] resolveUserLocale called', { user: userIdentifier, preferredLocale: user?.preferredLocale, languageCode: user?.languageCode });
         // user.preferredLocale > user.languageCode normalized > config default
@@ -81,7 +81,7 @@ class LocaleServiceImpl implements LocaleService {
         }
     }
 
-    t(locale: string, key: string, params?: Record<string, any>): string {
+    t(locale: string, key: string, params?: Record<string, string | number | boolean>): string {
         // console.info('[INFO - LocaleService] translation requested', { locale, key });
         const messages = this.getMessages(locale);
         let text = messages[key];

@@ -1,3 +1,9 @@
+import TelegramBot from "node-telegram-bot-api";
+import { PostService } from "../services/postService";
+import { UserService } from "../services/userService";
+import { PaymentService } from "../services/paymentService";
+import { InputService } from "../services/inputService";
+
 export interface MediaItem {
     fileId: string;
     type: "photo" | "video";
@@ -102,10 +108,10 @@ export interface Locals {
 }
 
 export interface LocaleService {
-    resolveUserLocale(user: any): string;
+    resolveUserLocale(user: User | null): string;
     getMessages(locale: string, namespace?: string): Record<string, string>;
     getFaqs(locale: string): Record<string, string>;
-    t(locale: string, key: string, params?: Record<string, any>): string;
+    t(locale: string, key: string, params?: Record<string, string | number | boolean>): string;
     availableLocales: string[];
 }
 
@@ -113,3 +119,41 @@ export interface UserSession {
     isIdle: boolean;
     awaitingDonation?: boolean;
 }
+
+export interface Post {
+    _id: string | unknown;
+    userId: string;
+    title: string;
+    description: string;
+    price: string;
+    media: MediaItem[];
+    location: string;
+    createdAt: Date;
+    status: "pending" | "approved" | "rejected" | "sold";
+    moderationMessageId?: number | null;
+    approvedMessageId?: number | null;
+    dailyBumpCount?: number | null;
+    lastBumpAt?: Date | null;
+    rejectionReason?: string | null;
+}
+
+export interface User {
+    userId: string;
+    userName?: string | null;
+    firstName: string | null;
+    lastName?: string | null;
+    preferredLocale?: string;
+    languageCode?: string;
+    isAdmin?: boolean;
+}
+
+export type TestCaseFn = (
+    bot: TelegramBot,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: TelegramBot.Message
+) => Promise<void>;

@@ -20,7 +20,7 @@ export class PostService {
     constructor(
         private bot: TelegramBot,
         private config: BotConfig,
-        private mediaService: MediaService
+        public mediaService: MediaService
     ) { }
 
     private get lang() {
@@ -58,7 +58,7 @@ export class PostService {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
-        const options: any = {
+        const options: TelegramBot.SendMessageOptions = {
             parse_mode: "HTML",
             reply_markup: {
                 inline_keyboard: [[
@@ -73,8 +73,12 @@ export class PostService {
         }
 
         if (media.length > 0) {
+            const mediaGroupOptions: TelegramBot.SendMessageOptions = {};
+            if (moderationTopicId && Number(moderationTopicId) !== 1) {
+                mediaGroupOptions.message_thread_id = Number(moderationTopicId);
+            }
             const group = this.mediaService.buildMediaGroup(media, text);
-            const sentMsgs = await this.bot.sendMediaGroup(moderationGroupId, group, (moderationTopicId && Number(moderationTopicId) !== 1) ? { message_thread_id: Number(moderationTopicId) } as any : {});
+            const sentMsgs = await this.bot.sendMediaGroup(moderationGroupId, group, mediaGroupOptions);
             await this.bot.sendMessage(moderationGroupId, localeService.t(this.config.lang, 'moderationPrompt'), options);
 
             return sentMsgs[0]?.message_id || null;
@@ -89,7 +93,7 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: any = { parse_mode: "HTML" };
+        const options: TelegramBot.SendMessageOptions = { parse_mode: "HTML" };
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }
@@ -110,7 +114,7 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: any = { parse_mode: "HTML" };
+        const options: TelegramBot.SendMessageOptions = { parse_mode: "HTML" };
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }

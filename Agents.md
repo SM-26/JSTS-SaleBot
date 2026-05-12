@@ -165,6 +165,8 @@ npm run test         # Validates src/locales key completeness
 
 ### Do
 - **Follow the existing service layer pattern**: business logic belongs in `src/services/`, database access in `src/repositories/`, type definitions in `src/types/index.ts`.
+- **Enforce strict typing**: Avoid `any`. Use specific types from `node-telegram-bot-api` (e.g., `User`, `Message`, `CallbackQuery`) or define custom interfaces in `src/types/index.ts`.
+- **Use `unknown` or Union Types**: If a type is truly dynamic (like translation parameters), prefer `Record<string, string | number | boolean>` or `unknown` over `any`.
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `npm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Check `session.isIdle`** before starting any new async input flow, and always reset it (including in `catch` blocks) to prevent users getting stuck.
@@ -175,12 +177,13 @@ npm run test         # Validates src/locales key completeness
 - **Add Tests**: When implementing new logic or features, add a relevant test case in `src/tests/testCases.ts` to verify the behavior.
 
 ### Don't
-- Don't add new config keys to `config.json` without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
-- Don't hardcode strings in service files — all text must come from `locals[config.lang]`.
-- Don't import directly from `src/tests/testCases.ts` outside of `botController.ts` — test cases are intentionally isolated.
-- Don't bypass the moderation flow: posts must pass through `moderationGroupId` before appearing in `approvedGroupId`.
-- Don't use `var`; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
-- Don't mutate `config.json` directly at runtime from code — use `adminService` to handle `/config` updates.
+- **Don't use `any`**: This project enforces the `@typescript-eslint/no-explicit-any` rule. Do not introduce new `any` declarations.
+- **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
+- **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
+- **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
+- **Don't bypass the moderation flow**: posts must pass through `moderationGroupId` before appearing in `approvedGroupId`.
+- **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
+- **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
 
 ### Adding a New Command
 1. Add the handler method to an appropriate service (or create a new one in `src/services/`).

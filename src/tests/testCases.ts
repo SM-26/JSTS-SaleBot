@@ -1,11 +1,11 @@
 import TelegramBot from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 import { PostService } from "../services/postService";
-import userRepository from "../repositories/userRepository";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
-import { BotConfig, MediaItem, LocaleService } from "../types";
+import { BotConfig, MediaItem, LocaleService, TestCaseFn, User } from "../types";
+import userRepository from "../repositories/userRepository";
 
 /**
  * Test cases for HandleStart flow.
@@ -31,17 +31,6 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     broadcast_test: { label: "📢 Broadcast (to Moderation)", run: testCase_Broadcast },
 };
 
-type TestCaseFn = (
-    bot: TelegramBot,
-    config: BotConfig,
-    localeService: LocaleService,
-    postService: PostService,
-    userService: UserService,
-    paymentService: PaymentService,
-    inputService: InputService,
-    msg: TelegramBot.Message
-) => Promise<void>;
-
 /**
  * CASE 1: Full post with multiple photos.
  */
@@ -56,7 +45,7 @@ async function testCase1_FullPost(
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user = msg.from;
+    const user: TelegramBot.User = msg.from;
 
     await userService.ensureUser(user);
 
@@ -102,7 +91,7 @@ async function testCase2_NoMedia(
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user = msg.from;
+    const user: TelegramBot.User = msg.from;
 
     await userService.ensureUser(user);
 
@@ -148,7 +137,7 @@ async function testCase3_OnePhoto(
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user = msg.from;
+    const user: TelegramBot.User = msg.from;
 
     await userService.ensureUser(user);
 
@@ -228,7 +217,7 @@ async function testCase_FreeTextPrice(
     msg: TelegramBot.Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user = msg.from;
+    const user: TelegramBot.User = msg.from;
 
     await userService.ensureUser(user);
 
@@ -273,8 +262,8 @@ async function testCase_FaqView(
     inputService: InputService,
     msg: TelegramBot.Message
 ): Promise<void> {
-    try {
-        const locale = localeService.resolveUserLocale(msg.from as any);
+    try { //
+        const locale = localeService.resolveUserLocale(msg.from ? { userId: String(msg.from.id), firstName: msg.from.first_name, languageCode: msg.from.language_code } as User : null);
         const faqs = localeService.getFaqs(locale);
 
         if (!faqs || Object.keys(faqs).length === 0) {
@@ -312,7 +301,7 @@ async function testCase_BroadcastCustom(
 ): Promise<void> {
     const moderationGroupId = config.moderationGroupId;
     const moderationTopicId = config.moderationTopicId;
-    const user = await userRepository.findByUserId(String(msg.from!.id));
+    const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
     const locale = localeService.resolveUserLocale(user);
 
     try {

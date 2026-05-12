@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
-import { BotConfig, UserSession } from "../types";
+import { BotConfig, UserSession, Post, User, LocaleService } from "../types";
 import { InputService } from "../services/inputService";
 import { MediaService } from "../services/photoService";
 import { PostService } from "../services/postService";
@@ -54,10 +54,10 @@ export class BotController {
 
     async syncSoldPosts(): Promise<void> {
         try {
-            const soldPosts = await postRepository.getSold();
-            let synced = 0;
+            const soldPosts: Post[] = await postRepository.getSold();
+            let synced = 0; //
             for (const post of soldPosts) {
-                const user = await userRepository.findByUserId(post.userId);
+                const user: User | null = await userRepository.findByUserId(post.userId);
                 const postText = this.postService.formatPostText({
                     title: post.title,
                     description: post.description,
@@ -92,7 +92,7 @@ export class BotController {
 
     async HandleStart(msg: TelegramBot.Message): Promise<void> {
         console.info('[INFO - HandleStart] session active', { userId: msg.from?.id, chatId: msg.chat.id });
-        const session = this.getSession(msg.from!.id);
+        const session: UserSession = this.getSession(msg.from!.id);
 
         try {
             session.isIdle = false;
@@ -140,7 +140,7 @@ export class BotController {
             }
 
             // Save & send to moderation
-            const post = await postRepository.createPost({
+            const post: Post = await postRepository.createPost({
                 userId: String(msg.from!.id),
                 title,
                 description,
@@ -169,7 +169,7 @@ export class BotController {
 
     async showHelp(msg: TelegramBot.Message): Promise<void> {
         await this.userService.ensureUser(msg.from!);
-        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         const lines = [
             localeService.t(locale, 'helpTitle'),
@@ -215,17 +215,17 @@ export class BotController {
                 return;
             }
 
-            const user = await userRepository.findByUserId(String(msg.from!.id));
+            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
             const locale = localeService.resolveUserLocale(user);
 
             const activeUsers: string[] = [];
             for (const [userId, session] of this.sessions.entries()) {
                 if (!session.isIdle) {
-                    const activeUser = await userRepository.findByUserId(String(userId));
-                    if (activeUser) {
+                    const activeUser: User | null = await userRepository.findByUserId(String(userId));
+                    if (activeUser) { //
                         const username = activeUser.userName ? `@${activeUser.userName}` : 'N/A';
                         const firstName = activeUser.firstName || 'N/A';
-                        const lastName = (activeUser as any).lastName || '';
+                        const lastName = activeUser.lastName || '';
                         const fullName = `${firstName} ${lastName}`.trim();
                         activeUsers.push(`• <code>${userId}</code> | ${username} | ${fullName}`);
                     }
@@ -251,7 +251,7 @@ export class BotController {
         const userIdentifier = msg.from?.username || msg.from?.id || 'unknown';
         console.info('[INFO - handleLang]', { user: userIdentifier });
         await this.userService.ensureUser(msg.from!);
-        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         const currentLocale = localeService.resolveUserLocale(user);
         const availableLocales = localeService.availableLocales;
 
@@ -275,7 +275,7 @@ export class BotController {
         }
 
         await this.userService.ensureUser(msg.from!);
-        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         const text = `${localeService.t(locale, 'donateTitle')}\n${localeService.t(locale, 'donateChooseAmount')}`;
 
@@ -374,7 +374,7 @@ export class BotController {
                     } else {
                         const tc = TEST_CASES[key];
                         if (!tc) return;
-                        await tc.run(this.bot, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
+                        await tc.run(this.bot, this.config, localeService as LocaleService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                     }
                     return;
                 }

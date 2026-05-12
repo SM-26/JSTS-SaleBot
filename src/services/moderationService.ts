@@ -1,5 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
-import { BotConfig } from "../types";
+import { BotConfig, Post, User } from "../types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService } from "./postService";
@@ -69,7 +69,7 @@ export class ModerationService {
                     ? localeService.t(locale, 'statusApproved')
                     : localeService.t(locale, 'statusRejected');
 
-                const topicId = (query.message as any)?.message_thread_id;
+                // const topicId = (query.message as any)?.message_thread_id;
 
                 this.bot.editMessageText(statusText, {
                     chat_id: query.message.chat.id,
@@ -82,7 +82,7 @@ export class ModerationService {
         }
     }
 
-    private async handleApproval(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
+    private async handleApproval(query: TelegramBot.CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<void> {
         const postText = this.postService.formatPostText({
             title: post.title,
             description: post.description,
@@ -91,7 +91,7 @@ export class ModerationService {
             media: post.media,
             userId: Number(postAuthor.userId),
             username: postAuthor.userName || undefined,
-            firstName: postAuthor.firstName || undefined,
+            firstName: postAuthor.firstName || "User",
         });
 
         const messageId = await this.postService.sendToApproved(postText, post.media);
@@ -115,7 +115,7 @@ export class ModerationService {
         });
     }
 
-    private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: any, postAuthor: any, adminLocale: string): Promise<void> {
+    private async handleRejection(query: TelegramBot.CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<void> {
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminRejected') });
 
         const reason = await this.askRejectReason(query);
@@ -144,12 +144,12 @@ export class ModerationService {
 
     async askRejectReason(query: TelegramBot.CallbackQuery): Promise<string | null> {
         const chatId = query.message!.chat.id;
-        const topicId = (query.message as any)?.message_thread_id;
+        const topicId = query.message?.message_thread_id;
         const adminId = query.from.id;
 
         const skipCallbackData = `skip_reason_${adminId}_${Date.now()}`;
 
-        const options: any = {
+        const options: TelegramBot.SendMessageOptions = {
             reply_markup: {
                 inline_keyboard: [[
                     { text: localeService.t(this.config.lang, 'skipReasonButton'), callback_data: skipCallbackData },
@@ -180,7 +180,7 @@ export class ModerationService {
 
             const msgListener = (reply: TelegramBot.Message) => {
                 if (reply.chat.id !== chatId || reply.from!.id !== adminId) return;
-                if (topicId && Number(topicId) !== 1 && (reply as any).message_thread_id !== topicId) return;
+                if (topicId && Number(topicId) !== 1 && reply.message_thread_id !== topicId) return;
                 if (reply.text && reply.text.startsWith("/")) return;
 
                 this.bot.removeListener("callback_query", cbListener);
