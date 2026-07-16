@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message } from "node-telegram-bot-api";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
@@ -91,14 +91,14 @@ export class BotController {
         return this.sessions.get(userId)!;
     }
 
-    async HandleStart(msg: TelegramBot.Message): Promise<void> {
+    async HandleStart(msg: Message): Promise<void> {
         await this.userService.ensureUser(msg.from!);
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'greeting'));
     }
 
-    async HandleNewPost(msg: TelegramBot.Message): Promise<void> {
+    async HandleNewPost(msg: Message): Promise<void> {
         console.info('[INFO - HandleNewPost] session active', { userId: msg.from?.id, chatId: msg.chat.id });
         const session: UserSession = this.getSession(msg.from!.id);
 
@@ -176,7 +176,7 @@ export class BotController {
         }
     }
 
-    async showHelp(msg: TelegramBot.Message): Promise<void> {
+    async showHelp(msg: Message): Promise<void> {
         await this.userService.ensureUser(msg.from!);
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         console.debug(`[DEBUG - showHelp] Resolving locale for user: ${msg.from!.id}`);
@@ -225,7 +225,7 @@ export class BotController {
         });
     }
 
-    async handleActiveUsers(msg: TelegramBot.Message): Promise<void> {
+    async handleActiveUsers(msg: Message): Promise<void> {
         console.debug('[DEBUG - handleActiveUsers] Admin command triggered', { adminId: msg.from?.id });
         try {
             const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
@@ -267,7 +267,7 @@ export class BotController {
         }
     }
 
-    async handleLang(msg: TelegramBot.Message): Promise<void> {
+    async handleLang(msg: Message): Promise<void> {
         const userIdentifier = msg.from?.username || msg.from?.id || 'unknown';
         console.info('[INFO - handleLang]', { user: userIdentifier });
         await this.userService.ensureUser(msg.from!);
@@ -288,7 +288,7 @@ export class BotController {
         });
     }
 
-    async handleDonate(msg: TelegramBot.Message): Promise<void> {
+    async handleDonate(msg: Message): Promise<void> {
         if (this.config.donationsEnabled === false) {
             await this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'donationDisabled'));
             return;
@@ -315,7 +315,7 @@ export class BotController {
     }
 
     registerRoutes(): void {
-        const isPrivate = (msg: TelegramBot.Message) => msg.chat.type === "private";
+        const isPrivate = (msg: Message) => msg.chat.type === "private";
 
         this.bot.onText(/\/start/, (msg) => {
             if (!isPrivate(msg)) return;
@@ -414,7 +414,7 @@ export class BotController {
                         { inline_keyboard: [] },
                         { chat_id: query.message.chat.id, message_id: query.message.message_id }
                     );
-                    const fakeMsg = { ...query.message, from: query.from } as TelegramBot.Message;
+                    const fakeMsg = { ...query.message, from: query.from } as Message;
 
                     if (key === "all") {
                         for (const tc of Object.values(TEST_CASES)) {

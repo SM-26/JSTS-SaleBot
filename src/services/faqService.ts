@@ -1,5 +1,5 @@
-import TelegramBot from "node-telegram-bot-api";
-import { BotConfig } from "../types";
+import TelegramBot, { Message, CallbackQuery, InlineKeyboardButton } from "node-telegram-bot-api";
+import { BotConfig, SendMessageOptions, EditMessageTextOptions } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
 import { UserService } from "./userService";
@@ -14,7 +14,7 @@ export class FaqService {
         this.userService = new UserService();
     }
 
-    async handleFaq(msg: TelegramBot.Message): Promise<void> {
+    async handleFaq(msg: Message): Promise<void> {
         try {
             await this.userService.ensureUser(msg.from!);
             const user = await userRepository.findByUserId(String(msg.from!.id));
@@ -26,7 +26,7 @@ export class FaqService {
         }
     }
 
-    async handleCallback(query: TelegramBot.CallbackQuery): Promise<void> {
+    async handleCallback(query: CallbackQuery): Promise<void> {
         const nodeId = query.data?.replace("faq_", "");
         if (!nodeId || !query.message) return;
 
@@ -54,7 +54,7 @@ export class FaqService {
 
         const baseText = nodeId ? `<b>${faqs[nodeId]}</b>` : `<b>${localeService.t(locale, 'helpFaq')}</b>`;
         const bodyParts: string[] = [];
-        const buttons: TelegramBot.InlineKeyboardButton[][] = [];
+        const buttons: InlineKeyboardButton[][] = [];
 
         for (const childKey of children) {
             const isBranch = keys.some(k => k.startsWith(childKey + '.'));
@@ -79,7 +79,7 @@ export class FaqService {
             buttons.push([{ text: localeService.t(locale, 'backButton'), callback_data: `faq_${parentId}` }]);
         }
 
-        const options: TelegramBot.SendMessageOptions & TelegramBot.EditMessageTextOptions = {
+        const options: SendMessageOptions & EditMessageTextOptions = {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: buttons }
         };
@@ -89,7 +89,7 @@ export class FaqService {
                 chat_id: chatId,
                 message_id: messageId,
                 ...options
-            } as TelegramBot.EditMessageTextOptions);
+            } as EditMessageTextOptions);
         } else {
             await this.bot.sendMessage(chatId, text, options);
         }

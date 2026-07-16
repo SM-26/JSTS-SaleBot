@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService } from "./postService";
@@ -26,13 +26,13 @@ export class MyPostsService {
         return map[status] ?? status;
     }
 
-    private buildSummaryMessage(posts: Post[], locale: string): { text: string; buttons: TelegramBot.InlineKeyboardButton[][] } {
+    private buildSummaryMessage(posts: Post[], locale: string): { text: string; buttons: InlineKeyboardButton[][] } {
         let text = localeService.t(locale, 'myPostsTitle') + "\n\n";
 
         const hasRejected = posts.some(p => p.status === 'rejected');
         const hasSold = posts.some(p => p.status === 'sold');
 
-        const buttons: TelegramBot.InlineKeyboardButton[][] = [[]]; //
+        const buttons: InlineKeyboardButton[][] = [[]]; //
         if (hasRejected) buttons[0].push({ text: localeService.t(locale, 'clearRejectedButton'), callback_data: 'clear_rejected' });
         if (hasSold) buttons[0].push({ text: localeService.t(locale, 'clearSoldButton'), callback_data: 'clear_sold' });
 
@@ -53,7 +53,7 @@ export class MyPostsService {
         return { text, buttons };
     }
 
-    async showPosts(msg: TelegramBot.Message): Promise<void> {
+    async showPosts(msg: Message): Promise<void> {
         const userId = String(msg.from!.id);
         const user: User | null = await userRepository.findByUserId(userId);
         const locale = localeService.resolveUserLocale(user); //
@@ -105,7 +105,7 @@ export class MyPostsService {
         }
     }
 
-    private async refreshMessage(query: TelegramBot.CallbackQuery): Promise<void> {
+    private async refreshMessage(query: CallbackQuery): Promise<void> {
         if (!query.message) return;
 
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
@@ -121,7 +121,7 @@ export class MyPostsService {
         });
     }
 
-    async handleClearStatus(query: TelegramBot.CallbackQuery, status: string): Promise<void> {
+    async handleClearStatus(query: CallbackQuery, status: string): Promise<void> {
         const userId = String(query.from.id);
         const user: User | null = await userRepository.findByUserId(userId);
         const locale = localeService.resolveUserLocale(user); //
@@ -139,7 +139,7 @@ export class MyPostsService {
         await this.refreshMessage(query);
     }
 
-    async handleSoldCallback(query: TelegramBot.CallbackQuery): Promise<void> {
+    async handleSoldCallback(query: CallbackQuery): Promise<void> {
         const postId = query.data!.replace("sold_", "");
         const post: Post | null = await postRepository.findById(postId);
 
@@ -181,7 +181,7 @@ export class MyPostsService {
             && d1.getDate() === d2.getDate();
     }
 
-    async handleBumpCallback(query: TelegramBot.CallbackQuery): Promise<void> {
+    async handleBumpCallback(query: CallbackQuery): Promise<void> {
         const postId = query.data!.replace("bump_", "");
         const post: Post | null = await postRepository.findById(postId);
 

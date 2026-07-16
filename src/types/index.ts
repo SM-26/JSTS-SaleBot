@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message, SendMessageParams, EditMessageTextParams } from "node-telegram-bot-api";
 import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
@@ -168,5 +168,8 @@ export type TestCaseFn = (
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ) => Promise<void>;
+
+export type SendMessageOptions = Omit<SendMessageParams, "chat_id" | "text">;
+export type EditMessageTextOptions = Omit<EditMessageTextParams, "text">;

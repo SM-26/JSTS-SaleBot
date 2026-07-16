@@ -1,13 +1,20 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message } from "node-telegram-bot-api";
 import * as fs from "fs";
 import * as path from "path";
-import { BotConfig } from "../types";
+import { BotConfig, SendMessageOptions } from "../types";
 import userRepository from "../repositories/userRepository";
 import { AuthLevel, User } from "../types";
 import { userService } from "./userService";
 import { localeService } from "./localeService";
 
 const configPath = path.join(__dirname, "../../config.json");
+
+// forward_from was removed from the Bot API in favor of forward_origin; only
+// MessageOriginUser carries the original sender's id (others are anonymous).
+function getForwardSenderId(msg: Message): number | undefined {
+    const origin = msg.forward_origin;
+    return origin && "sender_user" in origin ? origin.sender_user.id : undefined;
+}
 
 export class AdminService {
     constructor(
@@ -24,7 +31,7 @@ export class AdminService {
      * Handle /config command.
      * Access: ADMIN (Level 2)
      */
-    async handleConfig(msg: TelegramBot.Message, args: string): Promise<void> {
+    async handleConfig(msg: Message, args: string): Promise<void> {
         const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
 
@@ -103,7 +110,7 @@ export class AdminService {
      * Handle /broadcast command.
      * Access: ADMIN (Level 2)
      */
-    async handleBroadcast(msg: TelegramBot.Message, args: string): Promise<void> {
+    async handleBroadcast(msg: Message, args: string): Promise<void> {
         const user = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(user);
 
@@ -116,7 +123,7 @@ export class AdminService {
         const approvedGroupId = this.config.approvedGroupId;
         const broadcastTopicId = this.config.broadcastTopicId;
 
-        const options: TelegramBot.SendMessageOptions = {
+        const options: SendMessageOptions = {
             parse_mode: "HTML"
         };
 
@@ -175,7 +182,7 @@ export class AdminService {
      * Handle /promote command.
      * Access: ADMIN (Level 2)
      */
-    async handlePromote(msg: TelegramBot.Message, args: string): Promise<void> {
+    async handlePromote(msg: Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(actor);
@@ -227,7 +234,7 @@ export class AdminService {
      * Handle /demote command.
      * Access: ADMIN (Level 2)
      */
-    async handleDemote(msg: TelegramBot.Message, args: string): Promise<void> {
+    async handleDemote(msg: Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(actor);
@@ -271,7 +278,7 @@ export class AdminService {
      * Handle /auth command.
      * Access: MOD (Level 1) or ADMIN (Level 2)
      */
-    async handleAuth(msg: TelegramBot.Message, args: string): Promise<void> {
+    async handleAuth(msg: Message, args: string): Promise<void> {
         const actorId = String(msg.from!.id);
         const actor = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(actor);
@@ -284,7 +291,7 @@ export class AdminService {
             return;
         }
 
-        const targetUser: User | null = (!args.trim() && !msg.reply_to_message && !msg.forward_from)
+        const targetUser: User | null = (!args.trim() && !msg.reply_to_message && !getForwardSenderId(msg))
             ? actor
             : await this._resolveTargetUser(msg, args);
 
@@ -304,20 +311,21 @@ export class AdminService {
         );
     }
 
-    private async _resolveTargetUser(msg: TelegramBot.Message, args: string): Promise<User | null> {
+    private async _resolveTargetUser(msg: Message, args: string): Promise<User | null> {
         let targetUserId: string | undefined;
 
         // 1. Check for replied-to message
         if (msg.reply_to_message) {
-            if (msg.reply_to_message.forward_from?.id) {
-                targetUserId = String(msg.reply_to_message.forward_from.id);
+            const forwardSenderId = getForwardSenderId(msg.reply_to_message);
+            if (forwardSenderId) {
+                targetUserId = String(forwardSenderId);
             } else if (msg.reply_to_message.from?.id) {
                 targetUserId = String(msg.reply_to_message.from.id);
             }
         }
         // 2. Check for forwarded message (if Telegram provides sender metadata)
-        else if (msg.forward_from?.id) {
-            targetUserId = String(msg.forward_from.id);
+        else if (getForwardSenderId(msg)) {
+            targetUserId = String(getForwardSenderId(msg));
         }
         // 3. Check for arguments (numeric ID or @username)
         else if (args.trim()) {

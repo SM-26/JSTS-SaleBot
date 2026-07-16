@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message, User as TgUser } from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
@@ -44,10 +44,10 @@ async function testCase1_FullPost(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user: TelegramBot.User = msg.from;
+    const user: TgUser = msg.from;
 
     await userService.ensureUser(user);
 
@@ -90,10 +90,10 @@ async function testCase2_NoMedia(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user: TelegramBot.User = msg.from;
+    const user: TgUser = msg.from;
 
     await userService.ensureUser(user);
 
@@ -136,10 +136,10 @@ async function testCase3_OnePhoto(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user: TelegramBot.User = msg.from;
+    const user: TgUser = msg.from;
 
     await userService.ensureUser(user);
 
@@ -182,7 +182,7 @@ async function testCase_SimulateDonation(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     // Create a fake successful payment message
     const fakePaymentMessage = {
@@ -194,7 +194,7 @@ async function testCase_SimulateDonation(
             telegram_payment_charge_id: "test_charge_id",
             provider_payment_charge_id: "test_provider_id"
         }
-    } as TelegramBot.Message;
+    } as Message;
 
     console.log("Simulating donation payment...");
 
@@ -216,10 +216,10 @@ async function testCase_FreeTextPrice(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
-    const user: TelegramBot.User = msg.from;
+    const user: TgUser = msg.from;
 
     await userService.ensureUser(user);
 
@@ -262,7 +262,7 @@ async function testCase_FaqView(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     try { //
         const locale = localeService.resolveUserLocale(msg.from ? { userId: String(msg.from.id), firstName: msg.from.first_name, languageCode: msg.from.language_code } as User : null);
@@ -299,7 +299,7 @@ async function testCase_BroadcastCustom(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     const moderationGroupId = config.moderationGroupId;
     const moderationTopicId = config.moderationTopicId;
@@ -332,7 +332,7 @@ async function testCase_Broadcast(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     const moderationGroupId = config.moderationGroupId;
     const moderationTopicId = config.moderationTopicId;
@@ -363,7 +363,7 @@ async function testCase_RBACPromotion(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     const userId = String(msg.from!.id);
     const originalUser = await userRepository.findByUserId(userId);
@@ -406,7 +406,7 @@ async function testCase_RBACAuth(
     userService: UserService,
     paymentService: PaymentService,
     inputService: InputService,
-    msg: TelegramBot.Message
+    msg: Message
 ): Promise<void> {
     const userId = String(msg.from!.id);
     const user = await userRepository.findByUserId(userId);

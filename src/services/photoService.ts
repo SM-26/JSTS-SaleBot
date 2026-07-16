@@ -1,8 +1,8 @@
-import TelegramBot from "node-telegram-bot-api";
+import { InputMediaPhoto, InputMediaVideo } from "node-telegram-bot-api";
 import { MediaItem } from "../types";
 
 export class MediaService {
-    buildMediaGroup(media: MediaItem[], caption: string): (TelegramBot.InputMediaPhoto | TelegramBot.InputMediaVideo)[] {
+    buildMediaGroup(media: MediaItem[], caption: string): (InputMediaPhoto | InputMediaVideo)[] {
         return media.map((item, i) => ({
             type: item.type,
             media: item.fileId,

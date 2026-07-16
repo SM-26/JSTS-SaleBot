@@ -1,7 +1,7 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message } from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
-import { AuthLevel, BotConfig } from "../types";
+import { AuthLevel, BotConfig, SendMessageOptions } from "../types";
 import { PostService } from "./postService";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
@@ -14,7 +14,7 @@ export class PendingService {
         private mediaService: MediaService
     ) { }
 
-    async handlePending(msg: TelegramBot.Message): Promise<void> {
+    async handlePending(msg: Message): Promise<void> {
         console.debug('[DEBUG - pendingService.handlePending]', { userId: msg.from?.id, name: msg.from?.username, chatId: msg.chat.id });
         const user = await userRepository.findByUserId(String(msg.from!.id));
         console.debug(`[DEBUG - handlePending] Resolving locale for admin/mod: ${msg.from?.id}`);
@@ -24,7 +24,7 @@ export class PendingService {
             ? this.config.moderationTopicId
             : msg.message_thread_id;
 
-        const options: TelegramBot.SendMessageOptions = { parse_mode: "HTML" };
+        const options: SendMessageOptions = { parse_mode: "HTML" };
         if (targetThreadId && Number(targetThreadId) !== 1) {
             options.message_thread_id = Number(targetThreadId);
         }
@@ -78,7 +78,7 @@ export class PendingService {
                 };
 
                 if (post.media && post.media.length > 0) {
-                    const mediaGroupOptions: TelegramBot.SendMessageOptions = {};
+                    const mediaGroupOptions: SendMessageOptions = {};
                     if (targetThreadId && Number(targetThreadId) !== 1) {
                         mediaGroupOptions.message_thread_id = Number(targetThreadId);
                     }
@@ -86,11 +86,11 @@ export class PendingService {
                     await this.bot.sendMediaGroup(msg.chat.id, group, mediaGroupOptions);
 
                     // Buttons cannot be attached to a media group, so we send them in a separate message
-                    const btnOptions: TelegramBot.SendMessageOptions = { reply_markup: replyMarkup };
+                    const btnOptions: SendMessageOptions = { reply_markup: replyMarkup };
                     if (targetThreadId && Number(targetThreadId) !== 1) btnOptions.message_thread_id = Number(targetThreadId);
                     await this.bot.sendMessage(msg.chat.id, "👇", btnOptions);
                 } else {
-                    const msgOptions: TelegramBot.SendMessageOptions = { ...options, disable_web_page_preview: true, reply_markup: replyMarkup };
+                    const msgOptions: SendMessageOptions = { ...options, link_preview_options: { is_disabled: true }, reply_markup: replyMarkup };
                     await this.bot.sendMessage(msg.chat.id, postText, msgOptions);
                 }
             }
@@ -104,7 +104,7 @@ export class PendingService {
         }
     }
 
-    async handleClearPending(msg: TelegramBot.Message): Promise<void> {
+    async handleClearPending(msg: Message): Promise<void> {
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
 

@@ -1,5 +1,5 @@
-import TelegramBot from "node-telegram-bot-api";
-import { BotConfig, MediaItem } from "../types";
+import TelegramBot, { Message } from "node-telegram-bot-api";
+import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
@@ -58,7 +58,7 @@ export class PostService {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
-        const options: TelegramBot.SendMessageOptions = {
+        const options: SendMessageOptions = {
             parse_mode: "HTML",
             reply_markup: {
                 inline_keyboard: [[
@@ -73,7 +73,7 @@ export class PostService {
         }
 
         if (media.length > 0) {
-            const mediaGroupOptions: TelegramBot.SendMessageOptions = {};
+            const mediaGroupOptions: SendMessageOptions = {};
             if (moderationTopicId && Number(moderationTopicId) !== 1) {
                 mediaGroupOptions.message_thread_id = Number(moderationTopicId);
             }
@@ -93,7 +93,7 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: TelegramBot.SendMessageOptions = { parse_mode: "HTML" };
+        const options: SendMessageOptions = { parse_mode: "HTML" };
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }
@@ -114,7 +114,7 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: TelegramBot.SendMessageOptions = { parse_mode: "HTML" };
+        const options: SendMessageOptions = { parse_mode: "HTML" };
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }
@@ -157,7 +157,7 @@ export class PostService {
         }
     }
 
-    async handlePublicReply(msg: TelegramBot.Message): Promise<void> {
+    async handlePublicReply(msg: Message): Promise<void> {
         if (!msg.reply_to_message || msg.chat.id !== this.config.approvedGroupId) return;
 
         const post = await postRepository.findByApprovedMessageId(msg.reply_to_message.message_id);

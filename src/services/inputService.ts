@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { Message, CallbackQuery } from "node-telegram-bot-api";
 import { BotConfig, MediaItem } from "../types";
 import { localeService } from "./localeService";
 
@@ -8,9 +8,9 @@ export class InputService {
         private config: BotConfig
     ) { }
 
-    input(msg: TelegramBot.Message): Promise<string> {
+    input(msg: Message): Promise<string> {
         return new Promise((resolve) => {
-            const listener = (reply: TelegramBot.Message) => {
+            const listener = (reply: Message) => {
                 if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
                 if (reply.text && reply.text.startsWith("/")) return;
 
@@ -22,7 +22,7 @@ export class InputService {
         });
     }
 
-    async inputWithPrompt(msg: TelegramBot.Message, prompt: string): Promise<string> {
+    async inputWithPrompt(msg: Message, prompt: string): Promise<string> {
         await this.bot.sendMessage(msg.chat.id, prompt, { message_thread_id: msg.message_thread_id });
         return this.input(msg);
     }
@@ -33,7 +33,7 @@ export class InputService {
         return !isNaN(price) && price > 0;
     }
 
-    async inputPrice(msg: TelegramBot.Message, locale: string): Promise<string> {
+    async inputPrice(msg: Message, locale: string): Promise<string> {
         await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterPrice'), { message_thread_id: msg.message_thread_id });
 
         while (true) {
@@ -42,12 +42,12 @@ export class InputService {
         }
     }
 
-    inputMedia(msg: TelegramBot.Message): Promise<MediaItem[]> {
+    inputMedia(msg: Message): Promise<MediaItem[]> {
         const items: MediaItem[] = [];
         const doneCallbackData = `done_media_${msg.from!.id}`;
 
         return new Promise((resolve) => {
-            const cbListener = (query: TelegramBot.CallbackQuery) => {
+            const cbListener = (query: CallbackQuery) => {
                 if (query.data !== doneCallbackData) return;
                 if (query.from.id !== msg.from!.id) return;
 
@@ -65,7 +65,7 @@ export class InputService {
                 resolve(items);
             };
 
-            const msgListener = (reply: TelegramBot.Message) => {
+            const msgListener = (reply: Message) => {
                 if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
 
                 if (reply.photo && reply.photo.length > 0) {
@@ -81,7 +81,7 @@ export class InputService {
         });
     }
 
-    async promptMedia(msg: TelegramBot.Message, locale: string): Promise<MediaItem[]> {
+    async promptMedia(msg: Message, locale: string): Promise<MediaItem[]> {
         const mediaPromise = this.inputMedia(msg);
 
         await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterMedia'), {
@@ -96,7 +96,7 @@ export class InputService {
         return mediaPromise;
     }
 
-    async confirmAction(msg: TelegramBot.Message, locale: string): Promise<boolean> {
+    async confirmAction(msg: Message, locale: string): Promise<boolean> {
         const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
         const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
 
@@ -111,7 +111,7 @@ export class InputService {
         });
 
         return new Promise((resolve) => {
-            const listener = (query: TelegramBot.CallbackQuery) => {
+            const listener = (query: CallbackQuery) => {
                 if (query.from.id !== msg.from!.id) return;
                 if (query.data !== callbackId && query.data !== cancelId) return;
 

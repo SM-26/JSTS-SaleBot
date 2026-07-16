@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import TelegramBot, { PreCheckoutQuery, Message } from "node-telegram-bot-api";
 import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
@@ -34,12 +34,12 @@ export class PaymentService {
         }
     }
 
-    async handlePreCheckout(query: TelegramBot.PreCheckoutQuery) {
+    async handlePreCheckout(query: PreCheckoutQuery) {
         // Always approve pre-checkout for donations
         await this.bot.answerPreCheckoutQuery(query.id, true);
     }
 
-    async handleSuccessfulPayment(msg: TelegramBot.Message) {
+    async handleSuccessfulPayment(msg: Message) {
         const payment = msg.successful_payment;
 
         if (!payment) return;
