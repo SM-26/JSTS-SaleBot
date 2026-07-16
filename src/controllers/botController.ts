@@ -1,4 +1,4 @@
-import TelegramBot, { Message } from "node-telegram-bot-api";
+import TelegramBot, { Message, InputRichMessage } from "node-telegram-bot-api";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
@@ -181,47 +181,48 @@ export class BotController {
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         console.debug(`[DEBUG - showHelp] Resolving locale for user: ${msg.from!.id}`);
         const locale = localeService.resolveUserLocale(user);
-        const lines = [
-            localeService.t(locale, 'helpTitle'),
-            "",
-            localeService.t(locale, 'helpStart'),
-            localeService.t(locale, 'helpNewPost'),
-            localeService.t(locale, 'helpMyPosts'),
-            localeService.t(locale, 'helpLang'),
-            localeService.t(locale, 'helpHelp')
-        ];
+        const t = (key: string) => localeService.t(locale, key);
 
-        if (this.config.enableFaq !== false) {
-            lines.push(localeService.t(locale, 'helpFaq'));
-        }
-        if (this.config.donationsEnabled !== false) {
-            lines.push(localeService.t(locale, 'helpDonate'));
-        }
+        // Section titles carry <b> tags for the old HTML path; strip them since
+        // rich headings style themselves. Command lines are "/cmd - desc" — bold
+        // the command part so the list is scannable.
+        const heading = (key: string, size: number) => ({ type: "heading", text: t(key).replace(/<\/?b>/g, ""), size });
+        const cmd = (key: string) => {
+            const line = t(key);
+            const i = line.indexOf(" - ");
+            const text = i === -1 ? line : [{ type: "bold", text: line.slice(0, i) }, line.slice(i)];
+            return { blocks: [{ type: "paragraph", text }] };
+        };
+
+        const generalCmds = ['helpStart', 'helpNewPost', 'helpMyPosts', 'helpLang', 'helpHelp'];
+        if (this.config.enableFaq !== false) generalCmds.push('helpFaq');
+        if (this.config.donationsEnabled !== false) generalCmds.push('helpDonate');
+
+        const blocks: unknown[] = [
+            heading('helpTitle', 2),
+            { type: "list", items: generalCmds.map(cmd) },
+        ];
 
         const authLevel = user?.authLevel ?? AuthLevel.USER;
 
         if (authLevel >= AuthLevel.MOD) {
-            lines.push("");
-            lines.push(localeService.t(locale, 'helpModSection'));
-            lines.push(localeService.t(locale, 'helpPending'));
-            lines.push(localeService.t(locale, 'helpClearPending'));
-            lines.push(localeService.t(locale, 'helpAuth'));
+            blocks.push(
+                { type: "divider" },
+                heading('helpModSection', 3),
+                { type: "list", items: ['helpPending', 'helpClearPending', 'helpAuth'].map(cmd) },
+            );
         }
 
         if (authLevel >= AuthLevel.ADMIN) {
-            lines.push("");
-            lines.push(localeService.t(locale, 'helpAdminSection'));
-            lines.push(localeService.t(locale, 'helpConfig'));
-            lines.push(localeService.t(locale, 'helpActiveUsers'));
-            lines.push(localeService.t(locale, 'helpPromote'));
-            lines.push(localeService.t(locale, 'helpDemote'));
-            lines.push(localeService.t(locale, 'helpBroadcastTopic'));
-            lines.push(localeService.t(locale, 'helpTest'));
+            blocks.push(
+                { type: "divider" },
+                heading('helpAdminSection', 3),
+                { type: "list", items: ['helpConfig', 'helpActiveUsers', 'helpPromote', 'helpDemote', 'helpBroadcastTopic', 'helpTest'].map(cmd) },
+            );
         }
 
-        await this.bot.sendMessage(msg.chat.id, lines.join("\n"), {
-            parse_mode: "HTML",
-            message_thread_id: msg.message_thread_id
+        await this.bot.sendRichMessage(msg.chat.id, { blocks } as unknown as InputRichMessage, {
+            message_thread_id: msg.message_thread_id,
         });
     }
 
