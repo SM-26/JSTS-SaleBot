@@ -1,7 +1,7 @@
 # --- Base Stage ---
 FROM node:26-alpine AS base
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
 
 # --- Development Stage ---
@@ -27,7 +27,7 @@ COPY --from=build /app/package.json /app/pnpm-lock.yaml ./
 COPY --from=build /app/dist ./dist
 
 # Install only production dependencies
-RUN corepack enable && pnpm install --prod --frozen-lockfile
+RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile
 
 # Security: Run as a non-privileged user
 USER node
