@@ -1,8 +1,8 @@
-import TelegramBot, { Message, CallbackQuery, InputRichBlock, InlineKeyboardMarkup } from "node-telegram-bot-api";
+import TelegramBot, { Message, CallbackQuery, InlineKeyboardMarkup } from "node-telegram-bot-api";
 import { BotConfig, MediaItem } from "../types";
 import { localeService } from "./localeService";
 
-// Position within the /newPost wizard, shown as a footer on the prompt.
+// Position within the /newPost wizard, appended to the prompt as plain text.
 export interface WizardStep {
     locale: string;
     index: number;
@@ -16,20 +16,11 @@ export class InputService {
     ) { }
 
     private async sendPrompt(msg: Message, prompt: string, step?: WizardStep, replyMarkup?: InlineKeyboardMarkup): Promise<void> {
-        if (!step) {
-            await this.bot.sendMessage(msg.chat.id, prompt, {
-                message_thread_id: msg.message_thread_id,
-                ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-            });
-            return;
-        }
+        const text = step
+            ? `${prompt}\n\n${localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total })}`
+            : prompt;
 
-        const blocks: InputRichBlock[] = [
-            { type: "paragraph", text: prompt } as InputRichBlock,
-            { type: "footer", text: localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total }) } as InputRichBlock,
-        ];
-
-        await this.bot.sendRichMessage(msg.chat.id, { blocks }, {
+        await this.bot.sendMessage(msg.chat.id, text, {
             message_thread_id: msg.message_thread_id,
             ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         });
