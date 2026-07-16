@@ -110,11 +110,12 @@ export class BotController {
             const locale = localeService.resolveUserLocale(user);
 
             // Collect post details
-            const title = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'welcome'));
-            const description = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterDescription'));
-            const price = await this.inputService.inputPrice(msg, locale);
-            const location = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterLocation'));
-            const media = await this.inputService.promptMedia(msg, locale);
+            const totalSteps = 5;
+            const title = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'welcome'), { locale, index: 1, total: totalSteps });
+            const description = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterDescription'), { locale, index: 2, total: totalSteps });
+            const price = await this.inputService.inputPrice(msg, { locale, index: 3, total: totalSteps });
+            const location = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterLocation'), { locale, index: 4, total: totalSteps });
+            const media = await this.inputService.promptMedia(msg, { locale, index: 5, total: totalSteps });
 
             if (media.length < this.config.minimumMedia) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));

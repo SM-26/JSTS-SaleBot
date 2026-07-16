@@ -1,12 +1,39 @@
-import TelegramBot, { Message, CallbackQuery } from "node-telegram-bot-api";
+import TelegramBot, { Message, CallbackQuery, InputRichBlock, InlineKeyboardMarkup } from "node-telegram-bot-api";
 import { BotConfig, MediaItem } from "../types";
 import { localeService } from "./localeService";
+
+// Position within the /newPost wizard, shown as a footer on the prompt.
+export interface WizardStep {
+    locale: string;
+    index: number;
+    total: number;
+}
 
 export class InputService {
     constructor(
         private bot: TelegramBot,
         private config: BotConfig
     ) { }
+
+    private async sendPrompt(msg: Message, prompt: string, step?: WizardStep, replyMarkup?: InlineKeyboardMarkup): Promise<void> {
+        if (!step) {
+            await this.bot.sendMessage(msg.chat.id, prompt, {
+                message_thread_id: msg.message_thread_id,
+                ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+            });
+            return;
+        }
+
+        const blocks: InputRichBlock[] = [
+            { type: "paragraph", text: prompt } as InputRichBlock,
+            { type: "footer", text: localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total }) } as InputRichBlock,
+        ];
+
+        await this.bot.sendRichMessage(msg.chat.id, { blocks }, {
+            message_thread_id: msg.message_thread_id,
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        });
+    }
 
     input(msg: Message): Promise<string> {
         return new Promise((resolve) => {
@@ -22,8 +49,8 @@ export class InputService {
         });
     }
 
-    async inputWithPrompt(msg: Message, prompt: string): Promise<string> {
-        await this.bot.sendMessage(msg.chat.id, prompt, { message_thread_id: msg.message_thread_id });
+    async inputWithPrompt(msg: Message, prompt: string, step?: WizardStep): Promise<string> {
+        await this.sendPrompt(msg, prompt, step);
         return this.input(msg);
     }
 
@@ -33,12 +60,12 @@ export class InputService {
         return !isNaN(price) && price > 0;
     }
 
-    async inputPrice(msg: Message, locale: string): Promise<string> {
-        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterPrice'), { message_thread_id: msg.message_thread_id });
+    async inputPrice(msg: Message, step: WizardStep): Promise<string> {
+        await this.sendPrompt(msg, localeService.t(step.locale, 'enterPrice'), step);
 
         while (true) {
             const priceInput = await this.input(msg); if (this.validatePriceValue(priceInput)) return priceInput;
-            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'invalidPrice'), { message_thread_id: msg.message_thread_id });
+            this.bot.sendMessage(msg.chat.id, localeService.t(step.locale, 'invalidPrice'), { message_thread_id: msg.message_thread_id });
         }
     }
 
@@ -81,16 +108,13 @@ export class InputService {
         });
     }
 
-    async promptMedia(msg: Message, locale: string): Promise<MediaItem[]> {
+    async promptMedia(msg: Message, step: WizardStep): Promise<MediaItem[]> {
         const mediaPromise = this.inputMedia(msg);
 
-        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'enterMedia'), {
-            message_thread_id: msg.message_thread_id,
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: localeService.t(locale, 'doneMediaButton'), callback_data: `done_media_${msg.from!.id}` },
-                ]],
-            },
+        await this.sendPrompt(msg, localeService.t(step.locale, 'enterMedia'), step, {
+            inline_keyboard: [[
+                { text: localeService.t(step.locale, 'doneMediaButton'), callback_data: `done_media_${msg.from!.id}` },
+            ]],
         });
 
         return mediaPromise;

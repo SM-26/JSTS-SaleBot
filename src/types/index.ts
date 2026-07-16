@@ -33,6 +33,7 @@ export interface BotConfig {
 export interface LocaleStrings {
     greeting: string;
     welcome: string;
+    wizardStep: string;
     enterDescription: string;
     enterPrice: string;
     enterMedia: string;

@@ -107,5 +107,6 @@
     "soldTag": "\n\n--- SOLD ---",
     "statusApproved": "✅ Approved",
     "statusRejected": "❌ Rejected",
-    "welcome": "Welcome! Let's create a sale post. Please enter a title:"
+    "welcome": "Welcome! Let's create a sale post. Please enter a title:",
+    "wizardStep": "Step {step} of {total}"
 }
