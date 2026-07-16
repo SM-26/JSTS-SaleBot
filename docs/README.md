@@ -57,7 +57,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 ### 👤 User Commands
 | Command | Description |
 | :--- | :--- |
-| `/start` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). |
+| `/start` | Show a welcome greeting. |
+| `/newPost` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). |
 | `/myposts` | View your active posts, bump them to the top, or mark them as sold. |
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
@@ -333,7 +334,7 @@ pnpm start
 ## 🔄 How It Works
 
 ```
-User sends /start
+User sends /newPost
     ↓
 Bot collects: title → description → price → location → photos
     ↓

@@ -92,7 +92,14 @@ export class BotController {
     }
 
     async HandleStart(msg: TelegramBot.Message): Promise<void> {
-        console.info('[INFO - HandleStart] session active', { userId: msg.from?.id, chatId: msg.chat.id });
+        await this.userService.ensureUser(msg.from!);
+        const user = await userRepository.findByUserId(String(msg.from!.id));
+        const locale = localeService.resolveUserLocale(user);
+        this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'greeting'));
+    }
+
+    async HandleNewPost(msg: TelegramBot.Message): Promise<void> {
+        console.info('[INFO - HandleNewPost] session active', { userId: msg.from?.id, chatId: msg.chat.id });
         const session: UserSession = this.getSession(msg.from!.id);
 
         try {
@@ -100,7 +107,7 @@ export class BotController {
 
             await this.userService.ensureUser(msg.from!);
             const user = await userRepository.findByUserId(String(msg.from!.id));
-            console.debug(`[DEBUG - HandleStart] Resolving locale for user: ${msg.from!.id} (lang_code: ${msg.from!.language_code}, pref: ${user?.preferredLocale})`);
+            console.debug(`[DEBUG - HandleNewPost] Resolving locale for user: ${msg.from!.id} (lang_code: ${msg.from!.language_code}, pref: ${user?.preferredLocale})`);
             const locale = localeService.resolveUserLocale(user);
 
             // Collect post details
@@ -112,7 +119,7 @@ export class BotController {
 
             if (media.length < this.config.minimumMedia) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));
-                console.info('[INFO - HandleStart] session idle (insufficient media)', { userId: msg.from?.id });
+                console.info('[INFO - HandleNewPost] session idle (insufficient media)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
             }
@@ -136,7 +143,7 @@ export class BotController {
             const confirmed = await this.inputService.confirmAction(msg, locale);
             if (!confirmed) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCancelled'));
-                console.info('[INFO - HandleStart] session idle (user cancelled)', { userId: msg.from?.id });
+                console.info('[INFO - HandleNewPost] session idle (user cancelled)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
             }
@@ -158,13 +165,13 @@ export class BotController {
             }
 
             this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCreated'));
-            console.info('[INFO - HandleStart] session idle (success)', { userId: msg.from?.id });
+            console.info('[INFO - HandleNewPost] session idle (success)', { userId: msg.from?.id });
             session.isIdle = true;
 
         } catch (err) {
-            console.error("[ERROR - HandleStart] ", (err as Error).message);
+            console.error("[ERROR - HandleNewPost] ", (err as Error).message);
             this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
-            console.info('[INFO - HandleStart] session idle (error)', { userId: msg.from?.id });
+            console.info('[INFO - HandleNewPost] session idle (error)', { userId: msg.from?.id });
             session.isIdle = true;
         }
     }
@@ -178,6 +185,7 @@ export class BotController {
             localeService.t(locale, 'helpTitle'),
             "",
             localeService.t(locale, 'helpStart'),
+            localeService.t(locale, 'helpNewPost'),
             localeService.t(locale, 'helpMyPosts'),
             localeService.t(locale, 'helpLang'),
             localeService.t(locale, 'helpHelp')
@@ -312,6 +320,10 @@ export class BotController {
         this.bot.onText(/\/start/, (msg) => {
             if (!isPrivate(msg)) return;
             this.HandleStart(msg);
+        });
+        this.bot.onText(/\/newPost/, (msg) => {
+            if (!isPrivate(msg)) return;
+            this.HandleNewPost(msg);
         });
         this.bot.onText(/\/myposts/, (msg) => {
             if (!isPrivate(msg)) return;

@@ -8,7 +8,7 @@ import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from
 import userRepository from "../repositories/userRepository";
 
 /**
- * Test cases for HandleStart flow.
+ * Test cases for HandleNewPost flow.
  * Uncomment a case in runTests() to auto-create a post and send it to moderation.
  * This skips the interactive input so you can test admin approve/reject quickly.
  */

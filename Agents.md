@@ -93,7 +93,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 
 ### Post Lifecycle
 ```
-User sends /start
+User sends /newPost
   → InputService collects: title, description, price, location, media
   → PostService shows preview
   → User confirms
@@ -118,7 +118,8 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 
 | Command   | Access    | Description                                      |
 |-----------|-----------|--------------------------------------------------|
-| `/start`  | All users | Begins the post creation wizard                  |
+| `/start`  | All users | Shows a welcome greeting                          |
+| `/newPost`| All users | Begins the post creation wizard                  |
 | `/myposts`| All users | Lists user's own posts with bump/sold actions    |
 | `/lang`   | All users | Change language preference                       |
 | `/faq`    | All users | View airsoft FAQ and frequently asked questions  |

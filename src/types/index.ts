@@ -31,6 +31,7 @@ export interface BotConfig {
 }
 
 export interface LocaleStrings {
+    greeting: string;
     welcome: string;
     enterDescription: string;
     enterPrice: string;
@@ -83,6 +84,7 @@ export interface LocaleStrings {
     adminRejected: string;
     helpTitle: string;
     helpStart: string;
+    helpNewPost: string;
     helpMyPosts: string;
     helpHelp: string;
     helpAdminSection: string;
