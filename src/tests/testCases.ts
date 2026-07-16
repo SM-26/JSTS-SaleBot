@@ -62,20 +62,18 @@ async function testCase1_FullPost(
         return;
     }
 
-    const postText = postService.formatPostText({
-        title, description, price, location, media,
-        userId: user.id,
-        username: user.username,
-        firstName: user.first_name,
-    });
-
     const post = await postRepository.createPost({
         userId: user.id.toString(),
         title, description, price, media, location,
         createdAt: new Date(),
     });
 
-    await postService.sendToModeration(String(post._id), postText, media);
+    await postService.sendToModeration(String(post._id), {
+        title, description, price, location, media,
+        userId: user.id,
+        username: user.username,
+        firstName: user.first_name,
+    });
     bot.sendMessage(msg.chat.id, `✅ Test post created and sent to moderation (ID: ${post._id})`);
 }
 
@@ -108,20 +106,18 @@ async function testCase2_NoMedia(
         return;
     }
 
-    const postText = postService.formatPostText({
-        title, description, price, location, media,
-        userId: user.id,
-        username: user.username,
-        firstName: user.first_name,
-    });
-
     const post = await postRepository.createPost({
         userId: user.id.toString(),
         title, description, price, media, location,
         createdAt: new Date(),
     });
 
-    await postService.sendToModeration(String(post._id), postText, media);
+    await postService.sendToModeration(String(post._id), {
+        title, description, price, location, media,
+        userId: user.id,
+        username: user.username,
+        firstName: user.first_name,
+    });
     bot.sendMessage(msg.chat.id, `✅ Test post (no media) sent to moderation (ID: ${post._id})`);
 }
 
@@ -154,20 +150,18 @@ async function testCase3_OnePhoto(
         return;
     }
 
-    const postText = postService.formatPostText({
-        title, description, price, location, media,
-        userId: user.id,
-        username: user.username,
-        firstName: user.first_name,
-    });
-
     const post = await postRepository.createPost({
         userId: user.id.toString(),
         title, description, price, media, location,
         createdAt: new Date(),
     });
 
-    await postService.sendToModeration(String(post._id), postText, media);
+    await postService.sendToModeration(String(post._id), {
+        title, description, price, location, media,
+        userId: user.id,
+        username: user.username,
+        firstName: user.first_name,
+    });
     bot.sendMessage(msg.chat.id, `✅ Test post (1 photo) sent to moderation (ID: ${post._id})`);
 }
 
@@ -234,20 +228,18 @@ async function testCase_FreeTextPrice(
         return;
     }
 
-    const postText = postService.formatPostText({
-        title, description, price, location, media,
-        userId: user.id,
-        username: user.username,
-        firstName: user.first_name,
-    });
-
     const post = await postRepository.createPost({
         userId: user.id.toString(),
         title, description, price, media, location,
         createdAt: new Date(),
     });
 
-    await postService.sendToModeration(String(post._id), postText, media);
+    await postService.sendToModeration(String(post._id), {
+        title, description, price, location, media,
+        userId: user.id,
+        username: user.username,
+        firstName: user.first_name,
+    });
     bot.sendMessage(msg.chat.id, `✅ Test post (free text price) sent to moderation (ID: ${post._id})`);
 }
 

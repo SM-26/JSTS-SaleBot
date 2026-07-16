@@ -93,7 +93,7 @@ export class ModerationService {
             userId: Number(postAuthor.userId),
             username: postAuthor.userName || undefined,
             firstName: postAuthor.firstName || "User",
-        });
+        }, { showCta: true });
 
         const messageId = await this.postService.sendToApproved(richMessage);
         if (messageId) {

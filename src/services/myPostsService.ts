@@ -80,7 +80,9 @@ export class MyPostsService {
     }
 
     private async sendApprovedPostDetail(chatId: number, post: Post, user: User | null, locale: string): Promise<void> {
-        const postText = this.postService.formatPostText({
+        // One Rich Message with the sold/bump buttons attached — no separate
+        // follow-up message, so no button delay.
+        const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
             price: post.price,
@@ -96,13 +98,7 @@ export class MyPostsService {
             { text: localeService.t(locale, 'bumpButton'), callback_data: `bump_${post._id}` },
         ]];
 
-        if (post.media && post.media.length > 0) { //
-            const group = this.postService.mediaService.buildMediaGroup(post.media, postText);
-            await this.bot.sendMediaGroup(chatId, group);
-            await this.bot.sendMessage(chatId, "👇", { reply_markup: { inline_keyboard: buttons } });
-        } else {
-            await this.bot.sendMessage(chatId, postText, { parse_mode: "HTML", reply_markup: { inline_keyboard: buttons } });
-        }
+        await this.bot.sendRichMessage(chatId, richMessage, { reply_markup: { inline_keyboard: buttons } });
     }
 
     private async refreshMessage(query: CallbackQuery): Promise<void> {
@@ -167,7 +163,7 @@ export class MyPostsService {
                 userId: Number(post.userId),
                 username: user?.userName || undefined,
                 firstName: user?.firstName || "User",
-            }, localeService.t(this.config.lang, 'soldTag'));
+            }, { sold: true });
             await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
         }
 
@@ -228,7 +224,7 @@ export class MyPostsService {
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
-        });
+        }, { showCta: true });
 
         const newMessageId = await this.postService.sendToApproved(richMessage);
 

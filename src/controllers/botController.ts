@@ -68,7 +68,7 @@ export class BotController {
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "User",
-                }, localeService.t(this.config.lang, 'soldTag'));
+                }, { sold: true });
                 const success = await this.postService.markSoldInGroup(post.approvedMessageId!, richMessage);
                 if (success) {
                     synced++;
@@ -159,7 +159,7 @@ export class BotController {
                 createdAt: new Date(),
             });
 
-            const modMsgId = await this.postService.sendToModeration(String(post._id), postText, media);
+            const modMsgId = await this.postService.sendToModeration(String(post._id), postData);
             if (modMsgId) {
                 await postRepository.setModerationMessageId(String(post._id), modMsgId);
             }

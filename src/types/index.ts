@@ -28,6 +28,7 @@ export interface BotConfig {
     dailyBumpLimit: number;
     donationsEnabled?: boolean;
     enableFaq?: boolean;
+    mediaLayout?: "slideshow" | "collage";
 }
 
 export interface LocaleStrings {
@@ -52,7 +53,6 @@ export interface LocaleStrings {
     postCancelled: string;
     approveButton: string;
     rejectButton: string;
-    moderationPrompt: string;
     statusApproved: string;
     statusRejected: string;
     rejectReasonPrompt: string;

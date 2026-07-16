@@ -1,11 +1,9 @@
-import TelegramBot, { Message, InputRichMessage, InputRichBlock, InputRichBlockListItem, RichText } from "node-telegram-bot-api";
+import TelegramBot, { Message, InputRichMessage } from "node-telegram-bot-api";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
-
-type RichTextInput = RichText | string | RichTextInput[];
 
 export interface PostData {
     title: string;
@@ -45,59 +43,61 @@ export class PostService {
         ].join("\n");
     }
 
-    // node-telegram-bot-api's RichText type only covers the tagged formatting
-    // objects (bold, italic, ...); the Bot API also accepts a plain string or
-    // an array of RichText for concatenation, which the shipped types omit.
-    // Widen locally instead of casting at every call site.
-    formatUserMentionRich(userId: number, username?: string, firstName?: string): RichTextInput {
+    // The `text_mention` rich-text object links a display name to a user id.
+    formatUserMentionRich(userId: number, username?: string, firstName?: string): unknown {
         return username
             ? `@${username}`
-            : {
-                type: "text_mention",
-                text: (firstName || "User") as unknown as RichText,
-                user: { id: userId, is_bot: false, first_name: firstName || "User" },
-            };
+            : { type: "text_mention", text: firstName || "User", user: { id: userId, is_bot: false, first_name: firstName || "User" } };
     }
 
-    // Approved-group post as a Rich Message (Bot API 10.1+). See
-    // https://core.telegram.org/bots/api for the block/text "type" discriminators.
-    formatPostRichMessage(data: PostData, soldTag?: string): InputRichMessage {
-        const detailItem = (text: RichTextInput): InputRichBlockListItem => ({
-            blocks: [{ type: "paragraph", text } as InputRichBlock],
-        });
+    // Approved-group post as a Rich Message (Bot API 10.1+). The shipped RichText
+    // types omit the plain-string/array forms the API accepts, so we assemble the
+    // blocks loosely and cast once at the boundary. Block/text "type"
+    // discriminators verified against https://core.telegram.org/bots/api.
+    formatPostRichMessage(data: PostData, opts: { sold?: boolean; showCta?: boolean } = {}): InputRichMessage {
+        const bold = (text: unknown) => ({ type: "bold", text });
+        const para = (text: unknown) => ({ type: "paragraph", text });
+        const item = (text: unknown) => ({ blocks: [para(text)] });
 
-        const blocks: InputRichBlock[] = [
-            { type: "heading", text: data.title, size: 2 } as InputRichBlock,
-            { type: "blockquote", blocks: [{ type: "paragraph", text: data.description } as InputRichBlock] } as InputRichBlock,
-            { type: "divider" } as InputRichBlock,
+        const titleText = opts.sold ? { type: "strikethrough", text: data.title } : data.title;
+
+        const blocks: unknown[] = [
+            { type: "heading", text: titleText, size: 2 },
+            { type: "blockquote", blocks: [para(data.description)] },
+            { type: "divider" },
             {
                 type: "list",
                 items: [
-                    detailItem(`💰 ${data.price}`),
-                    detailItem(`📍 ${data.location}`),
-                    detailItem(["👤 ", this.formatUserMentionRich(data.userId, data.username, data.firstName)]),
+                    item(["💰 ", bold(data.price)]),
+                    item(`📍 ${data.location}`),
+                    item(["👤 ", this.formatUserMentionRich(data.userId, data.username, data.firstName)]),
                 ],
-            } as InputRichBlock,
+            },
         ];
 
-        const mediaBlocks: InputRichBlock[] = data.media.map((item) =>
-            item.type === "video"
-                ? { type: "video", video: { type: "video", media: item.fileId } } as InputRichBlock
-                : { type: "photo", photo: { type: "photo", media: item.fileId } } as InputRichBlock
+        const mediaBlocks = data.media.map((m) =>
+            m.type === "video"
+                ? { type: "video", video: { type: "video", media: m.fileId } }
+                : { type: "photo", photo: { type: "photo", media: m.fileId } }
         );
 
         if (mediaBlocks.length === 1) {
             blocks.push(mediaBlocks[0]);
         } else if (mediaBlocks.length > 1) {
-            // slideshow = swipeable gallery; nicer than a fixed collage grid.
-            blocks.push({ type: "slideshow", blocks: mediaBlocks } as InputRichBlock);
+            // slideshow (swipeable) vs collage (grid) — chosen in config.json.
+            const layout = this.config.mediaLayout ?? "slideshow";
+            blocks.push({ type: layout, blocks: mediaBlocks });
         }
 
-        // A sold post shouldn't invite contact, so swap the CTA for the sold tag.
-        const footerText = soldTag ? soldTag.trim() : localeService.t(this.lang, 'contactSellerCta');
-        blocks.push({ type: "footer", text: footerText } as InputRichBlock);
+        // Sold posts show the sold marker; only the public post gets a contact CTA.
+        const footer = opts.sold
+            ? localeService.t(this.lang, 'soldTag')
+            : opts.showCta ? localeService.t(this.lang, 'contactSellerCta') : null;
+        if (footer) {
+            blocks.push({ type: "footer", text: footer });
+        }
 
-        return { blocks };
+        return { blocks } as unknown as InputRichMessage;
     }
 
     async sendPreview(chatId: number, text: string, media: MediaItem[], locale: string): Promise<void> {
@@ -111,16 +111,18 @@ export class PostService {
         }
     }
 
-    async sendToModeration(postId: string, text: string, media: MediaItem[]): Promise<number | null> {
+    // One Rich Message carrying the post AND the approve/reject buttons. A media
+    // group can't hold buttons, which is why the old media path sent a second
+    // message — the source of the noticeable button delay.
+    async sendToModeration(postId: string, data: PostData): Promise<number | null> {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
-        const options: SendMessageOptions = {
-            parse_mode: "HTML",
+        const options: Parameters<TelegramBot['sendRichMessage']>[2] = {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: localeService.t(this.config.lang, 'approveButton'), callback_data: `approve_${postId}` },
-                    { text: localeService.t(this.config.lang, 'rejectButton'), callback_data: `reject_${postId}` },
+                    { text: localeService.t(this.lang, 'approveButton'), callback_data: `approve_${postId}` },
+                    { text: localeService.t(this.lang, 'rejectButton'), callback_data: `reject_${postId}` },
                 ]],
             },
         };
@@ -129,21 +131,9 @@ export class PostService {
             options.message_thread_id = Number(moderationTopicId);
         }
 
-        if (media.length > 0) {
-            const mediaGroupOptions: SendMessageOptions = {};
-            if (moderationTopicId && Number(moderationTopicId) !== 1) {
-                mediaGroupOptions.message_thread_id = Number(moderationTopicId);
-            }
-            const group = this.mediaService.buildMediaGroup(media, text);
-            const sentMsgs = await this.bot.sendMediaGroup(moderationGroupId, group, mediaGroupOptions);
-            await this.bot.sendMessage(moderationGroupId, localeService.t(this.config.lang, 'moderationPrompt'), options);
+        const sent = await this.bot.sendRichMessage(moderationGroupId, this.formatPostRichMessage(data), options);
 
-            return sentMsgs[0]?.message_id || null;
-        } else {
-            const sentMsg = await this.bot.sendMessage(moderationGroupId, text, options);
-
-            return sentMsg.message_id;
-        }
+        return sent.message_id;
     }
 
     async sendToApproved(richMessage: InputRichMessage): Promise<number | null> {

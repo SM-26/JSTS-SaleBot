@@ -10,6 +10,7 @@
     "dailyBumpLimit": 2,
     "donationsEnabled": true,
     "enableFaq": true,
+    "mediaLayout": "slideshow",
     "faqAllowInGroups": boolean,
     "faqMaxButtonsPerRow": 3,
     "faqMaxDepth": null,
