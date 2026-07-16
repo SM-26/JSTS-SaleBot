@@ -27,7 +27,9 @@ delivery (individual DMs vs. one channel message).
   replied-to media message with no text is rejected.
 - **Timing:** send immediately (no confirmation step).
 - **Report:** after sending, report to the admin who was reached and who
-  failed, with a per-recipient reason for each failure.
+  failed, with a per-recipient reason for each failure. The report is sent to
+  the admin as a **Rich Message** (heading + summary + failures list),
+  consistent with `/help` and the post views.
 - **Private chat only**, like `/broadcast`.
 
 ### Non-goals (explicitly out of scope)
@@ -124,6 +126,20 @@ send the localized report.
 - **Long failure lists:** the report always shows the count summary, itemizes
   the first ~30 failures, then appends "…and N more (see logs)." The full
   failure list is written to `console` regardless.
+
+### Report presentation (Rich Message)
+
+The controller sends the admin report via `bot.sendRichMessage`, matching the
+loose-typed block-building style already used in `postService`/`showHelp`
+(assemble blocks, cast once at the boundary):
+
+- `heading` — the report title (e.g. "📢 Broadcast report"), size 2.
+- `paragraph` — the summary line (`broadcastUsersReport`: sent / failed / total).
+- If there are failures: a `divider`, then a `list` of failure items
+  (`• @username (id) — reason`, up to ~30), and a trailing `paragraph` with
+  `broadcastUsersMore` when truncated.
+
+If there are zero failures, only the heading + summary paragraph are sent.
 
 ## Command routing
 
