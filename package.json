@@ -9,7 +9,7 @@
     "dev": "ts-node src/bot.ts",
     "check-locals": "ts-node src/tests/checkLocals.ts",
     "lint": "eslint .",
-    "test": "npm run check-locals && echo \"Tests passed\""
+    "test": "pnpm run check-locals && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",

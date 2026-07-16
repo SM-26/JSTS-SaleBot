@@ -1,19 +1,20 @@
 # --- Base Stage ---
 FROM node:26-alpine AS base
 WORKDIR /app
-COPY package*.json ./
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
 
 # --- Development Stage ---
 FROM base AS development
-RUN npm install
+RUN pnpm install --frozen-lockfile
 COPY . .
-CMD ["npm", "run", "dev"]
+CMD ["pnpm", "run", "dev"]
 
 # --- Build Stage ---
 FROM base AS build
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 # --- Production Stage ---
 FROM node:26-alpine AS production
@@ -22,11 +23,11 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Only copy what is strictly necessary
-COPY --from=build /app/package*.json ./
+COPY --from=build /app/package.json /app/pnpm-lock.yaml ./
 COPY --from=build /app/dist ./dist
 
 # Install only production dependencies
-RUN npm ci --omit=dev --quiet
+RUN corepack enable && pnpm install --prod --frozen-lockfile
 
 # Security: Run as a non-privileged user
 USER node

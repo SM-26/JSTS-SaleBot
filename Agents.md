@@ -110,7 +110,7 @@ User sends /start
 Each Telegram user has an in-memory `UserSession` (stored in a `Map<number, UserSession>` on `BotController`). The `isIdle` flag prevents overlapping conversations. Always check and reset `session.isIdle` around async flows.
 
 ### Localization
-All user-facing strings live in `src/locales/<lang>/common.json` files, where `<lang>` is the language code (e.g., `en`, `he`). Each language has its own directory containing a `common.json` file with key-value pairs (matching `LocaleStrings` in `src/types/index.ts`). The `LocaleService` handles user-specific language preferences with fallback logic: `preferredLocale` → `languageCode` → default language. When adding new strings, update **every** language's `common.json` file and run `npm run check-locals` to validate completeness and syntax.
+All user-facing strings live in `src/locales/<lang>/common.json` files, where `<lang>` is the language code (e.g., `en`, `he`). Each language has its own directory containing a `common.json` file with key-value pairs (matching `LocaleStrings` in `src/types/index.ts`). The `LocaleService` handles user-specific language preferences with fallback logic: `preferredLocale` → `languageCode` → default language. When adding new strings, update **every** language's `common.json` file and run `pnpm run check-locals` to validate completeness and syntax.
 
 ---
 
@@ -135,8 +135,8 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 ```bash
 cp .env.example .env          # Fill in BOT_TOKEN and MONGO_URI
 cp config.json.example config.json   # Adjust group IDs and settings
-npm install
-npm run dev                   # Runs via ts-node (no build required)
+pnpm install
+pnpm run dev                   # Runs via ts-node (no build required)
 ```
 
 ### Setup (Docker)
@@ -149,14 +149,14 @@ Mongo-express is available at `http://localhost:8081` for DB inspection.
 
 ### Build for production
 ```bash
-npm run build    # Compiles TypeScript to dist/
-npm start        # Runs dist/bot.js
+pnpm run build    # Compiles TypeScript to dist/
+pnpm start        # Runs dist/bot.js
 ```
 
 ### Linting & Testing
 ```bash
-npm run lint         # ESLint check
-npm run test         # Validates src/locales key completeness
+pnpm run lint         # ESLint check
+pnpm run test         # Validates src/locales key completeness
 ```
 
 ---
@@ -167,7 +167,7 @@ npm run test         # Validates src/locales key completeness
 - **Follow the existing service layer pattern**: business logic belongs in `src/services/`, database access in `src/repositories/`, type definitions in `src/types/index.ts`.
 - **Enforce strict typing**: Avoid `any`. Use specific types from `node-telegram-bot-api` (e.g., `User`, `Message`, `CallbackQuery`) or define custom interfaces in `src/types/index.ts`.
 - **Use `unknown` or Union Types**: If a type is truly dynamic (like translation parameters), prefer `Record<string, string | number | boolean>` or `unknown` over `any`.
-- **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `npm run check-locals`.
+- **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Check `session.isIdle`** before starting any new async input flow, and always reset it (including in `catch` blocks) to prevent users getting stuck.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
@@ -196,7 +196,7 @@ npm run test         # Validates src/locales key completeness
 ### Adding a New Locale
 1. Create a new directory `src/locales/<lang>/` (e.g., `src/locales/ru/`).
 2. Add a `common.json` file in the new directory, filling in all keys from `LocaleStrings`.
-3. Run `npm run check-locals` — it will error on any missing keys.
+3. Run `pnpm run check-locals` — it will error on any missing keys.
 4. Set `"lang": "<lang>"` in `config.json` to activate it as default (users can override with `/lang`).
 
 ---

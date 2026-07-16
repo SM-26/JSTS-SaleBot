@@ -166,7 +166,7 @@ cp src/locales/en/faq.json src/locales/fr/faq.json
 4. Run the locale validation test to ensure the file is syntactically correct:
 
 ```bash
-npm run test
+pnpm run test
 ```
 
 ### Best Practices
@@ -174,14 +174,14 @@ npm run test
 ✅ **Do:**
 - Keep FAQ entries concise and user-friendly
 - Use consistent numbering (avoid gaps: use `1`, `1.1`, `1.2`, `2`; not `1`, `1.5`, `3`)
-- Test the FAQ file with: `npm run test` (validates JSON syntax and node structure)
+- Test the FAQ file with: `pnpm run test` (validates JSON syntax and node structure)
 - Use the `/faq` command in the bot to preview your FAQ before committing
 - Update **all** language files when modifying structure (to keep them in sync)
 
 ❌ **Don't:**
 - Leave the `meta.locale` field empty or mismatched with the directory name
 - Use special characters or newlines in FAQ text—keep values as single-line strings
-- Skip validation after editing—`npm run test` ensures file integrity
+- Skip validation after editing—`pnpm run test` ensures file integrity
 - Create duplicate or out-of-order node keys (structure is for logical presentation, not sorting)
 
 ### Technical Implementation
@@ -269,7 +269,7 @@ Database UI: Access Mongo Express at `http://localhost:8081` to manage your coll
 ```bash
 git clone https://github.com/SM-26/JSTS-SaleBot.git
 cd JSTS-SaleBot
-npm install
+pnpm install
 ```
 
 ### 2. Configure Environment
@@ -321,11 +321,11 @@ Edit `config.json`:
 
 ```bash
 # Development (with ts-node)
-npm run dev
+pnpm run dev
 
 # Production
-npm run build
-npm start
+pnpm run build
+pnpm start
 ```
 
 ---
@@ -358,7 +358,7 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 | Database     | MongoDB + Mongoose          |
 | Config       | JSON (`config.json`)         |
 | i18n         | Structured JSON (`src/locales/<lang>/common.json` + `src/locales/<lang>/faq.json`)  |
-| Validation   | `npm run test` — Validates locale file syntax, key consistency, and FAQ structure |
+| Validation   | `pnpm run test` — Validates locale file syntax, key consistency, and FAQ structure |
 
 ---
 
