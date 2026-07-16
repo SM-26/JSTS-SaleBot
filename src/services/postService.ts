@@ -1,9 +1,11 @@
-import TelegramBot, { Message } from "node-telegram-bot-api";
+import TelegramBot, { Message, InputRichMessage, InputRichBlock, InputRichBlockListItem, RichText } from "node-telegram-bot-api";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
+
+type RichTextInput = RichText | string | RichTextInput[];
 
 export interface PostData {
     title: string;
@@ -41,6 +43,59 @@ export class PostService {
             `📍 ${data.location}`,
             `👤 ${this.formatUserMention(data.userId, data.username, data.firstName)}`,
         ].join("\n");
+    }
+
+    // node-telegram-bot-api's RichText type only covers the tagged formatting
+    // objects (bold, italic, ...); the Bot API also accepts a plain string or
+    // an array of RichText for concatenation, which the shipped types omit.
+    // Widen locally instead of casting at every call site.
+    formatUserMentionRich(userId: number, username?: string, firstName?: string): RichTextInput {
+        return username
+            ? `@${username}`
+            : {
+                type: "text_mention",
+                text: (firstName || "User") as unknown as RichText,
+                user: { id: userId, is_bot: false, first_name: firstName || "User" },
+            };
+    }
+
+    // Approved-group post as a Rich Message (Bot API 10.1+). See
+    // https://core.telegram.org/bots/api for the block/text "type" discriminators.
+    formatPostRichMessage(data: PostData, soldTag?: string): InputRichMessage {
+        const detailItem = (text: RichTextInput): InputRichBlockListItem => ({
+            blocks: [{ type: "paragraph", text } as InputRichBlock],
+        });
+
+        const blocks: InputRichBlock[] = [
+            { type: "heading", text: data.title, size: 3 } as InputRichBlock,
+            { type: "paragraph", text: data.description } as InputRichBlock,
+            {
+                type: "list",
+                items: [
+                    detailItem(`💰 ${data.price}`),
+                    detailItem(`📍 ${data.location}`),
+                    detailItem(["👤 ", this.formatUserMentionRich(data.userId, data.username, data.firstName)]),
+                ],
+            },
+        ];
+
+        const mediaBlocks: InputRichBlock[] = data.media.map((item) =>
+            item.type === "video"
+                ? { type: "video", video: { type: "video", media: item.fileId } }
+                : { type: "photo", photo: { type: "photo", media: item.fileId } }
+        );
+
+        if (mediaBlocks.length === 1) {
+            blocks.push(mediaBlocks[0]);
+        } else if (mediaBlocks.length > 1) {
+            blocks.push({ type: "collage", blocks: mediaBlocks });
+        }
+
+        if (soldTag) {
+            blocks.push({ type: "footer", text: soldTag } as InputRichBlock);
+        }
+
+        return { blocks };
     }
 
     async sendPreview(chatId: number, text: string, media: MediaItem[], locale: string): Promise<void> {
@@ -89,25 +144,18 @@ export class PostService {
         }
     }
 
-    async sendToApproved(text: string, media: MediaItem[]): Promise<number | null> {
+    async sendToApproved(richMessage: InputRichMessage): Promise<number | null> {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: SendMessageOptions = { parse_mode: "HTML" };
+        const options: Parameters<TelegramBot['sendRichMessage']>[2] = {};
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }
 
-        if (media.length > 0) {
-            const group = this.mediaService.buildMediaGroup(media, text);
-            const sent = await this.bot.sendMediaGroup(approvedGroupId, group, options);
+        const sent = await this.bot.sendRichMessage(approvedGroupId, richMessage, options);
 
-            return sent[0]?.message_id ?? null;
-        } else {
-            const sent = await this.bot.sendMessage(approvedGroupId, text, options);
-
-            return sent.message_id;
-        }
+        return sent.message_id;
     }
 
     async sendToApprovedText(text: string): Promise<number | null> {
@@ -124,23 +172,15 @@ export class PostService {
         return sent.message_id;
     }
 
-    async markSoldInGroup(approvedMessageId: number, soldText: string, hasMedia: boolean): Promise<boolean> {
+    async markSoldInGroup(approvedMessageId: number, richMessage: InputRichMessage): Promise<boolean> {
         const approvedGroupId = this.config.approvedGroupId;
 
         try {
-            if (hasMedia) {
-                await this.bot.editMessageCaption(soldText, {
-                    chat_id: approvedGroupId,
-                    message_id: approvedMessageId,
-                    parse_mode: "HTML",
-                });
-            } else {
-                await this.bot.editMessageText(soldText, {
-                    chat_id: approvedGroupId,
-                    message_id: approvedMessageId,
-                    parse_mode: "HTML",
-                });
-            }
+            await this.bot.editMessageText({
+                chat_id: approvedGroupId,
+                message_id: approvedMessageId,
+                rich_message: richMessage,
+            });
             return true;
         } catch (err) {
             const errorMessage = (err as Error).message;

@@ -84,7 +84,7 @@ export class ModerationService {
     }
 
     private async handleApproval(query: CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<void> {
-        const postText = this.postService.formatPostText({
+        const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
             price: post.price,
@@ -95,7 +95,7 @@ export class ModerationService {
             firstName: postAuthor.firstName || "User",
         });
 
-        const messageId = await this.postService.sendToApproved(postText, post.media);
+        const messageId = await this.postService.sendToApproved(richMessage);
         if (messageId) {
             await postRepository.setApprovedMessageId(postId, messageId);
         }

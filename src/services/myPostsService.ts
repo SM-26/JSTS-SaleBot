@@ -158,7 +158,7 @@ export class MyPostsService {
         // Edit the message in the approved group
         if (post.approvedMessageId) {
             const user = await userRepository.findByUserId(post.userId);
-            const postText = this.postService.formatPostText({
+            const richMessage = this.postService.formatPostRichMessage({
                 title: post.title,
                 description: post.description,
                 price: post.price,
@@ -167,9 +167,8 @@ export class MyPostsService {
                 userId: Number(post.userId),
                 username: user?.userName || undefined,
                 firstName: user?.firstName || "User",
-            });
-            const soldText = postText + localeService.t(this.config.lang, 'soldTag'); //
-            await this.postService.markSoldInGroup(post.approvedMessageId, soldText, post.media.length > 0);
+            }, localeService.t(this.config.lang, 'soldTag'));
+            await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
         }
 
         await this.refreshMessage(query);
@@ -220,7 +219,7 @@ export class MyPostsService {
 
         // Fetch user for formatting
         const postUser: User | null = await userRepository.findByUserId(post.userId);
-        const postText = this.postService.formatPostText({
+        const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
             price: post.price,
@@ -231,7 +230,7 @@ export class MyPostsService {
             firstName: postUser?.firstName || "User",
         });
 
-        const newMessageId = await this.postService.sendToApproved(postText, post.media);
+        const newMessageId = await this.postService.sendToApproved(richMessage);
 
         // Update bump tracking and store new message ID
         await postRepository.updateBump(postId, bumpCount + 1);

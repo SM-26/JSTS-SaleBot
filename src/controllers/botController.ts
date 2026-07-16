@@ -59,7 +59,7 @@ export class BotController {
             let synced = 0; //
             for (const post of soldPosts) {
                 const user: User | null = await userRepository.findByUserId(post.userId);
-                const postText = this.postService.formatPostText({
+                const richMessage = this.postService.formatPostRichMessage({
                     title: post.title,
                     description: post.description,
                     price: post.price,
@@ -68,9 +68,8 @@ export class BotController {
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "User",
-                });
-                const soldText = postText + localeService.t(this.config.lang, 'soldTag');
-                const success = await this.postService.markSoldInGroup(post.approvedMessageId!, soldText, post.media.length > 0);
+                }, localeService.t(this.config.lang, 'soldTag'));
+                const success = await this.postService.markSoldInGroup(post.approvedMessageId!, richMessage);
                 if (success) {
                     synced++;
                 } else {
