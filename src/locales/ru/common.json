@@ -25,6 +25,7 @@
     "configUpdated": "Конфигурация обновлена.",
     "configUsage": "Использование: <code>/config ключ значение</code>",
     "confirmButton": "✅ Подтвердить и отправить",
+    "contactSellerCta": "💬 Ответьте на это сообщение, чтобы связаться с продавцом",
     "clearRejectedButton": "🗑️ Очистить отклоненные",
     "clearSoldButton": "🗑️ Очистить проданные",
     "clearRejectedSuccess": "Все отклоненные посты были очищены.",

@@ -28,6 +28,7 @@
     "configUpdated": "Config updated.",
     "configUsage": "Usage: <code>/config key value</code>",
     "confirmButton": "✅ Confirm & Send",
+    "contactSellerCta": "💬 Reply to this message to contact the seller",
     "clearRejectedButton": "🗑️ Clear Rejected",
     "clearSoldButton": "🗑️ Clear Sold",
     "clearRejectedSuccess": "All rejected posts have been cleared.",

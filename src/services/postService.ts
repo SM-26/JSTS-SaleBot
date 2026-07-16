@@ -67,8 +67,9 @@ export class PostService {
         });
 
         const blocks: InputRichBlock[] = [
-            { type: "heading", text: data.title, size: 3 } as InputRichBlock,
-            { type: "paragraph", text: data.description } as InputRichBlock,
+            { type: "heading", text: data.title, size: 2 } as InputRichBlock,
+            { type: "blockquote", blocks: [{ type: "paragraph", text: data.description } as InputRichBlock] } as InputRichBlock,
+            { type: "divider" } as InputRichBlock,
             {
                 type: "list",
                 items: [
@@ -76,24 +77,25 @@ export class PostService {
                     detailItem(`📍 ${data.location}`),
                     detailItem(["👤 ", this.formatUserMentionRich(data.userId, data.username, data.firstName)]),
                 ],
-            },
+            } as InputRichBlock,
         ];
 
         const mediaBlocks: InputRichBlock[] = data.media.map((item) =>
             item.type === "video"
-                ? { type: "video", video: { type: "video", media: item.fileId } }
-                : { type: "photo", photo: { type: "photo", media: item.fileId } }
+                ? { type: "video", video: { type: "video", media: item.fileId } } as InputRichBlock
+                : { type: "photo", photo: { type: "photo", media: item.fileId } } as InputRichBlock
         );
 
         if (mediaBlocks.length === 1) {
             blocks.push(mediaBlocks[0]);
         } else if (mediaBlocks.length > 1) {
-            blocks.push({ type: "collage", blocks: mediaBlocks });
+            // slideshow = swipeable gallery; nicer than a fixed collage grid.
+            blocks.push({ type: "slideshow", blocks: mediaBlocks } as InputRichBlock);
         }
 
-        if (soldTag) {
-            blocks.push({ type: "footer", text: soldTag } as InputRichBlock);
-        }
+        // A sold post shouldn't invite contact, so swap the CTA for the sold tag.
+        const footerText = soldTag ? soldTag.trim() : localeService.t(this.lang, 'contactSellerCta');
+        blocks.push({ type: "footer", text: footerText } as InputRichBlock);
 
         return { blocks };
     }
