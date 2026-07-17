@@ -5,9 +5,6 @@ export class UserService {
     async ensureUser(from: { id: number; first_name: string; last_name?: string; username?: string; language_code?: string }): Promise<void> {
         const userId = String(from.id);
 
-        // Fetch existing user to avoid overwriting with incomplete data
-        const existingUser = await userRepository.findByUserId(userId);
-
         const setData: Partial<User> = { userId };
         // authLevel is the only field that should be set exclusively on insert if not already present.
         // Other fields (firstName, lastName, etc.) are handled by setData and Mongoose defaults.

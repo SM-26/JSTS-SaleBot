@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import User, { IUser } from "../models/User";
-import { AuthLevel, User as UserType } from "../types";
+import { AuthLevel } from "../types";
 
 class UserRepository {
     async findByUserId(userId: string): Promise<IUser | null> {
@@ -19,7 +19,7 @@ class UserRepository {
         // Check if the user exists to handle migration from isAdmin to authLevel
         const existingUser = await User.findOne({ userId }).exec();
 
-        const update: any = {
+        const update: mongoose.UpdateQuery<IUser> = {
             $set: setData,
             $setOnInsert: setOnInsert
         };
@@ -27,8 +27,8 @@ class UserRepository {
         // Since isAdmin is removed from the schema, we must use .get() to check for its presence in the DB.
         const isAdminValue = existingUser?.get('isAdmin');
         if (existingUser && typeof isAdminValue === 'boolean') {
-            const authLevel = isAdminValue ? AuthLevel.ADMIN : AuthLevel.USER;
-            update.$set.authLevel = authLevel;
+            // Mutating setData is safe: it's the same object referenced by update.$set.
+            setData.authLevel = isAdminValue ? AuthLevel.ADMIN : AuthLevel.USER;
             update.$unset = { isAdmin: 1 };
         }
 
