@@ -1,4 +1,4 @@
-import TelegramBot, { Message, CallbackQuery, InlineKeyboardMarkup } from "node-telegram-bot-api";
+import TelegramBot, { Message, CallbackQuery, InlineKeyboardMarkup, InputRichMessage } from "node-telegram-bot-api";
 import { BotConfig, MediaItem } from "../types";
 import { localeService } from "./localeService";
 
@@ -119,19 +119,29 @@ export class InputService {
         return mediaPromise;
     }
 
-    async confirmAction(msg: Message, locale: string): Promise<boolean> {
+    // Pass `richMessage` to send the preview and its confirm/cancel buttons as a
+    // single message — a media group can't carry buttons, which is what forced
+    // the old preview-then-"👆" pair and the visible gap between them.
+    async confirmAction(msg: Message, locale: string, richMessage?: InputRichMessage): Promise<boolean> {
         const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
         const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
 
-        const sentMsg = await this.bot.sendMessage(msg.chat.id, "👆", {
-            message_thread_id: msg.message_thread_id,
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: localeService.t(locale, 'confirmButton'), callback_data: callbackId },
-                    { text: localeService.t(locale, 'cancelButton'), callback_data: cancelId },
-                ]],
-            },
-        });
+        const replyMarkup: InlineKeyboardMarkup = {
+            inline_keyboard: [[
+                { text: localeService.t(locale, 'confirmButton'), callback_data: callbackId },
+                { text: localeService.t(locale, 'cancelButton'), callback_data: cancelId },
+            ]],
+        };
+
+        const sentMsg = richMessage
+            ? await this.bot.sendRichMessage(msg.chat.id, richMessage, {
+                message_thread_id: msg.message_thread_id,
+                reply_markup: replyMarkup,
+            })
+            : await this.bot.sendMessage(msg.chat.id, "👆", {
+                message_thread_id: msg.message_thread_id,
+                reply_markup: replyMarkup,
+            });
 
         return new Promise((resolve) => {
             const listener = (query: CallbackQuery) => {

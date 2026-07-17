@@ -1,6 +1,5 @@
 import TelegramBot, { Message, InputRichMessage } from "node-telegram-bot-api";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
-import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
@@ -19,8 +18,7 @@ export interface PostData {
 export class PostService {
     constructor(
         private bot: TelegramBot,
-        private config: BotConfig,
-        public mediaService: MediaService
+        private config: BotConfig
     ) { }
 
     private get lang() {
@@ -31,16 +29,6 @@ export class PostService {
         return username
             ? `@${username}`
             : `<a href="tg://user?id=${userId}">${firstName || "User"}</a>`;
-    }
-
-    formatPostText(data: PostData): string {
-        return [
-            `<b>${data.title}</b>`,
-            data.description,
-            `💰 ${data.price}`,
-            `📍 ${data.location}`,
-            `👤 ${this.formatUserMention(data.userId, data.username, data.firstName)}`,
-        ].join("\n");
     }
 
     // The `text_mention` rich-text object links a display name to a user id.
@@ -54,7 +42,10 @@ export class PostService {
     // types omit the plain-string/array forms the API accepts, so we assemble the
     // blocks loosely and cast once at the boundary. Block/text "type"
     // discriminators verified against https://core.telegram.org/bots/api.
-    formatPostRichMessage(data: PostData, opts: { sold?: boolean; showCta?: boolean } = {}): InputRichMessage {
+    formatPostRichMessage(
+        data: PostData,
+        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string } } = {}
+    ): InputRichMessage {
         const bold = (text: unknown) => ({ type: "bold", text });
         const para = (text: unknown) => ({ type: "paragraph", text });
         const item = (text: unknown) => ({ blocks: [para(text)] });
@@ -62,6 +53,7 @@ export class PostService {
         const titleText = opts.sold ? { type: "strikethrough", text: data.title } : data.title;
 
         const blocks: unknown[] = [
+            ...(opts.previewLabel ? [para(opts.previewLabel)] : []),
             { type: "heading", text: titleText, size: 2 },
             { type: "blockquote", blocks: [para(data.description)] },
             { type: "divider" },
@@ -89,6 +81,11 @@ export class PostService {
             blocks.push({ type: layout, blocks: mediaBlocks });
         }
 
+        // e.g. the /pending "Review" deep-link to the moderation message.
+        if (opts.link) {
+            blocks.push({ type: "footer", text: { type: "url", text: opts.link.label, url: opts.link.url } });
+        }
+
         // Sold posts show the sold marker; only the public post gets a contact CTA.
         const footer = opts.sold
             ? localeService.t(this.lang, 'soldTag')
@@ -98,17 +95,6 @@ export class PostService {
         }
 
         return { blocks } as unknown as InputRichMessage;
-    }
-
-    async sendPreview(chatId: number, text: string, media: MediaItem[], locale: string): Promise<void> {
-        const previewText = `${localeService.t(locale, 'preview')}\n${text}`;
-
-        if (media.length > 0) {
-            const group = this.mediaService.buildMediaGroup(media, previewText);
-            await this.bot.sendMediaGroup(chatId, group);
-        } else {
-            await this.bot.sendMessage(chatId, previewText, { parse_mode: "HTML" });
-        }
     }
 
     // One Rich Message carrying the post AND the approve/reject buttons. A media

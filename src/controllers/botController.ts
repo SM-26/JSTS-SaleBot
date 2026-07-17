@@ -5,7 +5,6 @@ import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { BotConfig, UserSession, Post, User, LocaleService } from "../types";
 import { InputService } from "../services/inputService";
-import { MediaService } from "../services/photoService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
@@ -28,7 +27,6 @@ export class BotController {
     private sessions: Map<number, UserSession> = new Map();
 
     private inputService: InputService;
-    private mediaService: MediaService;
     private postService: PostService;
     private moderationService: ModerationService;
     private userService: UserService;
@@ -44,13 +42,12 @@ export class BotController {
         this.config = config;
 
         this.inputService = new InputService(bot, this.config);
-        this.mediaService = new MediaService();
-        this.postService = new PostService(bot, this.config, this.mediaService);
+        this.postService = new PostService(bot, this.config);
         this.moderationService = new ModerationService(bot, this.config, this.postService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(bot, this.config, this.postService);
         this.adminService = new AdminService(bot, this.config);
-        this.pendingService = new PendingService(bot, this.config, this.postService, this.mediaService);
+        this.pendingService = new PendingService(bot, this.config, this.postService);
         this.paymentService = new PaymentService(bot, this.config);
         this.faqService = new FaqService(bot, this.config);
         this.broadcastUsersService = new BroadcastUsersService(bot);
@@ -127,7 +124,6 @@ export class BotController {
                 return;
             }
 
-            // Build post text
             const postData = {
                 title,
                 description,
@@ -138,12 +134,12 @@ export class BotController {
                 username: msg.from!.username,
                 firstName: msg.from!.first_name,
             };
-            const postText = this.postService.formatPostText(postData);
 
-            // Preview & confirm
-            await this.postService.sendPreview(msg.chat.id, postText, media, locale);
-
-            const confirmed = await this.inputService.confirmAction(msg, locale);
+            // Preview & confirm as one message (buttons attached to the preview).
+            const richPreview = this.postService.formatPostRichMessage(postData, {
+                previewLabel: localeService.t(locale, 'preview'),
+            });
+            const confirmed = await this.inputService.confirmAction(msg, locale, richPreview);
             if (!confirmed) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCancelled'));
                 console.info('[INFO - HandleNewPost] session idle (user cancelled)', { userId: msg.from?.id });

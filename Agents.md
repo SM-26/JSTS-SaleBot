@@ -33,7 +33,6 @@
 │   │   ├── moderationService.ts  # Approve/reject callback handling in moderation group
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
-│   │   ├── photoService.ts       # Media (photo/video) file ID extraction helper
 │   │   ├── userService.ts        # Ensures user record exists in DB on first interaction
 │   │   └── paymentService.ts     # Donation invoice creation & payment event handling
 │   ├── models/
@@ -84,7 +83,8 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `approvedTopicId`   | number  | Forum topic ID within the approved group (optional)      |
 | `timeOut`           | number  | User input timeout in minutes                            |
 | `validatePrice`     | boolean | Whether to enforce numeric price input                   |
-| `minimumMedia`      | number  | Minimum number of photos/videos required per post        |
+| `minimumPhotos`     | number  | Minimum number of photos/videos required per post (0 = optional) |
+| `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
 
 ---

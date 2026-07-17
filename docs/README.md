@@ -211,7 +211,6 @@ src/
 │   └── userRepository.ts     # User CRUD (upsert)
 ├── services/
 │   ├── inputService.ts       # Reusable input collection (text, price, photos, confirm)
-│   ├── photoService.ts       # Photo download & media group builder
 │   ├── postService.ts        # Post formatting, preview, publish to groups
 │   ├── myPostsService.ts     # User post management (list, bump, mark sold)
 │   ├── moderationService.ts  # Approve/reject logic & rejection reasons

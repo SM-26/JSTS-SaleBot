@@ -3,15 +3,13 @@ import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { AuthLevel, BotConfig, SendMessageOptions } from "../types";
 import { PostService } from "./postService";
-import { MediaService } from "./photoService";
 import { localeService } from "./localeService";
 
 export class PendingService {
     constructor(
         private bot: TelegramBot,
         private config: BotConfig,
-        private postService: PostService,
-        private mediaService: MediaService
+        private postService: PostService
     ) { }
 
     async handlePending(msg: Message): Promise<void> {
@@ -53,7 +51,8 @@ export class PendingService {
             for (const post of displayPosts) {
                 const user = await userRepository.findByUserId(post.userId);
 
-                const postTextBody = this.postService.formatPostText({
+                const chatIdStr = this.config.moderationGroupId.toString().replace(/^-100/, "");
+                const richMessage = this.postService.formatPostRichMessage({
                     title: post.title,
                     description: post.description,
                     price: post.price,
@@ -62,37 +61,28 @@ export class PendingService {
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "Unknown",
-                });
+                }, post.moderationMessageId ? {
+                    link: {
+                        label: localeService.t(locale, 'adminPendingLink'),
+                        url: `https://t.me/c/${chatIdStr}/${post.moderationMessageId}`,
+                    },
+                } : {});
 
-                const chatIdStr = this.config.moderationGroupId.toString().replace(/^-100/, "");
-                const link = post.moderationMessageId
-                    ? `\n<a href="https://t.me/c/${chatIdStr}/${post.moderationMessageId}">${localeService.t(locale, 'adminPendingLink')}</a>`
-                    : "";
-                const postText = postTextBody + link;
-
-                const replyMarkup = {
-                    inline_keyboard: [[
-                        { text: localeService.t(locale, 'approveButton'), callback_data: `approve_${post._id}` },
-                        { text: localeService.t(locale, 'rejectButton'), callback_data: `reject_${post._id}` }
-                    ]]
-                };
-
-                if (post.media && post.media.length > 0) {
-                    const mediaGroupOptions: SendMessageOptions = {};
-                    if (targetThreadId && Number(targetThreadId) !== 1) {
-                        mediaGroupOptions.message_thread_id = Number(targetThreadId);
+                // One Rich Message with the approve/reject buttons attached — a media
+                // group can't carry buttons, which is what forced the old extra "👇".
+                const richOptions: Parameters<TelegramBot['sendRichMessage']>[2] = {
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: localeService.t(locale, 'approveButton'), callback_data: `approve_${post._id}` },
+                            { text: localeService.t(locale, 'rejectButton'), callback_data: `reject_${post._id}` }
+                        ]]
                     }
-                    const group = this.mediaService.buildMediaGroup(post.media, postText);
-                    await this.bot.sendMediaGroup(msg.chat.id, group, mediaGroupOptions);
-
-                    // Buttons cannot be attached to a media group, so we send them in a separate message
-                    const btnOptions: SendMessageOptions = { reply_markup: replyMarkup };
-                    if (targetThreadId && Number(targetThreadId) !== 1) btnOptions.message_thread_id = Number(targetThreadId);
-                    await this.bot.sendMessage(msg.chat.id, "👇", btnOptions);
-                } else {
-                    const msgOptions: SendMessageOptions = { ...options, link_preview_options: { is_disabled: true }, reply_markup: replyMarkup };
-                    await this.bot.sendMessage(msg.chat.id, postText, msgOptions);
+                };
+                if (targetThreadId && Number(targetThreadId) !== 1) {
+                    richOptions.message_thread_id = Number(targetThreadId);
                 }
+
+                await this.bot.sendRichMessage(msg.chat.id, richMessage, richOptions);
             }
 
             if (pendingPosts.length > 10) {
