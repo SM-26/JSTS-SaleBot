@@ -244,24 +244,51 @@ src/
 ## ⚡ Quick Start
 
 ### 🐳 Run with Docker (Recommended)
-The easiest way to get the bot, database, and database management UI running is via Docker. This ensures all services are networked correctly out of the box.
 
-#### Configure Environment:
-Ensure your .env and config.json files are set up. For Docker, use:
+The `dockerfile` is a multi-stage build with **two deployment targets**:
+
+| Target | Use case | How it runs | Image contents |
+| :--- | :--- | :--- | :--- |
+| **`development`** | Local development & testing | `ts-node` directly — no build step. Source is bind-mounted, so edits apply live. Node debugger on `9221`. | Includes devDependencies (ts-node, eslint…) |
+| **`production`** | Real deployment | Pre-compiled `node dist/bot.js`, as the non-root `node` user | Production dependencies only — slim |
+
+Both stages install the exact pnpm version pinned by the `packageManager` field in `package.json`, so Docker, CI and local never drift.
+
+#### 1. Development — `docker compose`
+
+`docker-compose.yaml` targets the **development** stage and brings up the bot, MongoDB and mongo-express together, networked out of the box.
+
+In `.env`, point at the Mongo **service name** (not `localhost` — inside the container that would mean the bot itself):
+
 ``` env
 MONGO_URI=mongodb://mongoserver:27017/SalesBotDB
 ```
 
-#### Launch Services:
+Launch:
 
 ```bash
-docker compose up -d
+docker compose up -d          # add --build after changing dependencies or the dockerfile
 ```
-#### Monitor & Manage:
 
-Bot Logs: `docker compose logs -f bot`
+Monitor & manage:
+- Bot logs: `docker compose logs -f bot`
+- Database UI: Mongo Express at `http://localhost:8081` — username `admin`, password `pass`
+- Debugger: attach to `localhost:9221`
 
-Database UI: Access Mongo Express at `http://localhost:8081` to manage your collections. username is `admin` and password is `pass`
+#### 2. Production — build & run
+
+The production target is **not** part of `docker-compose.yaml`. Build it and run it against your real MongoDB:
+
+```bash
+docker build --target production -t jsts-salebot:1.0.0 .
+
+docker run -d --name jsts-salebot \
+  --env-file .env \
+  -v "$PWD/config.json:/app/config.json" \
+  jsts-salebot:1.0.0
+```
+
+> **`config.json` is not baked into the image.** It is environment-specific (and gitignored), so it must be mounted at `/app/config.json` — the container exits on startup without it. Mount it **writable**: `/config` changes are persisted back to this file.
 
 ## Dev build  
 ### Prerequisites
@@ -382,12 +409,5 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 See [LICENSE.txt](../docs/LICENSE.txt) for details.
 
 ## Todo list
-- [x] wrap this project in docker
-- [x] make sure that the /test is working from docker
-- [x] setup .github folder with everything like the old project.
-- [x] double check translations and all of the strings
 - [ ] make a logo for this project
-- [ ] better readme.md
-- [ ] make sure we implement an expiration mechanism somehow
-- [ ] maybe set up a logging channel?
-- [ ] handle idle state
+- [ ] rework the faq with rich message
