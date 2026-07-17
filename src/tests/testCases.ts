@@ -6,6 +6,7 @@ import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
 import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from "../types";
 import userRepository from "../repositories/userRepository";
+import { BroadcastUsersService } from "../services/broadcastUsersService";
 
 /**
  * Test cases for HandleNewPost flow.
@@ -31,6 +32,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     broadcast_test: { label: "📢 Broadcast (to Moderation)", run: testCase_Broadcast },
     rbac_promotion: { label: "🎖 Test RBAC Promotion", run: testCase_RBACPromotion },
     rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
+    broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
 };
 
 /**
@@ -415,4 +417,59 @@ async function testCase_RBACAuth(
     const output = localeService.t(locale, 'authCurrentLevel', { userId: user.userId, role: roleName, level: user.authLevel });
     await bot.sendMessage(msg.chat.id, `<b>RBAC Auth Test</b>\n\n${output}`, { parse_mode: "HTML" });
     await bot.sendMessage(msg.chat.id, "✅ Auth logic verified.");
+}
+
+/**
+ * TEST CASE: broadcastUsers audience resolution + send path.
+ * Seeds a pending post and an approved post from distinct fake authors, then
+ * exercises resolveAudience/sendToMany like /broadcastUsers would.
+ */
+async function testCase_BroadcastUsers(
+    bot: TelegramBot,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    const adminId = String(msg.from.id);
+    const pendingAuthorId = `test_pending_${Date.now()}`;
+    const approvedAuthorId = `test_approved_${Date.now()}`;
+    let pendingPostId: string | undefined;
+    let approvedPostId: string | undefined;
+
+    try {
+        const pendingPost = await postRepository.createPost({
+            userId: pendingAuthorId, status: "pending",
+            title: "טסט - פוסט ממתין", description: "בדיקת broadcastUsers",
+            price: "1", media: [], location: "טסט", createdAt: new Date(),
+        });
+        const approvedPost = await postRepository.createPost({
+            userId: approvedAuthorId, status: "approved",
+            title: "טסט - פוסט מאושר", description: "בדיקת broadcastUsers",
+            price: "1", media: [], location: "טסט", createdAt: new Date(),
+        });
+        pendingPostId = String(pendingPost._id);
+        approvedPostId = String(approvedPost._id);
+
+        const broadcastUsersService = new BroadcastUsersService(bot);
+        const audience = await broadcastUsersService.resolveAudience([], adminId);
+        const report = await broadcastUsersService.sendToMany(audience, "🧪 <b>broadcastUsers test</b> — you can ignore this message.");
+
+        await bot.sendMessage(msg.chat.id,
+            `✅ broadcastUsers test: audience=${audience.length}, sent=${report.sent}, failed=${report.failures.length}\n` +
+            `pending author included: ${audience.includes(pendingAuthorId)}\n` +
+            `approved author included: ${audience.includes(approvedAuthorId)}\n` +
+            `admin excluded: ${!audience.includes(adminId)}`
+        );
+    } catch (err) {
+        console.error("[ERROR - testCase_BroadcastUsers]", (err as Error).message);
+        await bot.sendMessage(msg.chat.id, "❌ broadcastUsers test failed: " + (err as Error).message);
+    } finally {
+        if (pendingPostId) await postRepository.deleteById(pendingPostId);
+        if (approvedPostId) await postRepository.deleteById(approvedPostId);
+    }
 }

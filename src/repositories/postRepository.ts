@@ -57,6 +57,10 @@ class PostRepository {
         return Post.find({ status: "sold", approvedMessageId: { $ne: null } });
     }
 
+    distinctUserIdsByStatus(status: IPost["status"]): Promise<string[]> {
+        return Post.distinct("userId", { status });
+    }
+
     deleteById(postId: string) {
         return Post.findByIdAndDelete(postId);
     }

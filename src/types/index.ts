@@ -115,6 +115,12 @@ export interface LocaleStrings {
     adminPendingEmpty: string;
     adminPendingLink: string;
     adminClearPendingSuccess: string;
+    helpBroadcastUsers: string;
+    broadcastUsersUsage: string;
+    broadcastUsersTextOnly: string;
+    broadcastUsersNoRecipients: string;
+    broadcastUsersReport: string;
+    broadcastUsersMore: string;
     [key: string]: string;
 }
 

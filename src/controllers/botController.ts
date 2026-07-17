@@ -14,6 +14,7 @@ import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
+import { BroadcastUsersService, truncateFailures } from "../services/broadcastUsersService";
 import { localeService } from "../services/localeService";
 import { AuthLevel } from "../types";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
@@ -36,6 +37,7 @@ export class BotController {
     private pendingService: PendingService;
     private paymentService: PaymentService;
     private faqService: FaqService;
+    private broadcastUsersService: BroadcastUsersService;
 
     constructor(bot: TelegramBot) {
         this.bot = bot;
@@ -51,6 +53,7 @@ export class BotController {
         this.pendingService = new PendingService(bot, this.config, this.postService, this.mediaService);
         this.paymentService = new PaymentService(bot, this.config);
         this.faqService = new FaqService(bot, this.config);
+        this.broadcastUsersService = new BroadcastUsersService(bot);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -217,7 +220,7 @@ export class BotController {
             blocks.push(
                 { type: "divider" },
                 heading('helpAdminSection', 3),
-                { type: "list", items: ['helpConfig', 'helpActiveUsers', 'helpPromote', 'helpDemote', 'helpBroadcastTopic', 'helpTest'].map(cmd) },
+                { type: "list", items: ['helpConfig', 'helpActiveUsers', 'helpPromote', 'helpDemote', 'helpBroadcastTopic', 'helpBroadcastUsers', 'helpTest'].map(cmd) },
             );
         }
 
@@ -266,6 +269,81 @@ export class BotController {
             console.error('[CRITICAL - handleActiveUsers] System failed to generate active users list', (err as Error).message);
             this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
         }
+    }
+
+    async handleBroadcastUsers(msg: Message, args: string): Promise<void> {
+        const adminId = String(msg.from!.id);
+        const user: User | null = await userRepository.findByUserId(adminId);
+        const locale = localeService.resolveUserLocale(user);
+
+        const isAuthorized = await this.userService.hasAuthLevel(adminId, AuthLevel.ADMIN);
+        if (!isAuthorized) {
+            console.warn('[WARN - handleBroadcastUsers] Unauthorized access attempt detected', { userId: msg.from?.id });
+            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            return;
+        }
+
+        let htmlMessage: string | undefined;
+        if (msg.reply_to_message) {
+            if (!msg.reply_to_message.text) {
+                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersTextOnly'));
+                return;
+            }
+            htmlMessage = msg.reply_to_message.text;
+        } else if (args.trim()) {
+            htmlMessage = args.trim();
+        }
+
+        if (!htmlMessage) {
+            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersUsage'));
+            return;
+        }
+
+        const activeIds = Array.from(this.sessions.entries())
+            .filter(([, session]) => !session.isIdle)
+            .map(([userId]) => String(userId));
+
+        const audience = await this.broadcastUsersService.resolveAudience(activeIds, adminId);
+        if (audience.length === 0) {
+            console.info('[INFO - handleBroadcastUsers] No recipients found', { adminId });
+            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersNoRecipients'));
+            return;
+        }
+
+        const report = await this.broadcastUsersService.sendToMany(audience, htmlMessage);
+        console.info('[INFO - handleBroadcastUsers] Broadcast complete', { adminId, total: report.total, sent: report.sent, failed: report.failures.length });
+        if (report.failures.length > 0) {
+            console.log('[INFO - handleBroadcastUsers] Failures:', report.failures);
+        }
+
+        const blocks: unknown[] = [
+            { type: "heading", text: "📢 Broadcast report", size: 2 },
+            { type: "paragraph", text: localeService.t(locale, 'broadcastUsersReport', { sent: report.sent, failed: report.failures.length, total: report.total }) },
+        ];
+
+        if (report.failures.length > 0) {
+            const usersFromDb = await userRepository.findManyByIds(report.failures.map(f => f.userId));
+            const mentionById = new Map(usersFromDb.map(u => [u.userId, u.userName ? `@${u.userName}` : 'N/A']));
+
+            const { shown, remainder } = truncateFailures(report.failures);
+            blocks.push(
+                { type: "divider" },
+                {
+                    type: "list",
+                    items: shown.map(f => ({
+                        blocks: [{ type: "paragraph", text: `• ${mentionById.get(f.userId) ?? 'N/A'} (${f.userId}) — ${f.reason}` }],
+                    })),
+                },
+            );
+
+            if (remainder > 0) {
+                blocks.push({ type: "paragraph", text: localeService.t(locale, 'broadcastUsersMore', { n: remainder }) });
+            }
+        }
+
+        await this.bot.sendRichMessage(msg.chat.id, { blocks } as unknown as InputRichMessage, {
+            message_thread_id: msg.message_thread_id,
+        });
     }
 
     async handleLang(msg: Message): Promise<void> {
@@ -369,9 +447,13 @@ export class BotController {
             }
             this.pendingService.handleClearPending(msg);
         });
-        this.bot.onText(/\/broadcast([\s\S]*)/, (msg, match) => {
+        this.bot.onText(/\/broadcast(?!Users)([\s\S]*)/, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleBroadcast(msg, match?.[1] ?? "");
+        });
+        this.bot.onText(/\/broadcastUsers([\s\S]*)/, (msg, match) => {
+            if (!isPrivate(msg)) return;
+            this.handleBroadcastUsers(msg, match?.[1] ?? "");
         });
         this.bot.onText(/\/promote(.*)/, (msg, match) => {
             if (!isPrivate(msg)) return;
