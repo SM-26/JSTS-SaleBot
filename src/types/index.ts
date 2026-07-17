@@ -121,6 +121,9 @@ export interface LocaleStrings {
     broadcastUsersNoRecipients: string;
     broadcastUsersReport: string;
     broadcastUsersMore: string;
+    broadcastUsersReportTitle: string;
+    langUpdated: string;
+    pendingMore: string;
     [key: string]: string;
 }
 

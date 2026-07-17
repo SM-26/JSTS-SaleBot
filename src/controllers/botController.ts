@@ -317,7 +317,7 @@ export class BotController {
         }
 
         const blocks: unknown[] = [
-            { type: "heading", text: "📢 Broadcast report", size: 2 },
+            { type: "heading", text: localeService.t(locale, 'broadcastUsersReportTitle'), size: 2 },
             { type: "paragraph", text: localeService.t(locale, 'broadcastUsersReport', { sent: report.sent, failed: report.failures.length, total: report.total }) },
         ];
 
@@ -545,7 +545,8 @@ export class BotController {
                     const lang = query.data.replace("lang_", "");
                     await userRepository.updateUser(String(query.from!.id), { preferredLocale: lang });
                     this.bot.answerCallbackQuery(query.id);
-                    this.bot.sendMessage(query.message!.chat.id, `Language set to ${lang.toUpperCase()}`);
+                    // Confirm in the language the user just picked.
+                    this.bot.sendMessage(query.message!.chat.id, localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }));
                     return;
                 }
 

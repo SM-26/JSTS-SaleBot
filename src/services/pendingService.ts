@@ -96,7 +96,7 @@ export class PendingService {
             }
 
             if (pendingPosts.length > 10) {
-                await this.bot.sendMessage(msg.chat.id, `...and ${pendingPosts.length - 10} more.`, options);
+                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'pendingMore', { n: pendingPosts.length - 10 }), options);
             }
         } catch (err) {
             console.error("[ERROR - PendingService.handlePending]", err);
