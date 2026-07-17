@@ -23,17 +23,6 @@
   "author": "SM26",
   "license": "ISC",
   "auditLevel": "low",
-  "auditConfig": {
-    "ignore": [
-      "npm:request@2.88.2"
-    ]
-  },
-  "overrides": {
-    "form-data": "^4.0.4",
-    "@cypress/request": "^3.0.0",
-    "qs": "^6.14.2",
-    "tough-cookie": "^4.1.3"
-  },
   "dependencies": {
     "dotenv": "^17.4.2",
     "mongoose": "^9.6.3",
