@@ -24,7 +24,7 @@ export interface BotConfig {
     broadcastTopicId?: number | null;
     timeOut: number;
     validatePrice: boolean;
-    minimumMedia: number;
+    minimumPhotos: number;
     dailyBumpLimit: number;
     donationsEnabled?: boolean;
     enableFaq?: boolean;
@@ -38,6 +38,7 @@ export interface LocaleStrings {
     contactSellerCta: string;
     enterDescription: string;
     enterPrice: string;
+    expectedText: string;
     enterMedia: string;
     doneMediaButton: string;
     enterLocation: string;
@@ -77,6 +78,7 @@ export interface LocaleStrings {
     configUsage: string;
     configKeyNotFound: string;
     configInvalidValue: string;
+    configExpected: string;
     configUpdated: string;
     adminPostNotFound: string;
     adminPostHandled: string;

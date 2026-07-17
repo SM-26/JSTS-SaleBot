@@ -120,7 +120,7 @@ export class BotController {
             const location = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterLocation'), { locale, index: 4, total: totalSteps });
             const media = await this.inputService.promptMedia(msg, { locale, index: 5, total: totalSteps });
 
-            if (media.length < this.config.minimumMedia) {
+            if (media.length < (this.config.minimumPhotos ?? 0)) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));
                 console.info('[INFO - HandleNewPost] session idle (insufficient media)', { userId: msg.from?.id });
                 session.isIdle = true;
@@ -396,41 +396,41 @@ export class BotController {
     registerRoutes(): void {
         const isPrivate = (msg: Message) => msg.chat.type === "private";
 
-        this.bot.onText(/\/start/, (msg) => {
+        this.bot.onText(/\/start/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.HandleStart(msg);
         });
-        this.bot.onText(/\/newPost/, (msg) => {
+        this.bot.onText(/\/newPost/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.HandleNewPost(msg);
         });
-        this.bot.onText(/\/myposts/, (msg) => {
+        this.bot.onText(/\/myposts/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.myPostsService.showPosts(msg);
         });
-        this.bot.onText(/\/help/, (msg) => {
+        this.bot.onText(/\/help/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.showHelp(msg);
         });
-        this.bot.onText(/\/lang/, (msg) => {
+        this.bot.onText(/\/lang/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.handleLang(msg);
         });
         if (this.config.enableFaq !== false) {
-            this.bot.onText(/\/faq/, (msg) => {
+            this.bot.onText(/\/faq/i, (msg) => {
                 if (!isPrivate(msg)) return;
                 this.faqService.handleFaq(msg);
             });
         }
-        this.bot.onText(/\/config(.*)/, (msg, match) => {
+        this.bot.onText(/\/config(.*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleConfig(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/activeUsers/, (msg) => {
+        this.bot.onText(/\/activeUsers/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.handleActiveUsers(msg);
         });
-        this.bot.onText(/\/pending/, async (msg) => {
+        this.bot.onText(/\/pending/i, async (msg) => {
             const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
             if (!isAuthorized) {
                 this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
@@ -438,7 +438,7 @@ export class BotController {
             }
             this.pendingService.handlePending(msg);
         });
-        this.bot.onText(/\/clearpending/, async (msg) => {
+        this.bot.onText(/\/clearpending/i, async (msg) => {
             if (!isPrivate(msg)) return;
             const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
             if (!isAuthorized) {
@@ -447,27 +447,27 @@ export class BotController {
             }
             this.pendingService.handleClearPending(msg);
         });
-        this.bot.onText(/\/broadcast(?!Users)([\s\S]*)/, (msg, match) => {
+        this.bot.onText(/\/broadcast(?!Users)([\s\S]*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleBroadcast(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/broadcastUsers([\s\S]*)/, (msg, match) => {
+        this.bot.onText(/\/broadcastUsers([\s\S]*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.handleBroadcastUsers(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/promote(.*)/, (msg, match) => {
+        this.bot.onText(/\/promote(.*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handlePromote(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/demote(.*)/, (msg, match) => {
+        this.bot.onText(/\/demote(.*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleDemote(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/auth(.*)/, (msg, match) => {
+        this.bot.onText(/\/auth(.*)/i, (msg, match) => {
             if (!isPrivate(msg)) return;
             this.adminService.handleAuth(msg, match?.[1] ?? "");
         });
-        this.bot.onText(/\/test/, async (msg) => {
+        this.bot.onText(/\/test/i, async (msg) => {
             if (!isPrivate(msg)) return;
             const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
             const authLevel = user?.authLevel ?? AuthLevel.USER;
@@ -617,7 +617,7 @@ export class BotController {
             }
         });
 
-        this.bot.onText(/\/donate/, (msg) => {
+        this.bot.onText(/\/donate/i, (msg) => {
             if (!isPrivate(msg)) return;
             this.handleDonate(msg);
         });

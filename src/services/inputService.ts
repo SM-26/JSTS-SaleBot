@@ -26,14 +26,21 @@ export class InputService {
         });
     }
 
-    input(msg: Message): Promise<string> {
+    input(msg: Message, locale?: string): Promise<string> {
         return new Promise((resolve) => {
             const listener = (reply: Message) => {
                 if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
                 if (reply.text && reply.text.startsWith("/")) return;
 
+                // These are text prompts: a photo/video/sticker carries no .text and
+                // would otherwise resolve to "" and silently advance the wizard.
+                if (!reply.text?.trim()) {
+                    this.bot.sendMessage(msg.chat.id, localeService.t(locale ?? this.config.lang, 'expectedText'), { message_thread_id: msg.message_thread_id });
+                    return;
+                }
+
                 this.bot.removeListener("message", listener);
-                resolve(reply.text || "");
+                resolve(reply.text);
             };
 
             this.bot.on("message", listener);
@@ -42,12 +49,13 @@ export class InputService {
 
     async inputWithPrompt(msg: Message, prompt: string, step?: WizardStep): Promise<string> {
         await this.sendPrompt(msg, prompt, step);
-        return this.input(msg);
+        return this.input(msg, step?.locale);
     }
 
     validatePriceValue(priceInput: string): boolean {
         if (!this.config.validatePrice) return true;
-        const price = Number(priceInput);
+        // Accept thousands separators: "2,000" and "2 000" mean the same as "2000".
+        const price = Number(priceInput.replace(/[,\s]/g, ""));
         return !isNaN(price) && price > 0;
     }
 
@@ -55,7 +63,7 @@ export class InputService {
         await this.sendPrompt(msg, localeService.t(step.locale, 'enterPrice'), step);
 
         while (true) {
-            const priceInput = await this.input(msg); if (this.validatePriceValue(priceInput)) return priceInput;
+            const priceInput = await this.input(msg, step.locale); if (this.validatePriceValue(priceInput)) return priceInput;
             this.bot.sendMessage(msg.chat.id, localeService.t(step.locale, 'invalidPrice'), { message_thread_id: msg.message_thread_id });
         }
     }

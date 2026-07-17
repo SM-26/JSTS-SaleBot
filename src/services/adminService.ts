@@ -6,6 +6,7 @@ import userRepository from "../repositories/userRepository";
 import { AuthLevel, User } from "../types";
 import { userService } from "./userService";
 import { localeService } from "./localeService";
+import { CONFIG_SCHEMA, parseConfigValue } from "./configSchema";
 
 const configPath = path.join(__dirname, "../../config.json");
 
@@ -69,31 +70,22 @@ export class AdminService {
     }
 
     private async updateConfig(chatId: number, key: string, rawValue: string, locale: string): Promise<void> {
-        if (!(key in this.config)) {
+        if (!(key in this.config) || !(key in CONFIG_SCHEMA)) {
             await this.bot.sendMessage(chatId, localeService.t(locale, 'configKeyNotFound'));
             return;
         }
 
-        const currentValue = this.config[key as keyof BotConfig];
-        let parsed: string | number | boolean;
-
-        if (typeof currentValue === "boolean") {
-            if (rawValue === "true") parsed = true;
-            else if (rawValue === "false") parsed = false;
-            else {
-                await this.bot.sendMessage(chatId, localeService.t(locale, 'configInvalidValue'));
-                return;
-            }
-        } else if (typeof currentValue === "number") {
-            parsed = Number(rawValue);
-            if (isNaN(parsed)) {
-                await this.bot.sendMessage(chatId, localeService.t(locale, 'configInvalidValue'));
-                return;
-            }
-        } else {
-            parsed = rawValue;
+        const result = parseConfigValue(key, rawValue);
+        if (!result.ok) {
+            await this.bot.sendMessage(
+                chatId,
+                `${localeService.t(locale, 'configInvalidValue')}\n${localeService.t(locale, 'configExpected', { key, expected: result.expected })}`,
+                { parse_mode: "HTML" }
+            );
+            return;
         }
 
+        const parsed = result.value;
         (this.config as unknown as Record<string, unknown>)[key] = parsed;
 
         // Persist to config.json
