@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { connectDB } from "./config/db";
 import { BotController } from "./controllers/botController";
+import { registerPollingErrorHandler } from "./config/pollingErrors";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -23,6 +24,7 @@ async function main() {
     await connectDB();
 
     const bot = new TelegramBot(token!, { polling: true });
+    registerPollingErrorHandler(bot);
 
     const controller = new BotController(bot);
     controller.registerRoutes();

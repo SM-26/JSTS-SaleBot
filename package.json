@@ -10,8 +10,9 @@
     "dev": "ts-node src/bot.ts",
     "check-locals": "ts-node src/tests/checkLocals.ts",
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
+    "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-claim && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",
