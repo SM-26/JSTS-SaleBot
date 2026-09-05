@@ -12,6 +12,13 @@ if (!token) {
     process.exit(1);
 }
 
+// ponytail: a long-running bot should log and keep polling, not die. Several
+// bot.editMessage* calls are fire-and-forget; Telegram 400s (e.g. "message is
+// not modified") would otherwise take the whole process down.
+process.on("unhandledRejection", (err) => {
+    console.error("[unhandledRejection]", err);
+});
+
 async function main() {
     await connectDB();
 
@@ -36,4 +43,7 @@ async function main() {
     });
 }
 
-main();
+main().catch((err) => {
+    console.error("Fatal startup error:", err);
+    process.exit(1);
+});
