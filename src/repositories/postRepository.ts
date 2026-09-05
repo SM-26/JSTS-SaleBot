@@ -18,6 +18,17 @@ class PostRepository {
         return Post.findOne({ approvedMessageId }).exec();
     }
 
+    // ponytail: atomic claim - the status filter makes this the concurrency
+    // guard. Returns null if another moderator already took the post, so two
+    // admins clicking approve/reject cannot both proceed.
+    claimPending(postId: string, status: IPost["status"]) {
+        return Post.findOneAndUpdate(
+            { _id: postId, status: "pending" },
+            { $set: { status } },
+            { returnDocument: 'after' }
+        );
+    }
+
     updateStatus(postId: string, status: IPost["status"]) {
         return Post.findByIdAndUpdate(postId, { status }, { returnDocument: 'after' });
     }

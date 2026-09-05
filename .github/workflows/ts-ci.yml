@@ -15,6 +15,19 @@ jobs:
     env:
       # Forces the runner to use Node 24 for the internal Action logic
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # Without this the moderation-claim test skips instead of running.
+      MONGO_URI: mongodb://localhost:27017/SalesBotTestDB
+
+    services:
+      mongo:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code

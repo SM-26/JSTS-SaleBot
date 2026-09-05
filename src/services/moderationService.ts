@@ -29,6 +29,8 @@ export class ModerationService {
         const adminUser = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(adminUser);
 
+        let claimed = null;
+
         try {
             console.debug('[DEBUG - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
 
@@ -48,7 +50,10 @@ export class ModerationService {
                 console.warn("[WARN - ModerationService.handleCallback]", "Admin is moderating their own post", { adminId: query.from.id, postId });
             }
 
-            if (post.status !== "pending") {
+            // Claim the post before any long await (the reject-reason prompt waits
+            // on a human). A read-then-check here lets a second moderator through.
+            claimed = await postRepository.claimPending(postId, isApprove ? "approved" : "rejected");
+            if (!claimed) {
                 this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminPostHandled') });
                 return;
             }
@@ -72,13 +77,17 @@ export class ModerationService {
 
                 // const topicId = (query.message as any)?.message_thread_id;
 
+                // Best-effort: a duplicate/failed redraw must not reach the outer
+                // catch, which would release the claim and un-moderate the post.
                 this.bot.editMessageText(statusText, {
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id
-                });
+                }).catch((err: Error) => console.warn("[WARN - ModerationService.handleCallback] editMessageText failed:", err.message));
             }
         } catch (err) {
             console.error("[ERROR - ModerationService.handleCallback]", (err as Error).message);
+            // Release the claim so the post returns to the queue and can be retried.
+            if (claimed) await postRepository.updateStatus(postId, "pending");
             this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminError') });
         }
     }
@@ -100,9 +109,6 @@ export class ModerationService {
             await postRepository.setApprovedMessageId(postId, messageId);
         }
 
-        // Only update status in DB after successful Telegram post
-        await postRepository.updateStatus(postId, "approved");
-
         const authorLocale = localeService.resolveUserLocale(postAuthor);
         this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postApproved'));
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminApproved') });
@@ -120,9 +126,6 @@ export class ModerationService {
         this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminRejected') });
 
         const reason = await this.askRejectReason(query);
-
-        // Only update status in DB after reason is handled
-        await postRepository.updateStatus(postId, "rejected");
 
         const authorLocale = localeService.resolveUserLocale(postAuthor);
 
@@ -175,7 +178,7 @@ export class ModerationService {
                 this.bot.editMessageReplyMarkup(
                     { inline_keyboard: [] },
                     { chat_id: chatId, message_id: sentMsg.message_id }
-                );
+                ).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
                 resolve(null);
             };
 
@@ -189,7 +192,7 @@ export class ModerationService {
                 this.bot.editMessageReplyMarkup(
                     { inline_keyboard: [] },
                     { chat_id: chatId, message_id: sentMsg.message_id }
-                );
+                ).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
                 resolve(reply.text || null);
             };
 
