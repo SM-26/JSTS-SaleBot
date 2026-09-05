@@ -127,6 +127,12 @@ export class ModerationService {
 
         const reason = await this.askRejectReason(query);
 
+        // Persist before notifying: the schema has carried this field all along
+        // but nothing ever wrote it, so reasons only existed in the logs.
+        if (reason) {
+            await postRepository.setRejectionReason(postId, reason);
+        }
+
         const authorLocale = localeService.resolveUserLocale(postAuthor);
 
         if (reason) {

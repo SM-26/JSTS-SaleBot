@@ -45,6 +45,13 @@ async function run() {
         assert.strictEqual(stored!.status, winners[0]!.status, "stored status should match the winning claim");
 
         console.log(`[OK] one moderator won (${winners[0]!.status}), the other was rejected.`);
+
+        // The schema carried rejectionReason for a long time with nothing writing it.
+        await postRepository.setRejectionReason(postId, "no price listed");
+        const withReason = await postRepository.findById(postId);
+        assert.strictEqual(withReason!.rejectionReason, "no price listed", "rejection reason must be persisted");
+
+        console.log("[OK] rejection reason is stored on the post.");
     } finally {
         await Post.deleteOne({ _id: postId });
         await mongoose.disconnect();

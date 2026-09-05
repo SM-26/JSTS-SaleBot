@@ -33,6 +33,10 @@ class PostRepository {
         return Post.findByIdAndUpdate(postId, { status }, { returnDocument: 'after' });
     }
 
+    setRejectionReason(postId: string, rejectionReason: string) {
+        return Post.findByIdAndUpdate(postId, { rejectionReason }, { returnDocument: 'after' });
+    }
+
     setApprovedMessageId(postId: string, approvedMessageId: number | null) {
         return Post.findByIdAndUpdate(postId, { approvedMessageId }, { returnDocument: 'after' });
     }
