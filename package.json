@@ -28,7 +28,7 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "mongoose": "^9.9.4",
-    "node-telegram-bot-api": "^1.2.0"
+    "node-telegram-bot-api": "^2.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -15,8 +15,8 @@ importers:
         specifier: ^9.9.4
         version: 9.9.4
       node-telegram-bot-api:
-        specifier: ^1.2.0
-        version: 1.2.0
+        specifier: ^2.1.0
+        version: 2.1.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -522,8 +522,8 @@ packages:
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
 
-  node-telegram-bot-api@1.2.0:
-    resolution: {integrity: sha512-M6S61LZn1FQMQnZSdFlc4oV+mwDGlPTbLzq/GUaSH4ew40wGTaKPtAaLp5oOhl/C3k0ylGqMIppJsVulwTCePg==}
+  node-telegram-bot-api@2.1.0:
+    resolution: {integrity: sha512-IXWp7Qzhwv21DqTw0g1CcppTb4TCzrQ949RVdtAmgiHAu3KbcRPyCAFXLaFAViqWDVx8GLZjnWiWJ7pWSj2PRA==}
     engines: {node: '>=18'}
 
   nodemon@3.1.14:
@@ -1159,7 +1159,7 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  node-telegram-bot-api@1.2.0: {}
+  node-telegram-bot-api@2.1.0: {}
 
   nodemon@3.1.14:
     dependencies:
