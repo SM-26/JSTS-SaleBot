@@ -492,7 +492,7 @@ export class BotController {
                     this.bot.editMessageReplyMarkup(
                         { inline_keyboard: [] },
                         { chat_id: query.message.chat.id, message_id: query.message.message_id }
-                    );
+                    ).catch((err: Error) => console.warn("[WARN - botController.testMenu] editMessageReplyMarkup failed:", err.message));
                     const fakeMsg = { ...query.message, from: query.from } as Message;
 
                     if (key === "all") {
@@ -553,7 +553,7 @@ export class BotController {
                     if (!chatId) return;
 
                     // Clear buttons
-                    this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id });
+                    this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id }).catch((err: Error) => console.warn("[WARN - botController.donate] editMessageReplyMarkup failed:", err.message));
                     this.bot.answerCallbackQuery(query.id);
 
                     if (action === "other") {

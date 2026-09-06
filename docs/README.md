@@ -280,12 +280,12 @@ Monitor & manage:
 The production target is **not** part of `docker-compose.yaml`. Build it and run it against your real MongoDB:
 
 ```bash
-docker build --target production -t jsts-salebot:1.0.0 .
+docker build --target production -t jsts-salebot:1.1.0 .
 
 docker run -d --name jsts-salebot \
   --env-file .env \
   -v "$PWD/config.json:/app/config.json" \
-  jsts-salebot:1.0.0
+  jsts-salebot:1.1.0
 ```
 
 > **`config.json` is not baked into the image.** It is environment-specific (and gitignored), so it must be mounted at `/app/config.json` — the container exits on startup without it. Mount it **writable**: `/config` changes are persisted back to this file.
@@ -318,6 +318,11 @@ cp .env.example .env
 BOT_TOKEN=your_telegram_bot_token
 MONGO_URI=mongodb://localhost:27017/SalesBotDB
 ```
+
+`MONGO_MAX_ATTEMPTS` is optional (default `5`, 5 seconds apart). The bot exits
+if MongoDB is still unreachable after that many tries, rather than starting
+without a database; the container's restart policy then retries until Mongo is
+up. Raise it if your MongoDB is slow to become ready after a host reboot.
 
 ### 3. Configure Bot Settings
 

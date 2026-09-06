@@ -85,7 +85,7 @@ export class InputService {
                     this.bot.editMessageReplyMarkup(
                         { inline_keyboard: [] },
                         { chat_id: query.message.chat.id, message_id: query.message.message_id }
-                    );
+                    ).catch((err: Error) => console.warn("[WARN - inputService.inputMedia] editMessageReplyMarkup failed:", err.message));
                 }
 
                 resolve(items);
@@ -153,7 +153,7 @@ export class InputService {
                 this.bot.editMessageReplyMarkup(
                     { inline_keyboard: [] },
                     { chat_id: msg.chat.id, message_id: sentMsg.message_id }
-                );
+                ).catch((err: Error) => console.warn("[WARN - inputService.confirm] editMessageReplyMarkup failed:", err.message));
 
                 resolve(query.data === callbackId);
             };

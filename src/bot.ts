@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { connectDB } from "./config/db";
 import { BotController } from "./controllers/botController";
+import { registerPollingErrorHandler } from "./config/pollingErrors";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -12,10 +13,18 @@ if (!token) {
     process.exit(1);
 }
 
+// ponytail: a long-running bot should log and keep polling, not die. Several
+// bot.editMessage* calls are fire-and-forget; Telegram 400s (e.g. "message is
+// not modified") would otherwise take the whole process down.
+process.on("unhandledRejection", (err) => {
+    console.error("[unhandledRejection]", err);
+});
+
 async function main() {
     await connectDB();
 
     const bot = new TelegramBot(token!, { polling: true });
+    registerPollingErrorHandler(bot);
 
     const controller = new BotController(bot);
     controller.registerRoutes();
@@ -36,4 +45,7 @@ async function main() {
     });
 }
 
-main();
+main().catch((err) => {
+    console.error("Fatal startup error:", err);
+    process.exit(1);
+});
