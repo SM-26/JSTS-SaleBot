@@ -27,7 +27,7 @@
   "auditLevel": "low",
   "dependencies": {
     "dotenv": "^17.4.2",
-    "mongoose": "^9.9.5",
+    "mongoose": "^9.10.1",
     "node-telegram-bot-api": "^1.2.0"
   },
   "devDependencies": {
