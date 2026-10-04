@@ -12,8 +12,8 @@ importers:
         specifier: ^17.4.2
         version: 17.4.2
       mongoose:
-        specifier: ^9.10.2
-        version: 9.10.2
+        specifier: ^9.10.3
+        version: 9.10.3
       node-telegram-bot-api:
         specifier: ^1.2.0
         version: 1.2.0
@@ -41,7 +41,7 @@ importers:
         version: 6.0.3
       typescript-eslint:
         specifier: ^8.70.1
-        version: 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
+        version: 8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)
 
 packages:
 
@@ -133,8 +133,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@mongodb-js/saslprep@1.5.4':
-    resolution: {integrity: sha512-05UC0jQsjKAOuXQ0H9Ud9vUTJpZIg+n/FinpR30tI5I8pY2inTfPOZ5OF/cg3Ce/N9MoD1xhRCeOsJtuTbFYlw==}
+  '@mongodb-js/saslprep@1.5.5':
+    resolution: {integrity: sha512-0PV4mvjGd2Q2/viDvXuoSNzTjQngHvtuWUry1vqvcK4Q/CTeO1zEKMf9set01DMocJnogl/pyNAdvyk+Pe0kQA==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -527,8 +527,8 @@ packages:
       socks:
         optional: true
 
-  mongoose@9.10.2:
-    resolution: {integrity: sha512-oFcFL3dsX5tDzMwBD+GGoDqKIj6RNG3bu3oqlvcUIgPulHP14/6N7c07j3s0XgbrlT7U/lbiXOD89hmPtEXnfQ==}
+  mongoose@9.10.3:
+    resolution: {integrity: sha512-BQyjLRSJa5DzJ3PP0LHxATG4XX+6ys0J68lFmOlgoXJ+GVkuIsaZXZKxUPYd/t1Tv4qzLfaKkNWaipMIOuy5yw==}
     engines: {node: '>=20.19.0'}
 
   mpath@0.9.0:
@@ -806,7 +806,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@mongodb-js/saslprep@1.5.4':
+  '@mongodb-js/saslprep@1.5.5':
     dependencies:
       sparse-bitfield: 3.0.3
 
@@ -836,12 +836,12 @@ snapshots:
     dependencies:
       '@types/webidl-conversions': 7.0.3
 
-  '@typescript-eslint/eslint-plugin@8.70.1(@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3))(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)':
+  '@typescript-eslint/eslint-plugin@8.70.1(@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3))(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
+      '@typescript-eslint/parser': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)
       '@typescript-eslint/scope-manager': 8.70.1
-      '@typescript-eslint/type-utils': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
+      '@typescript-eslint/type-utils': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)
       '@typescript-eslint/utils': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 8.70.1
       eslint: 10.11.0(supports-color@5.5.0)
@@ -852,7 +852,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)':
+  '@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.70.1
       '@typescript-eslint/types': 8.70.1
@@ -882,7 +882,7 @@ snapshots:
     dependencies:
       typescript: 6.0.3
 
-  '@typescript-eslint/type-utils@8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)':
+  '@typescript-eslint/type-utils@8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/types': 8.70.1
       '@typescript-eslint/typescript-estree': 8.70.1(typescript@6.0.3)
@@ -1191,11 +1191,11 @@ snapshots:
 
   mongodb@7.6.0:
     dependencies:
-      '@mongodb-js/saslprep': 1.5.4
+      '@mongodb-js/saslprep': 1.5.5
       bson: 7.3.3
       mongodb-connection-string-url: 7.0.2
 
-  mongoose@9.10.2:
+  mongoose@9.10.3:
     dependencies:
       '@standard-schema/spec': 1.1.0
       kareem: 3.4.0
@@ -1340,10 +1340,10 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
 
-  typescript-eslint@8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3):
+  typescript-eslint@8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.70.1(@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3))(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
-      '@typescript-eslint/parser': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
+      '@typescript-eslint/eslint-plugin': 8.70.1(@typescript-eslint/parser@8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3))(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)
+      '@typescript-eslint/parser': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@6.0.3)
       '@typescript-eslint/typescript-estree': 8.70.1(typescript@6.0.3)
       '@typescript-eslint/utils': 8.70.1(eslint@10.11.0(supports-color@5.5.0))(typescript@6.0.3)
       eslint: 10.11.0(supports-color@5.5.0)
