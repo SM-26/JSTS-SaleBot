@@ -1,11 +1,12 @@
-import TelegramBot, { PreCheckoutQuery, Message } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { PreCheckoutQuery, Message } from "node-telegram-bot-api/types";
 import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
 
 export class PaymentService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig
     ) { }
 
@@ -20,15 +21,15 @@ export class PaymentService {
         const prices = [{ label: "Donation", amount: amount }]; // Amount in Stars
 
         try {
-            await this.bot.sendInvoice(
-                chatId,
+            await this.api.sendInvoice({
+                chat_id: chatId,
                 title,
                 description,
                 payload,
-                providerToken,
+                provider_token: providerToken,
                 currency,
                 prices
-            );
+            });
         } catch (err) {
             console.error("[PaymentService] Error sending invoice:", err);
         }
@@ -36,7 +37,7 @@ export class PaymentService {
 
     async handlePreCheckout(query: PreCheckoutQuery) {
         // Always approve pre-checkout for donations
-        await this.bot.answerPreCheckoutQuery(query.id, true);
+        await this.api.answerPreCheckoutQuery({ pre_checkout_query_id: query.id, ok: true });
     }
 
     async handleSuccessfulPayment(msg: Message) {
@@ -48,6 +49,6 @@ export class PaymentService {
         const locale = localeService.resolveUserLocale(user);
 
         const text = localeService.t(locale, 'donationSuccess').replace("{amount}", String(payment.total_amount));
-        await this.bot.sendMessage(msg.chat.id, text);
+        await this.api.sendMessage({ chat_id: msg.chat.id, text });
     }
 }

@@ -1,4 +1,5 @@
-import TelegramBot, { Message } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message } from "node-telegram-bot-api/types";
 import * as fs from "fs";
 import * as path from "path";
 import { BotConfig, SendMessageOptions } from "../types";
@@ -19,7 +20,7 @@ function getForwardSenderId(msg: Message): number | undefined {
 
 export class AdminService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig
     ) {
     }
@@ -38,7 +39,7 @@ export class AdminService {
 
         const isAuthorized = await userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN);
         if (!isAuthorized) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
@@ -58,7 +59,7 @@ export class AdminService {
             return;
         }
 
-        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'configUsage'), { parse_mode: "HTML" });
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'configUsage'), parse_mode: "HTML" });
     }
 
     private async showConfig(chatId: number, locale: string): Promise<void> {
@@ -66,22 +67,18 @@ export class AdminService {
             ([key, value]) => `<b>${key}</b>: <code>${value}</code>`
         );
         const text = `${localeService.t(locale, 'configTitle')}\n\n${lines.join("\n")}`;
-        await this.bot.sendMessage(chatId, text, { parse_mode: "HTML" });
+        await this.api.sendMessage({ chat_id: chatId, text, parse_mode: "HTML" });
     }
 
     private async updateConfig(chatId: number, key: string, rawValue: string, locale: string): Promise<void> {
         if (!(key in this.config) || !(key in CONFIG_SCHEMA)) {
-            await this.bot.sendMessage(chatId, localeService.t(locale, 'configKeyNotFound'));
+            await this.api.sendMessage({ chat_id: chatId, text: localeService.t(locale, 'configKeyNotFound') });
             return;
         }
 
         const result = parseConfigValue(key, rawValue);
         if (!result.ok) {
-            await this.bot.sendMessage(
-                chatId,
-                `${localeService.t(locale, 'configInvalidValue')}\n${localeService.t(locale, 'configExpected', { key, expected: result.expected })}`,
-                { parse_mode: "HTML" }
-            );
+            await this.api.sendMessage({ chat_id: chatId, text: `${localeService.t(locale, 'configInvalidValue')}\n${localeService.t(locale, 'configExpected', { key, expected: result.expected })}`, parse_mode: "HTML" });
             return;
         }
 
@@ -91,11 +88,7 @@ export class AdminService {
         // Persist to config.json
         fs.writeFileSync(configPath, JSON.stringify(this.config, null, 4), "utf-8");
 
-        await this.bot.sendMessage(
-            chatId,
-            `${localeService.t(locale, 'configUpdated')}\n<b>${key}</b>: <code>${parsed}</code>`,
-            { parse_mode: "HTML" }
-        );
+        await this.api.sendMessage({ chat_id: chatId, text: `${localeService.t(locale, 'configUpdated')}\n<b>${key}</b>: <code>${parsed}</code>`, parse_mode: "HTML" });
     }
 
     /**
@@ -108,7 +101,7 @@ export class AdminService {
 
         const isAuthorized = await userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN);
         if (!isAuthorized) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
@@ -129,29 +122,24 @@ export class AdminService {
             if (msg.reply_to_message) {
                 if (msg.reply_to_message.text) {
                     // For text messages, sendMessage ensures the text is parsed as HTML
-                    await this.bot.sendMessage(approvedGroupId, msg.reply_to_message.text, options);
+                    await this.api.sendMessage({ chat_id: approvedGroupId, text: msg.reply_to_message.text, ...options });
                 } else {
                     // For media, copyMessage supports parse_mode for the caption
-                    await this.bot.copyMessage(
-                        approvedGroupId,
-                        msg.chat.id,
-                        msg.reply_to_message.message_id,
-                        options
-                    );
+                    await this.api.copyMessage({ chat_id: approvedGroupId, from_chat_id: msg.chat.id, message_id: msg.reply_to_message.message_id, ...options });
                 }
             }
             // Scenario 2: Admin typed a message after /broadcast
             else if (args.trim()) {
-                await this.bot.sendMessage(approvedGroupId, args.trim(), options);
+                await this.api.sendMessage({ chat_id: approvedGroupId, text: args.trim(), ...options });
             }
             // Scenario 3: No message to broadcast
             else {
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsage'));
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'broadcastUsage') });
                 return;
             }
 
             // Common success handling
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastSuccess'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'broadcastSuccess') });
             console.info('[INFO - AdminService.handleBroadcast] Broadcast successful', {
                 adminId: msg.from?.id,
                 type: msg.reply_to_message ? 'copy' : 'text'
@@ -166,7 +154,7 @@ export class AdminService {
                     optionsThreadId: `${options.message_thread_id} (${typeof options.message_thread_id})`
                 }
             });
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'generalError'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'generalError') });
         }
     }
 
@@ -182,7 +170,7 @@ export class AdminService {
         const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.ADMIN);
         if (!isAuthorized) {
             console.warn(`[WARN - AdminService.handlePromote] Unauthorized attempt by user ${actorId}`);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
@@ -190,7 +178,7 @@ export class AdminService {
 
         if (!targetUser) {
             console.warn(`[WARN - AdminService.handlePromote] Target user not found for actor ${actorId} with args: ${args}`);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'userNotFound') });
             return;
         }
 
@@ -198,14 +186,14 @@ export class AdminService {
 
         if (targetId === actorId) {
             console.warn(`[WARN - AdminService.handlePromote] Admin ${actorId} attempted to promote themselves.`);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'promoteAlreadyAtLevel'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'promoteAlreadyAtLevel') });
             return;
         }
 
         const currentAuthLevel = targetUser.authLevel;
         if (currentAuthLevel >= AuthLevel.ADMIN) {
             console.warn(`[WARN - handlePromote] Target user ${targetId} is already ADMIN. Actor: ${actorId}`);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'promoteLimitReached'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'promoteLimitReached') });
             return;
         }
 
@@ -215,11 +203,7 @@ export class AdminService {
         const timestamp = new Date().toISOString();
         console.info(`[INFO - handlePromote] Action: PROMOTE | Actor: ${actorId} | Target: ${targetId} | Old Level: ${currentAuthLevel} | New Level: ${newAuthLevel} | Time: ${timestamp}`);
 
-        await this.bot.sendMessage(
-            msg.chat.id,
-            localeService.t(locale, 'promoteSuccess', { userId: targetId, level: newAuthLevel }),
-            { parse_mode: "HTML" }
-        );
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'promoteSuccess', { userId: targetId, level: newAuthLevel }), parse_mode: "HTML" });
     }
 
     /**
@@ -233,19 +217,19 @@ export class AdminService {
 
         const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.ADMIN);
         if (!isAuthorized) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
         const targetUser = await this._resolveTargetUser(msg, args);
         if (!targetUser) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'userNotFound') });
             return;
         }
 
         const targetId = String(targetUser.userId);
         if (targetUser.authLevel <= AuthLevel.USER) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteAlreadyAtLevel'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'demoteAlreadyAtLevel') });
             return;
         }
 
@@ -256,12 +240,12 @@ export class AdminService {
         const timestamp = new Date().toISOString();
         console.info(`[INFO - handleDemote] Action: DEMOTE | Actor: ${actorId} | Target: ${targetId} | Old Level: ${oldLevel} | New Level: ${newLevel} | Time: ${timestamp}`);
 
-        await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteSuccess', { userId: targetId, level: newLevel }), { parse_mode: "HTML" });
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'demoteSuccess', { userId: targetId, level: newLevel }), parse_mode: "HTML" });
 
         if (oldLevel === AuthLevel.ADMIN) {
             const adminCount = await userRepository.countByAuthLevel(AuthLevel.ADMIN);
             if (adminCount === 0) {
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'demoteAdminWarning'), { parse_mode: "HTML" });
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'demoteAdminWarning'), parse_mode: "HTML" });
             }
         }
     }
@@ -279,7 +263,7 @@ export class AdminService {
         const isAuthorized = await userService.hasAuthLevel(actorId, AuthLevel.MOD);
         if (!isAuthorized) {
             console.warn(`[WARN - handleAuth] Unauthorized attempt by user ${actorId}`);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
@@ -288,7 +272,7 @@ export class AdminService {
             : await this._resolveTargetUser(msg, args);
 
         if (!targetUser) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'userNotFound'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'userNotFound') });
             return;
         }
 
@@ -296,11 +280,7 @@ export class AdminService {
             targetUser.authLevel === AuthLevel.MOD ? 'authLevelMod' : 'authLevelUser';
         const roleLabel = localeService.t(locale, roleLabelKey);
 
-        await this.bot.sendMessage(
-            msg.chat.id,
-            localeService.t(locale, 'authCurrentLevel', { userId: targetUser.userId, role: roleLabel, level: targetUser.authLevel }),
-            { parse_mode: "HTML" }
-        );
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'authCurrentLevel', { userId: targetUser.userId, role: roleLabel, level: targetUser.authLevel }), parse_mode: "HTML" });
     }
 
     private async _resolveTargetUser(msg: Message, args: string): Promise<User | null> {

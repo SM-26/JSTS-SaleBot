@@ -2,9 +2,9 @@ name: TypeScript CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, migration/v2]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, migration/v2]
 
 permissions:
   contents: read
@@ -51,6 +51,10 @@ jobs:
       - name: Linting
         run: pnpm run lint
         continue-on-error: false
+
+      - name: Create config.json
+        # config.json is gitignored; the controller and locale service read it at import.
+        run: cp config.json.example config.json
 
       - name: Run tests
         run: pnpm test

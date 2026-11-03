@@ -1,5 +1,6 @@
-import TelegramBot, { Message, CallbackQuery, InlineKeyboardMarkup, InputRichMessage } from "node-telegram-bot-api";
-import { BotConfig, MediaItem } from "../types";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, InlineKeyboardMarkup } from "node-telegram-bot-api/types";
+import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 
 // Position within the /newPost wizard, appended to the prompt as plain text.
@@ -9,47 +10,26 @@ export interface WizardStep {
     total: number;
 }
 
+// The stateless half of the wizard: sending prompts and validating one answer.
+// The step machine that decides what to ask next lives in WizardService.
 export class InputService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig
     ) { }
 
-    private async sendPrompt(msg: Message, prompt: string, step?: WizardStep, replyMarkup?: InlineKeyboardMarkup): Promise<void> {
-        const text = step
-            ? `${prompt}\n\n${localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total })}`
-            : prompt;
+    stepText(step: WizardStep): string {
+        return localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total });
+    }
 
-        await this.bot.sendMessage(msg.chat.id, text, {
-            message_thread_id: msg.message_thread_id,
+    sendPrompt(chatId: number, prompt: string, step?: WizardStep, replyMarkup?: InlineKeyboardMarkup): Promise<Message> {
+        const text = step ? `${prompt}\n\n${this.stepText(step)}` : prompt;
+
+        return this.api.sendMessage({
+            chat_id: chatId,
+            text,
             ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         });
-    }
-
-    input(msg: Message, locale?: string): Promise<string> {
-        return new Promise((resolve) => {
-            const listener = (reply: Message) => {
-                if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
-                if (reply.text && reply.text.startsWith("/")) return;
-
-                // These are text prompts: a photo/video/sticker carries no .text and
-                // would otherwise resolve to "" and silently advance the wizard.
-                if (!reply.text?.trim()) {
-                    this.bot.sendMessage(msg.chat.id, localeService.t(locale ?? this.config.lang, 'expectedText'), { message_thread_id: msg.message_thread_id });
-                    return;
-                }
-
-                this.bot.removeListener("message", listener);
-                resolve(reply.text);
-            };
-
-            this.bot.on("message", listener);
-        });
-    }
-
-    async inputWithPrompt(msg: Message, prompt: string, step?: WizardStep): Promise<string> {
-        await this.sendPrompt(msg, prompt, step);
-        return this.input(msg, step?.locale);
     }
 
     validatePriceValue(priceInput: string): boolean {
@@ -57,108 +37,5 @@ export class InputService {
         // Accept thousands separators: "2,000" and "2 000" mean the same as "2000".
         const price = Number(priceInput.replace(/[,\s]/g, ""));
         return !isNaN(price) && price > 0;
-    }
-
-    async inputPrice(msg: Message, step: WizardStep): Promise<string> {
-        await this.sendPrompt(msg, localeService.t(step.locale, 'enterPrice'), step);
-
-        while (true) {
-            const priceInput = await this.input(msg, step.locale); if (this.validatePriceValue(priceInput)) return priceInput;
-            this.bot.sendMessage(msg.chat.id, localeService.t(step.locale, 'invalidPrice'), { message_thread_id: msg.message_thread_id });
-        }
-    }
-
-    inputMedia(msg: Message): Promise<MediaItem[]> {
-        const items: MediaItem[] = [];
-        const doneCallbackData = `done_media_${msg.from!.id}`;
-
-        return new Promise((resolve) => {
-            const cbListener = (query: CallbackQuery) => {
-                if (query.data !== doneCallbackData) return;
-                if (query.from.id !== msg.from!.id) return;
-
-                this.bot.removeListener("message", msgListener);
-                this.bot.removeListener("callback_query", cbListener);
-                this.bot.answerCallbackQuery(query.id);
-
-                if (query.message) {
-                    this.bot.editMessageReplyMarkup(
-                        { inline_keyboard: [] },
-                        { chat_id: query.message.chat.id, message_id: query.message.message_id }
-                    ).catch((err: Error) => console.warn("[WARN - inputService.inputMedia] editMessageReplyMarkup failed:", err.message));
-                }
-
-                resolve(items);
-            };
-
-            const msgListener = (reply: Message) => {
-                if (reply.chat.id !== msg.chat.id || reply.from!.id !== msg.from!.id) return;
-
-                if (reply.photo && reply.photo.length > 0) {
-                    const fileId = reply.photo[reply.photo.length - 1].file_id;
-                    items.push({ fileId, type: "photo" });
-                } else if (reply.video) {
-                    items.push({ fileId: reply.video.file_id, type: "video" });
-                }
-            };
-
-            this.bot.on("callback_query", cbListener);
-            this.bot.on("message", msgListener);
-        });
-    }
-
-    async promptMedia(msg: Message, step: WizardStep): Promise<MediaItem[]> {
-        const mediaPromise = this.inputMedia(msg);
-
-        await this.sendPrompt(msg, localeService.t(step.locale, 'enterMedia'), step, {
-            inline_keyboard: [[
-                { text: localeService.t(step.locale, 'doneMediaButton'), callback_data: `done_media_${msg.from!.id}` },
-            ]],
-        });
-
-        return mediaPromise;
-    }
-
-    // Pass `richMessage` to send the preview and its confirm/cancel buttons as a
-    // single message — a media group can't carry buttons, which is what forced
-    // the old preview-then-"👆" pair and the visible gap between them.
-    async confirmAction(msg: Message, locale: string, richMessage?: InputRichMessage): Promise<boolean> {
-        const callbackId = `confirm_${msg.from!.id}_${Date.now()}`;
-        const cancelId = `cancel_${msg.from!.id}_${Date.now()}`;
-
-        const replyMarkup: InlineKeyboardMarkup = {
-            inline_keyboard: [[
-                { text: localeService.t(locale, 'confirmButton'), callback_data: callbackId },
-                { text: localeService.t(locale, 'cancelButton'), callback_data: cancelId },
-            ]],
-        };
-
-        const sentMsg = richMessage
-            ? await this.bot.sendRichMessage(msg.chat.id, richMessage, {
-                message_thread_id: msg.message_thread_id,
-                reply_markup: replyMarkup,
-            })
-            : await this.bot.sendMessage(msg.chat.id, "👆", {
-                message_thread_id: msg.message_thread_id,
-                reply_markup: replyMarkup,
-            });
-
-        return new Promise((resolve) => {
-            const listener = (query: CallbackQuery) => {
-                if (query.from.id !== msg.from!.id) return;
-                if (query.data !== callbackId && query.data !== cancelId) return;
-
-                this.bot.removeListener("callback_query", listener);
-                this.bot.answerCallbackQuery(query.id);
-                this.bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
-                    { chat_id: msg.chat.id, message_id: sentMsg.message_id }
-                ).catch((err: Error) => console.warn("[WARN - inputService.confirm] editMessageReplyMarkup failed:", err.message));
-
-                resolve(query.data === callbackId);
-            };
-
-            this.bot.on("callback_query", listener);
-        });
     }
 }

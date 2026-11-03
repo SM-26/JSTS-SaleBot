@@ -10,8 +10,8 @@
 
 **Stack:**
 - Runtime: Node.js + TypeScript
-- Telegram library: `node-telegram-bot-api`
-- Database: MongoDB via `mongoose`
+- Telegram library: `node-telegram-bot-api` **v2.2.0** (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
+- Database: MongoDB via `mongoose` (collections `posts`, `users`, plus `drafts` and `bot_sessions` for persistent flows)
 - Linting: ESLint + `typescript-eslint`
 - Infrastructure: Docker + Docker Compose (bot + MongoDB + mongo-express)
 
@@ -24,34 +24,44 @@
 ├── src/
 │   ├── bot.ts                    # Entry point: initializes DB, bot, registers routes
 │   ├── config/
-│   │   └── db.ts                 # Mongoose connection helper
+│   │   ├── db.ts                 # Mongoose connection helper
+│   │   └── pollingErrors.ts      # Polling error classification / de-duplicated logging
 │   ├── controllers/
-│   │   ├── botController.ts      # Main router: registers all Telegram command/callback handlers
+│   │   ├── botController.ts      # Main router: registerRoutes() builds the v2 middleware chain
+│   │   ├── commands.ts           # command(): anchored, case-insensitive matcher, @ourbot only
+│   │   ├── middleware.ts         # ensureUser, sessionKey, requireAuthLevel, errorBoundary, staleButtonCatchAll
 │   │   └── callbackRoutes.ts     # callback_data prefix → action; formats are frozen (golden test)
 │   ├── services/
-│   │   ├── inputService.ts       # Prompts user for text, price, and media input via chat
+│   │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
+│   │   ├── wizardService.ts      # /newPost wizard as a step machine over drafts; /cancel; wizard buttons
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
-│   │   ├── moderationService.ts  # Approve/reject callback handling in moderation group
+│   │   ├── moderationService.ts  # Approve/reject callbacks; reject-reason prompt (reply or Skip)
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
 │   │   ├── userService.ts        # Ensures user record exists in DB on first interaction
 │   │   └── paymentService.ts     # Donation invoice creation & payment event handling
 │   ├── models/
 │   │   ├── Post.ts               # Mongoose schema: Post (pending/approved/rejected/sold)
-│   │   └── User.ts               # Mongoose schema: User (userId, username, isAdmin)
+│   │   ├── User.ts               # Mongoose schema: User (userId, username, authLevel)
+│   │   └── Draft.ts              # Mongoose schema: Draft (one /newPost wizard per user; collection `drafts`)
 │   ├── repositories/
 │   │   ├── postRepository.ts     # Post CRUD + status query helpers
-│   │   └── userRepository.ts     # User lookup and admin-check helpers
+│   │   ├── userRepository.ts     # User lookup and auth-level helpers
+│   │   ├── draftRepository.ts    # Draft CRUD, atomic pushMedia/claim, isDraftExpired (against timeOut)
+│   │   └── sessionStore.ts       # MongoSessionStore: v2 session store (collection `bot_sessions`)
 │   ├── types/
 │   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, LocaleService, UserSession, etc.)
 │   ├── tests/
-│   │   ├── checkLocals.ts        # Validates locale keys are complete for src/locales
+│   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
+│   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
 │       ├── en/
 │       │   └── common.json       # English locale strings
-│       └── he/
-│           └── common.json       # Hebrew locale strings
+│       ├── he/
+│       │   └── common.json       # Hebrew locale strings
+│       └── ru/
+│           └── common.json       # Russian locale strings
 ├── scripts/
 │   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
@@ -85,7 +95,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `approvedGroupId`   | number  | Telegram group ID where approved posts are published     |
 | `moderationTopicId` | number  | Forum topic ID within the moderation group (optional)    |
 | `approvedTopicId`   | number  | Forum topic ID within the approved group (optional)      |
-| `timeOut`           | number  | User input timeout in minutes                            |
+| `timeOut`           | number  | Minutes of inactivity before a wizard draft expires (0 = never); read live on every touch |
 | `validatePrice`     | boolean | Whether to enforce numeric price input                   |
 | `minimumPhotos`     | number  | Minimum number of photos/videos required per post (0 = optional) |
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
@@ -98,20 +108,25 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 ### Post Lifecycle
 ```
 User sends /newPost
-  → InputService collects: title, description, price, location, media
+  → WizardService walks the user's draft (collection `drafts`): title, description, price, location, media
   → PostService shows preview
   → User confirms
   → Post saved to DB (status: "pending")
   → PostService forwards to moderation group
       → ModerationService: admin approves → status: "approved", posted to approved group
-      → ModerationService: admin rejects  → status: "rejected", user notified
+      → ModerationService: admin rejects  → status: "rejected"; the moderator REPLIES to the reason prompt
+                                            (or presses Skip), then the user is notified
   → User can /myposts:
       → Mark as "sold"  → updates approved group message with sold tag
       → Bump post       → re-posts with updated timestamp (subject to dailyBumpLimit)
 ```
 
-### Session Management
-Each Telegram user has an in-memory `UserSession` (stored in a `Map<number, UserSession>` on `BotController`). The `isIdle` flag prevents overlapping conversations. Always check and reset `session.isIdle` around async flows.
+### Session Management and Persistent Flows
+Nothing a user or moderator is in the middle of lives in process memory: a restart must lose nothing. There is no in-memory session map and no `isIdle` flag.
+- **Wizard state** lives in the `drafts` collection (`Draft` model, `draftRepository`): one document per user with the step, the answers, the media and `promptMessageId`. `WizardService` reads the user's draft on every update. Wizard buttons (Done-media, Confirm, Cancel, Continue/Start over) are valid only against the draft itself: it exists, its step matches and the pressed message is `promptMessageId`. Anything else falls through to `staleButtonCatchAll`, which answers "expired".
+- **Expiry**: `isDraftExpired(draft, config.timeOut)` is checked on every touch against the live `timeOut` (minutes, 0 = never). There is deliberately no TTL index; startup deletes drafts already past `timeOut`.
+- **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag and the moderator's pending reject-reason prompts (`pendingRejects`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
+- A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
 All user-facing strings live in `src/locales/<lang>/common.json` files, where `<lang>` is the language code (e.g., `en`, `he`). Each language has its own directory containing a `common.json` file with key-value pairs (matching `LocaleStrings` in `src/types/index.ts`). The `LocaleService` handles user-specific language preferences with fallback logic: `preferredLocale` → `languageCode` → default language. When adding new strings, update **every** language's `common.json` file and run `pnpm run check-locals` to validate completeness and syntax.
@@ -123,7 +138,8 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | Command   | Access    | Description                                      |
 |-----------|-----------|--------------------------------------------------|
 | `/start`  | All users | Shows a welcome greeting                          |
-| `/newPost`| All users | Begins the post creation wizard                  |
+| `/newPost`| All users | Begins the post creation wizard (Continue / Start over if a draft exists) |
+| `/cancel` | All users | Drops your wizard draft; in the moderation group, forgets your pending reject-reason prompts |
 | `/myposts`| All users | Lists user's own posts with bump/sold actions    |
 | `/lang`   | All users | Change language preference                       |
 | `/faq`    | All users | View airsoft FAQ and frequently asked questions  |
@@ -160,9 +176,25 @@ pnpm start        # Runs dist/bot.js
 
 ### Linting & Testing
 ```bash
-pnpm run lint         # ESLint check
-pnpm run test         # Validates src/locales key completeness
+pnpm run lint            # ESLint check
+pnpm run build           # tsc type check
+pnpm run test            # runs every check-* script below, in this order
 ```
+
+| Script | What it checks | Needs `MONGO_URI` |
+|--------|----------------|------------------|
+| `pnpm run check-locals` | Locale files: JSON syntax, no empty values, key parity across `en`/`he`/`ru`, FAQ structure | no |
+| `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
+| `pnpm run check-polling` | Polling-error classification and de-duplication | no |
+| `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
+| `pnpm run check-platform` | Command matcher and middleware (offline harness) | no |
+| `pnpm run check-store` | `MongoSessionStore` (TTL, expiry on read) | yes |
+| `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
+| `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
+
+The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
+
+Never run the bot, or a check, against the production token or database.
 
 ---
 
@@ -174,14 +206,15 @@ pnpm run test         # Validates src/locales key completeness
 - **Use `unknown` or Union Types**: If a type is truly dynamic (like translation parameters), prefer `Record<string, string | number | boolean>` or `unknown` over `any`.
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
-- **Check `session.isIdle`** before starting any new async input flow, and always reset it (including in `catch` blocks) to prevent users getting stuck.
+- **Persist flow state**: flows are persisted (drafts, sessions), so there is no `isIdle` flag. Before acting on a wizard message or button, read the user's draft (`draftRepository.findByUserId`) and check it exists, is not expired (`isDraftExpired`) and is at the expected step. On errors, tell the user and leave the draft consistent, so they can `/cancel` or continue.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
 - **Use `async/await`** with `try/catch` for all async operations, logging errors with a `[ERROR - <context>]` prefix to `console.error`.
 - **Avoid Conflicting Update Operators**: In MongoDB upsert operations (`findOneAndUpdate`), never include the same field path in both `$set` and `$setOnInsert`. This triggers a `ConflictingUpdateOperators` (Code 40) error.
 - **Defensive Metadata Updates**: When updating user profiles, only `$set` fields that have valid, non-empty values from Telegram. Avoid overwriting existing database records with placeholder strings (like "Unknown") used during internal service discovery.
 - **Preserve Docker targets** (`development`/`production`) when modifying the `dockerfile`.
 - **Update Documentation**: When implementing new features, always update `README.md` (Features list) and `CHANGELOG.md`.
-- **Add Tests**: When implementing new logic or features, add a relevant test case in `src/tests/testCases.ts` to verify the behavior.
+- **Add Tests**: When implementing new logic or features, add an assertion to the matching `check-*` script (or a new one, wired into `pnpm test`), and a relevant case in `src/tests/testCases.ts` when it helps verify the behavior from Telegram.
+- **Use v2 handler idioms**: register behavior as middleware in `registerRoutes()`, call the `Api` with a params object (`api.sendMessage({ chat_id, text })`), and detach genuinely long jobs (broadcasts, `/test` runs) so they never block the update loop or touch the session.
 
 ### Don't
 - **Don't use `any`**: This project enforces the `@typescript-eslint/no-explicit-any` rule. Do not introduce new `any` declarations.
@@ -190,13 +223,15 @@ pnpm run test         # Validates src/locales key completeness
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
 - **Don't bypass the moderation flow**: posts must pass through `moderationGroupId` before appearing in `approvedGroupId`.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
+- **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
 
 ### Adding a New Command
 1. Add the handler method to an appropriate service (or create a new one in `src/services/`).
-2. Register the route in `BotController.registerRoutes()` in `src/controllers/botController.ts`.
+2. Register it in `BotController.registerRoutes()` in `src/controllers/botController.ts` with `cmd("name", handler)` (a thin wrapper over `command()` in `src/controllers/commands.ts`). Matching is anchored at the start of the message, case-insensitive, matches the exact command name, and accepts `/name` or `/name@ourbot` only; `/name@otherbot` is ignored. Pass `{ detached: true }` only for long jobs.
 3. Add help strings to `src/locales/<lang>/common.json` for all languages and reference them in `showHelp()`.
-4. Update the `/help` display in `botController.ts` if the command is user-facing.
+4. Update the `/help` display in `botController.ts` if the command is user-facing, and add the command to the Commands table here and in `docs/README.md`.
+5. Extend `src/tests/checkRoutes.ts` or `checkPlatform.ts` if the routing changes.
 
 ### Adding a New Locale
 1. Create a new directory `src/locales/<lang>/` (e.g., `src/locales/ru/`).
@@ -212,14 +247,20 @@ pnpm run test         # Validates src/locales key completeness
 |------|---------|
 | `src/bot.ts` | App entry point |
 | `src/controllers/botController.ts` | All Telegram event routing |
-| `src/services/inputService.ts` | Step-by-step user input collection |
+| `src/controllers/commands.ts` | Anchored, case-insensitive command matcher |
+| `src/controllers/middleware.ts` | ensureUser, auth guard, error boundary, expired-button catch-all |
+| `src/services/wizardService.ts` | /newPost wizard over persisted drafts |
+| `src/services/inputService.ts` | Wizard prompts and price validation |
 | `src/services/postService.ts` | Post formatting & Telegram message management |
-| `src/services/moderationService.ts` | Approve/reject logic |
+| `src/services/moderationService.ts` | Approve/reject logic, reject-reason prompt |
 | `src/services/myPostsService.ts` | User post management (bump, sold) |
 | `src/services/adminService.ts` | Runtime config command |
 | `src/services/paymentService.ts` | Handles Telegram Stars donations |
 | `src/models/Post.ts` | Post Mongoose schema |
 | `src/models/User.ts` | User Mongoose schema |
+| `src/models/Draft.ts` | Wizard draft schema (collection `drafts`) |
+| `src/repositories/draftRepository.ts` | Draft access and expiry |
+| `src/repositories/sessionStore.ts` | Mongo store for v2 sessions (`bot_sessions`) |
 | `src/types/index.ts` | All shared TypeScript interfaces |
 | `src/locales/` | Directory containing localized UI strings by language |
 | `config.json` | Runtime bot configuration |
