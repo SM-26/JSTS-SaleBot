@@ -136,9 +136,10 @@ export class ModerationService {
         await this.askRejectReason(ctx, query, postId);
     }
 
-    // Two messages, because Telegram cannot combine force_reply and an inline
-    // keyboard on one message: the prompt forces a reply, a second tiny message
-    // right under it carries the Skip button.
+    // One message: the prompt carries the Skip button and the moderator replies to
+    // it. No force_reply: it can't share a message with an inline keyboard, and in
+    // live testing it opened nothing. Reply and press markers live in separate
+    // tables, so both key on the same message id (promptId === skipMsgId).
     private async askRejectReason(ctx: Context, query: CallbackQuery, postId: string): Promise<void> {
         const chatId = query.message!.chat.id;
         const topicId = query.message && "message_thread_id" in query.message ? query.message.message_thread_id : undefined;
@@ -148,12 +149,6 @@ export class ModerationService {
         const prompt = await this.api.sendMessage({
             chat_id: chatId,
             text: localeService.t(this.lang, 'rejectReasonPrompt'),
-            reply_markup: { force_reply: true, selective: true },
-            ...thread,
-        });
-        const skip = await this.api.sendMessage({
-            chat_id: chatId,
-            text: "👆",
             reply_markup: {
                 inline_keyboard: [[
                     { text: localeService.t(this.lang, 'skipReasonButton'), callback_data: `skip_reason_${moderatorId}_${Date.now()}` },
@@ -161,12 +156,13 @@ export class ModerationService {
             },
             ...thread,
         });
+        const id = prompt.message_id;
 
-        expectReply(ctx, prompt.message_id, { postId, skipMsgId: skip.message_id } satisfies RejectReplyMarker);
-        expectCallback(ctx, skip.message_id, { postId, promptId: prompt.message_id } satisfies RejectSkipMarker);
+        expectReply(ctx, id, { postId, skipMsgId: id } satisfies RejectReplyMarker);
+        expectCallback(ctx, id, { postId, promptId: id } satisfies RejectSkipMarker);
         // The reply-tracking table has no read-only peek, so keep a mirror of what is pending.
         const data = ctx.getSession<UserSession>().data;
-        data.pendingRejects = [...(data.pendingRejects ?? []), { promptId: prompt.message_id, skipMsgId: skip.message_id }];
+        data.pendingRejects = [...(data.pendingRejects ?? []), { promptId: id, skipMsgId: id }];
     }
 
     private async removeKeyboard(chatId: number, messageId: number): Promise<void> {
@@ -224,11 +220,11 @@ export class ModerationService {
 
         const hit = msg.text ? matchReply<RejectReplyMarker>(ctx) : undefined;
         if (!hit) {
-            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from.id)));
+            // Group language, like the prompt itself (owner's decision for the moderation group).
             const topicId = msg.message_thread_id;
             await this.api.sendMessage({
                 chat_id: msg.chat.id,
-                text: localeService.t(locale, 'replyToPromptHint'),
+                text: localeService.t(this.lang, 'replyToPromptHint'),
                 ...(topicId && Number(topicId) !== 1 ? { message_thread_id: Number(topicId) } : {}),
             });
             return false;
@@ -248,8 +244,7 @@ export class ModerationService {
 
         // The button names its moderator; another moderator's session holds no marker for it.
         if (query.data.split("_")[2] !== String(query.from.id)) {
-            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(query.from.id)));
-            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'notYourButton') });
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(this.lang, 'notYourButton') });
             return true;
         }
 

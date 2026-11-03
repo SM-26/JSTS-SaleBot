@@ -343,10 +343,9 @@ async function run() {
             await rejectButton(one, mod, postId);
             await settle();
             const sent = one.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
-            assert.strictEqual(sent.length, 2, "the prompt and the Skip message");
+            assert.strictEqual(sent.length, 1, "one prompt message carrying the Skip button");
             assert.strictEqual(text(sent[0]), T("rejectReasonPrompt"));
-            assert.deepStrictEqual(sent[0].params.reply_markup, { force_reply: true, selective: true });
-            assert.ok(/^skip_reason_\d+_\d+$/.test(keyboard(sent[1])[0].callback_data));
+            assert.ok(/^skip_reason_\d+_\d+$/.test(keyboard(sent[0])[0].callback_data));
             assert.strictEqual((await Post.findById(postId))!.status, "rejected", "claimed on Reject");
             assert.ok(!one.calls.some((c) => Number(c.params.chat_id) === author && c.method === "sendMessage"), "the author is told only after a reason");
 
@@ -356,11 +355,11 @@ async function run() {
             assert.strictEqual((await Post.findById(postId))!.rejectionReason, "Photos are too dark");
             const told = two.calls.find((c) => c.method === "sendMessage" && Number(c.params.chat_id) === author);
             assert.strictEqual(text(told!), T("postRejectedWithReason") + "Photos are too dark");
-            assert.ok(two.calls.some((c) => c.method === "editMessageReplyMarkup" && Number(c.params.message_id) === messageId(sent[1])), "Skip keyboard removed");
+            assert.ok(two.calls.some((c) => c.method === "editMessageReplyMarkup" && Number(c.params.message_id) === messageId(sent[0])), "Skip keyboard removed");
 
             // the Skip button is dead now
             two.calls.length = 0;
-            await two.pressButton(keyboard(sent[1])[0].callback_data, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: messageId(sent[1]) });
+            await two.pressButton(keyboard(sent[0])[0].callback_data, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: messageId(sent[0]) });
             await settle();
             assert.ok(two.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === T("staleButton")));
             assert.ok(!two.calls.some((c) => Number(c.params.chat_id) === author));
@@ -374,7 +373,8 @@ async function run() {
             h.calls.length = 0;
             await rejectButton(h, mod, postId);
             await settle();
-            const [prompt, skip] = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
+            const [prompt] = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
+            const skip = prompt; // one message: the prompt carries the Skip button
             const skipData = keyboard(skip)[0].callback_data;
 
             h.calls.length = 0;
