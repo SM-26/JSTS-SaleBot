@@ -1,9 +1,8 @@
 import "dotenv/config";
 import TelegramBot from "node-telegram-bot-api";
-import mongoose from "mongoose";
 import * as fs from "fs";
 import * as path from "path";
-import { connectDB } from "./config/db";
+import { connectDB, disconnectDB } from "./config/db";
 import { BotController } from "./controllers/botController";
 import { registerPollingErrorHandler } from "./config/pollingErrors";
 
@@ -35,14 +34,18 @@ async function main() {
 
     console.log(`Bot v${pkg.version} is running...`);
 
-    // Graceful shutdown
-    process.on("SIGINT", () => {
-        console.log("Shutting down bot...");
+    // Graceful shutdown. `docker stop` sends SIGTERM, and Node running as a
+    // container's PID 1 ignores it without a handler, so Docker would wait 10s
+    // and SIGKILL the bot mid-poll.
+    const shutdown = (signal: NodeJS.Signals) => {
+        console.log(`Shutting down bot (${signal})...`);
         bot.stopPolling()
-            .then(() => mongoose.disconnect())
+            .then(() => disconnectDB())
             .catch((err) => console.error("Shutdown error:", err))
             .finally(() => process.exit(0));
-    });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
 }
 
 main().catch((err) => {
