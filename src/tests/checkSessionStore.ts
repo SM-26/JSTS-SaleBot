@@ -1,11 +1,11 @@
 import assert from "assert";
 import mongoose from "mongoose";
-import { Bot, createSession } from "tgv2";
-import type { Update } from "tgv2";
+import { Bot, createSession } from "node-telegram-bot-api";
+import type { Update } from "node-telegram-bot-api";
 import { MongoSessionStore, SESSION_TTL_SECONDS } from "../repositories/sessionStore";
 
 // Guards the Mongo-backed session store: the contract (read/write/touch/delete/
-// init, expiry) and, through the real tgv2 session middleware, the two things
+// init, expiry) and, through the real node-telegram-bot-api session middleware, the two things
 // the migration depends on -- sessions survive a restart, and a burst of
 // updates for one key (an album) is serialized rather than losing writes.
 // Needs a real Mongo for the same reason as checkModerationClaim.

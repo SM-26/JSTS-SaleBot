@@ -1,16 +1,19 @@
-import TelegramBot, { CallbackQuery, Message } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
 import { AuthLevel, BotConfig, Post, User, SendMessageOptions } from "../types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { userService } from "./userService";
 import { PostService } from "./postService";
 import { localeService } from "./localeService";
+import type { TemporaryListeners } from "../controllers/temporaryListeners";
 
 export class ModerationService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig,
-        private postService: PostService
+        private postService: PostService,
+        private listeners: TemporaryListeners
     ) { }
 
     private get lang() {
@@ -36,13 +39,13 @@ export class ModerationService {
 
             const isAuthorized = await userService.hasAuthLevel(String(query.from.id), AuthLevel.MOD);
             if (!isAuthorized) {
-                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'notAdmin'), show_alert: true });
+                this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'notAdmin'), show_alert: true });
                 return;
             }
 
             const post = await postRepository.findById(postId);
             if (!post) {
-                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminPostNotFound') });
+                this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'adminPostNotFound') });
                 return;
             }
 
@@ -54,13 +57,13 @@ export class ModerationService {
             // on a human). A read-then-check here lets a second moderator through.
             claimed = await postRepository.claimPending(postId, isApprove ? "approved" : "rejected");
             if (!claimed) {
-                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminPostHandled') });
+                this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'adminPostHandled') });
                 return;
             }
 
             const postAuthor = await userRepository.findByUserId(post.userId);
             if (!postAuthor) {
-                this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminUserNotFound') });
+                this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'adminUserNotFound') });
                 return;
             }
 
@@ -79,16 +82,17 @@ export class ModerationService {
 
                 // Best-effort: a duplicate/failed redraw must not reach the outer
                 // catch, which would release the claim and un-moderate the post.
-                this.bot.editMessageText(statusText, {
+                this.api.editMessageText({
                     chat_id: query.message.chat.id,
-                    message_id: query.message.message_id
+                    message_id: query.message.message_id,
+                    text: statusText
                 }).catch((err: Error) => console.warn("[WARN - ModerationService.handleCallback] editMessageText failed:", err.message));
             }
         } catch (err) {
             console.error("[ERROR - ModerationService.handleCallback]", (err as Error).message);
             // Release the claim so the post returns to the queue and can be retried.
             if (claimed) await postRepository.updateStatus(postId, "pending");
-            this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'adminError') });
+            this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'adminError') });
         }
     }
 
@@ -110,8 +114,8 @@ export class ModerationService {
         }
 
         const authorLocale = localeService.resolveUserLocale(postAuthor);
-        this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postApproved'));
-        this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminApproved') });
+        this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, 'postApproved') });
+        this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(adminLocale, 'adminApproved') });
 
         console.info('[INFO - ModerationService.handleApproval]', {
             action: 'APPROVED',
@@ -123,7 +127,7 @@ export class ModerationService {
     }
 
     private async handleRejection(query: CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<void> {
-        this.bot.answerCallbackQuery(query.id, { text: localeService.t(adminLocale, 'adminRejected') });
+        this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(adminLocale, 'adminRejected') });
 
         const reason = await this.askRejectReason(query);
 
@@ -136,9 +140,9 @@ export class ModerationService {
         const authorLocale = localeService.resolveUserLocale(postAuthor);
 
         if (reason) {
-            this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postRejectedWithReason') + reason);
+            this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, 'postRejectedWithReason') + reason });
         } else {
-            this.bot.sendMessage(Number(post.userId), localeService.t(authorLocale, 'postRejected'));
+            this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, 'postRejected') });
         }
 
         const actionLabel = reason ? 'REJECTED_WITH_REASON' : 'REJECTED_WITHOUT_REASON';
@@ -171,21 +175,23 @@ export class ModerationService {
             options.message_thread_id = Number(topicId);
         }
 
-        const sentMsg = await this.bot.sendMessage(chatId, localeService.t(this.config.lang, 'rejectReasonPrompt'), options);
+        const sentMsg = await this.api.sendMessage({ chat_id: chatId, text: localeService.t(this.config.lang, 'rejectReasonPrompt'), ...options });
 
         return new Promise((resolve) => {
-            const cbListener = (cb: CallbackQuery) => {
+            const cbListener = (cb: CallbackQuery): boolean | void => {
                 if (cb.from.id !== adminId) return;
                 if (cb.data !== skipCallbackData) return;
 
-                this.bot.removeListener("callback_query", cbListener);
-                this.bot.removeListener("message", msgListener);
-                this.bot.answerCallbackQuery(cb.id);
-                this.bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
-                    { chat_id: chatId, message_id: sentMsg.message_id }
-                ).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
+                this.listeners.removeListener("callback_query", cbListener);
+                this.listeners.removeListener("message", msgListener);
+                this.api.answerCallbackQuery({ callback_query_id: cb.id });
+                this.api.editMessageReplyMarkup({
+                    chat_id: chatId,
+                    message_id: sentMsg.message_id,
+                    reply_markup: { inline_keyboard: [] },
+                }).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
                 resolve(null);
+                return true;
             };
 
             const msgListener = (reply: Message) => {
@@ -193,17 +199,18 @@ export class ModerationService {
                 if (topicId && Number(topicId) !== 1 && reply.message_thread_id !== topicId) return;
                 if (reply.text && reply.text.startsWith("/")) return;
 
-                this.bot.removeListener("callback_query", cbListener);
-                this.bot.removeListener("message", msgListener);
-                this.bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
-                    { chat_id: chatId, message_id: sentMsg.message_id }
-                ).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
+                this.listeners.removeListener("callback_query", cbListener);
+                this.listeners.removeListener("message", msgListener);
+                this.api.editMessageReplyMarkup({
+                    chat_id: chatId,
+                    message_id: sentMsg.message_id,
+                    reply_markup: { inline_keyboard: [] },
+                }).catch((err: Error) => console.warn("[WARN - ModerationService.askRejectReason] editMessageReplyMarkup failed:", err.message));
                 resolve(reply.text || null);
             };
 
-            this.bot.on("callback_query", cbListener);
-            this.bot.on("message", msgListener);
+            this.listeners.on("callback_query", cbListener);
+            this.listeners.on("message", msgListener);
         });
     }
 }

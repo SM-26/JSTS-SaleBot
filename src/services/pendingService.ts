@@ -1,4 +1,5 @@
-import TelegramBot, { Message } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, SendRichMessageParams } from "node-telegram-bot-api/types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { AuthLevel, BotConfig, SendMessageOptions } from "../types";
@@ -7,7 +8,7 @@ import { localeService } from "./localeService";
 
 export class PendingService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig,
         private postService: PostService
     ) { }
@@ -31,7 +32,7 @@ export class PendingService {
             const isAuthorized = await userRepository.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
             if (!isAuthorized) {
                 console.warn('[WARN - PendingService.handlePending] non-admin attempted access', { userId: msg.from?.id });
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'), options);
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin'), ...options });
                 return;
             }
 
@@ -39,11 +40,11 @@ export class PendingService {
 
             if (!pendingPosts || pendingPosts.length === 0) {
                 console.info('[INFO - handlePending] no pending posts available');
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminPendingEmpty'), options);
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminPendingEmpty'), ...options });
                 return;
             }
 
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminPendingTitle'), options);
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminPendingTitle'), ...options });
 
             // Limit display to avoid hitting Telegram message size limits
             const displayPosts = pendingPosts.slice(0, 10);
@@ -70,7 +71,7 @@ export class PendingService {
 
                 // One Rich Message with the approve/reject buttons attached — a media
                 // group can't carry buttons, which is what forced the old extra "👇".
-                const richOptions: Parameters<TelegramBot['sendRichMessage']>[2] = {
+                const richOptions: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {
                     reply_markup: {
                         inline_keyboard: [[
                             { text: localeService.t(locale, 'approveButton'), callback_data: `approve_${post._id}` },
@@ -82,15 +83,15 @@ export class PendingService {
                     richOptions.message_thread_id = Number(targetThreadId);
                 }
 
-                await this.bot.sendRichMessage(msg.chat.id, richMessage, richOptions);
+                await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: richMessage, ...richOptions });
             }
 
             if (pendingPosts.length > 10) {
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'pendingMore', { n: pendingPosts.length - 10 }), options);
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'pendingMore', { n: pendingPosts.length - 10 }), ...options });
             }
         } catch (err) {
             console.error("[ERROR - PendingService.handlePending]", err);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminError'), { message_thread_id: targetThreadId });
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminError'), message_thread_id: targetThreadId });
         }
     }
 
@@ -102,16 +103,16 @@ export class PendingService {
 
             const isAuthorized = await userRepository.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
             if (!isAuthorized) {
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
                 return;
             }
 
             await postRepository.expireAllPendingPosts();
 
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminClearPendingSuccess'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminClearPendingSuccess') });
         } catch (err) {
             console.error("[ERROR - PendingService.handleClearPending]", err);
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminError'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminError') });
         }
     }
 }

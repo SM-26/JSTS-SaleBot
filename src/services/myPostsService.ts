@@ -1,4 +1,5 @@
-import TelegramBot, { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api/types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService } from "./postService";
@@ -7,7 +8,7 @@ import { BotConfig, Post, User } from "../types";
 
 export class MyPostsService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig,
         private postService: PostService
     ) { }
@@ -60,13 +61,15 @@ export class MyPostsService {
         const posts: Post[] = await postRepository.findByUserId(userId);
 
         if (!posts || posts.length === 0) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'myPostsEmpty'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'myPostsEmpty') });
             return;
         }
 
         const { text, buttons } = this.buildSummaryMessage(posts, locale);
 
-        await this.bot.sendMessage(msg.chat.id, text, {
+        await this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text,
             parse_mode: "HTML",
             reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
         });
@@ -98,7 +101,7 @@ export class MyPostsService {
             { text: localeService.t(locale, 'bumpButton'), callback_data: `bump_${post._id}` },
         ]];
 
-        await this.bot.sendRichMessage(chatId, richMessage, { reply_markup: { inline_keyboard: buttons } });
+        await this.api.sendRichMessage({ chat_id: chatId, rich_message: richMessage, reply_markup: { inline_keyboard: buttons } });
     }
 
     private async refreshMessage(query: CallbackQuery): Promise<void> {
@@ -109,9 +112,10 @@ export class MyPostsService {
         const posts: Post[] = await postRepository.findByUserId(String(query.from.id));
         const { text, buttons } = this.buildSummaryMessage(posts, locale);
 
-        await this.bot.editMessageText(text, {
+        await this.api.editMessageText({
             chat_id: query.message.chat.id,
             message_id: query.message.message_id,
+            text,
             parse_mode: "HTML",
             reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
         });
@@ -130,7 +134,7 @@ export class MyPostsService {
         }
 
         const successKey = status === 'rejected' ? 'clearRejectedSuccess' : 'clearSoldSuccess';
-        await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, successKey) });
+        await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, successKey) });
 
         await this.refreshMessage(query);
     }
@@ -142,14 +146,14 @@ export class MyPostsService {
         if (!post || String(post.userId) !== String(query.from.id)) {
             const user: User | null = await userRepository.findByUserId(String(query.from.id));
             const locale = localeService.resolveUserLocale(user); //
-            await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'postNotFound') });
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postNotFound') });
             return;
         }
 
         await postRepository.updateStatus(postId, "sold");
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
-        await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'postMarkedSold') });
+        await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
 
         // Edit the message in the approved group
         if (post.approvedMessageId) {
@@ -183,14 +187,14 @@ export class MyPostsService {
         if (!post || String(post.userId) !== String(query.from.id)) {
             const user: User | null = await userRepository.findByUserId(String(query.from.id));
             const locale = localeService.resolveUserLocale(user); //
-            await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'postNotFound') });
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postNotFound') });
             return;
         }
 
         if (post.status !== "approved") {
             const user: User | null = await userRepository.findByUserId(String(query.from.id));
             const locale = localeService.resolveUserLocale(user); //
-            await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'bumpNotApproved') });
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpNotApproved') });
             return;
         }
 
@@ -201,7 +205,7 @@ export class MyPostsService {
             if (bumpCount >= this.config.dailyBumpLimit) {
                 const user: User | null = await userRepository.findByUserId(String(query.from.id));
                 const locale = localeService.resolveUserLocale(user); //
-                await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'bumpLimitReached'), show_alert: true });
+                await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpLimitReached'), show_alert: true });
                 return;
             }
         } else {
@@ -211,7 +215,7 @@ export class MyPostsService {
         // Answer callback immediately to avoid timeout
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
-        await this.bot.answerCallbackQuery(query.id, { text: localeService.t(locale, 'bumpSuccess') });
+        await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpSuccess') });
 
         // Fetch user for formatting
         const postUser: User | null = await userRepository.findByUserId(post.userId);

@@ -1,5 +1,5 @@
-import { Bot } from "tgv2";
-import type { Update } from "tgv2/types";
+import { Bot } from "node-telegram-bot-api";
+import type { Update } from "node-telegram-bot-api/types";
 
 export interface RecordedCall {
     method: string;
@@ -43,7 +43,7 @@ async function decodeBody(body: RequestInit["body"]): Promise<Record<string, unk
     return params;
 }
 
-/** Offline bot: a tgv2 Bot whose fetch records every API call and never touches Telegram. */
+/** Offline bot: a node-telegram-bot-api Bot whose fetch records every API call and never touches Telegram. */
 export function createHarness(options: HarnessOptions = {}) {
     const calls: RecordedCall[] = [];
     let nextMessageId = 100;

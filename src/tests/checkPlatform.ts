@@ -1,5 +1,5 @@
 import assert from "assert";
-import type { Context } from "tgv2";
+import type { Context } from "node-telegram-bot-api";
 import { command, parseCommand } from "../controllers/commands";
 import { ensureUserMiddleware, errorBoundary, requireAuthLevel, sessionKey, staleButtonCatchAll } from "../controllers/middleware";
 import { createHarness, BOT_USERNAME } from "./harness";

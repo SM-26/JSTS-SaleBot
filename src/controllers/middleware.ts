@@ -1,5 +1,5 @@
-import type { Context, Middleware } from "tgv2";
-import type { User } from "tgv2/types";
+import type { Context, Middleware } from "node-telegram-bot-api";
+import type { User } from "node-telegram-bot-api/types";
 import { AuthLevel } from "../types";
 
 /** Per-user-per-chat session key; undefined when the update has no chat or no user. */

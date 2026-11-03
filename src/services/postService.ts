@@ -1,4 +1,5 @@
-import TelegramBot, { Message, InputRichMessage } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, InputRichMessage, SendRichMessageParams } from "node-telegram-bot-api/types";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
@@ -17,7 +18,7 @@ export interface PostData {
 
 export class PostService {
     constructor(
-        private bot: TelegramBot,
+        private api: Api,
         private config: BotConfig
     ) { }
 
@@ -104,7 +105,7 @@ export class PostService {
         const moderationGroupId = this.config.moderationGroupId;
         const moderationTopicId = this.config.moderationTopicId;
 
-        const options: Parameters<TelegramBot['sendRichMessage']>[2] = {
+        const options: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {
             reply_markup: {
                 inline_keyboard: [[
                     { text: localeService.t(this.lang, 'approveButton'), callback_data: `approve_${postId}` },
@@ -117,7 +118,7 @@ export class PostService {
             options.message_thread_id = Number(moderationTopicId);
         }
 
-        const sent = await this.bot.sendRichMessage(moderationGroupId, this.formatPostRichMessage(data), options);
+        const sent = await this.api.sendRichMessage({ chat_id: moderationGroupId, rich_message: this.formatPostRichMessage(data), ...options });
 
         return sent.message_id;
     }
@@ -126,12 +127,12 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: Parameters<TelegramBot['sendRichMessage']>[2] = {};
+        const options: Pick<SendRichMessageParams, "message_thread_id"> = {};
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
         }
 
-        const sent = await this.bot.sendRichMessage(approvedGroupId, richMessage, options);
+        const sent = await this.api.sendRichMessage({ chat_id: approvedGroupId, rich_message: richMessage, ...options });
 
         return sent.message_id;
     }
@@ -145,7 +146,7 @@ export class PostService {
             options.message_thread_id = Number(approvedTopicId);
         }
 
-        const sent = await this.bot.sendMessage(approvedGroupId, text, options);
+        const sent = await this.api.sendMessage({ chat_id: approvedGroupId, text, ...options });
 
         return sent.message_id;
     }
@@ -154,7 +155,7 @@ export class PostService {
         const approvedGroupId = this.config.approvedGroupId;
 
         try {
-            await this.bot.editMessageText({
+            await this.api.editMessageText({
                 chat_id: approvedGroupId,
                 message_id: approvedMessageId,
                 rich_message: richMessage,
@@ -185,22 +186,23 @@ export class PostService {
             const locale = localeService.resolveUserLocale(author);
 
             // 1. Send the text notification
-            await this.bot.sendMessage(Number(post.userId),
-                `💬 <b>${localeService.t(locale, 'newReplyNotification')}</b>\n` +
+            await this.api.sendMessage({
+                chat_id: Number(post.userId),
+                text: `💬 <b>${localeService.t(locale, 'newReplyNotification')}</b>\n` +
                 `Post: <i>${post.title}</i>\n` +
                 `From: ${this.formatUserMention(msg.from!.id, msg.from!.username, msg.from!.first_name)}`,
-                { parse_mode: "HTML" }
-            );
+                parse_mode: "HTML"
+            });
 
             // 2. Attempt Forward with Copy fallback
             try {
-                await this.bot.forwardMessage(Number(post.userId), msg.chat.id, msg.message_id);
+                await this.api.forwardMessage({ chat_id: Number(post.userId), from_chat_id: msg.chat.id, message_id: msg.message_id });
             } catch (err) {
                 console.warn('[WARN - PostService.handlePublicReply] Forward failed, attempting copy...', (err as Error).message);
 
                 try {
                     // copyMessage is much more likely to succeed in protected groups
-                    await this.bot.copyMessage(Number(post.userId), msg.chat.id, msg.message_id);
+                    await this.api.copyMessage({ chat_id: Number(post.userId), from_chat_id: msg.chat.id, message_id: msg.message_id });
                 } catch (copyErr) {
                     console.error('[ERROR - PostService.handlePublicReply] Both forward and copy failed.', (copyErr as Error).message);
                 }
