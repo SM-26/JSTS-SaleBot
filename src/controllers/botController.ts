@@ -1,11 +1,15 @@
+import { createSession } from "node-telegram-bot-api";
 import type { Api, Bot, Context, Middleware } from "node-telegram-bot-api";
 import type { Message, CallbackQuery, InputRichMessage } from "node-telegram-bot-api/types";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
+import draftRepository from "../repositories/draftRepository";
+import { MongoSessionStore, SESSION_TTL_SECONDS } from "../repositories/sessionStore";
 import { BotConfig, UserSession, Post, User, LocaleService } from "../types";
 import { InputService } from "../services/inputService";
+import { WizardService } from "../services/wizardService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
 import { UserService } from "../services/userService";
@@ -18,9 +22,8 @@ import { BroadcastUsersService, truncateFailures } from "../services/broadcastUs
 import { localeService } from "../services/localeService";
 import { AuthLevel } from "../types";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
-import { TemporaryListeners } from "./temporaryListeners";
 import { command, ParsedCommand } from "./commands";
-import { ensureUserMiddleware, staleButtonCatchAll } from "./middleware";
+import { ensureUserMiddleware, sessionKey, staleButtonCatchAll } from "./middleware";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -28,11 +31,16 @@ const config: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
 export class BotController {
     private api: Api;
-    private temporaryListeners = new TemporaryListeners();
-    private config: BotConfig;
-    private sessions: Map<number, UserSession> = new Map();
+    readonly config: BotConfig;
+    // Per chat+user, persisted in Mongo: the donation flag and the reject-prompt mirror.
+    private session = createSession<UserSession>({
+        store: new MongoSessionStore(),
+        ttlSeconds: SESSION_TTL_SECONDS,
+        getSessionKey: sessionKey,
+    });
 
     private inputService: InputService;
+    private wizardService: WizardService;
     private postService: PostService;
     private moderationService: ModerationService;
     private userService: UserService;
@@ -47,9 +55,10 @@ export class BotController {
         this.api = api;
         this.config = config;
 
-        this.inputService = new InputService(api, this.config, this.temporaryListeners);
+        this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
-        this.moderationService = new ModerationService(api, this.config, this.postService, this.temporaryListeners);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService);
+        this.moderationService = new ModerationService(api, this.config, this.postService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
         this.adminService = new AdminService(api, this.config);
@@ -89,94 +98,21 @@ export class BotController {
         }
     }
 
-    getSession(userId: number): UserSession {
-        if (!this.sessions.has(userId)) {
-            this.sessions.set(userId, { isIdle: true });
+    // Startup sweep: drafts abandoned past the (live) timeOut. Expiry is also
+    // checked on every touch, so this only keeps the collection tidy.
+    async deleteExpiredDrafts(): Promise<void> {
+        try {
+            const removed = await draftRepository.deleteExpired(this.config.timeOut);
+            console.log(`Deleted ${removed} expired draft(s).`);
+        } catch (err) {
+            console.error("[ERROR - deleteExpiredDrafts]", (err as Error).message);
         }
-        return this.sessions.get(userId)!;
     }
 
     async HandleStart(msg: Message): Promise<void> {
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
-    }
-
-    async HandleNewPost(msg: Message): Promise<void> {
-        console.info('[INFO - HandleNewPost] session active', { userId: msg.from?.id, chatId: msg.chat.id });
-        const session: UserSession = this.getSession(msg.from!.id);
-
-        try {
-            session.isIdle = false;
-
-                const user = await userRepository.findByUserId(String(msg.from!.id));
-            console.debug(`[DEBUG - HandleNewPost] Resolving locale for user: ${msg.from!.id} (lang_code: ${msg.from!.language_code}, pref: ${user?.preferredLocale})`);
-            const locale = localeService.resolveUserLocale(user);
-
-            // Collect post details
-            const totalSteps = 5;
-            const title = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'welcome'), { locale, index: 1, total: totalSteps });
-            const description = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterDescription'), { locale, index: 2, total: totalSteps });
-            const price = await this.inputService.inputPrice(msg, { locale, index: 3, total: totalSteps });
-            const location = await this.inputService.inputWithPrompt(msg, localeService.t(locale, 'enterLocation'), { locale, index: 4, total: totalSteps });
-            const media = await this.inputService.promptMedia(msg, { locale, index: 5, total: totalSteps });
-
-            if (media.length < (this.config.minimumPhotos ?? 0)) {
-                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notEnoughMedia') });
-                console.info('[INFO - HandleNewPost] session idle (insufficient media)', { userId: msg.from?.id });
-                session.isIdle = true;
-                return;
-            }
-
-            const postData = {
-                title,
-                description,
-                price,
-                location,
-                media,
-                userId: msg.from!.id,
-                username: msg.from!.username,
-                firstName: msg.from!.first_name,
-            };
-
-            // Preview & confirm as one message (buttons attached to the preview).
-            const richPreview = this.postService.formatPostRichMessage(postData, {
-                previewLabel: localeService.t(locale, 'preview'),
-            });
-            const confirmed = await this.inputService.confirmAction(msg, locale, richPreview);
-            if (!confirmed) {
-                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'postCancelled') });
-                console.info('[INFO - HandleNewPost] session idle (user cancelled)', { userId: msg.from?.id });
-                session.isIdle = true;
-                return;
-            }
-
-            // Save & send to moderation
-            const post: Post = await postRepository.createPost({
-                userId: String(msg.from!.id),
-                title,
-                description,
-                price,
-                media,
-                location,
-                createdAt: new Date(),
-            });
-
-            const modMsgId = await this.postService.sendToModeration(String(post._id), postData);
-            if (modMsgId) {
-                await postRepository.setModerationMessageId(String(post._id), modMsgId);
-            }
-
-            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'postCreated') });
-            console.info('[INFO - HandleNewPost] session idle (success)', { userId: msg.from?.id });
-            session.isIdle = true;
-
-        } catch (err) {
-            console.error("[ERROR - HandleNewPost] ", (err as Error).message);
-            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
-            console.info('[INFO - HandleNewPost] session idle (error)', { userId: msg.from?.id });
-            session.isIdle = true;
-        }
     }
 
     async showHelp(msg: Message): Promise<void> {
@@ -196,7 +132,7 @@ export class BotController {
             return { blocks: [{ type: "paragraph", text }] };
         };
 
-        const generalCmds = ['helpStart', 'helpNewPost', 'helpMyPosts', 'helpLang', 'helpHelp'];
+        const generalCmds = ['helpStart', 'helpNewPost', 'helpCancel', 'helpMyPosts', 'helpLang', 'helpHelp'];
         if (this.config.enableFaq !== false) generalCmds.push('helpFaq');
         if (this.config.donationsEnabled !== false) generalCmds.push('helpDonate');
 
@@ -239,9 +175,7 @@ export class BotController {
 
             const locale = localeService.resolveUserLocale(user);
 
-            const activeIds = Array.from(this.sessions.entries())
-                .filter(([, session]) => !session.isIdle)
-                .map(([userId]) => String(userId));
+            const activeIds = await draftRepository.findActiveUserIds(this.config.timeOut);
 
             const activeUsers: string[] = [];
             const usersFromDb = await userRepository.findManyByIds(activeIds);
@@ -296,9 +230,7 @@ export class BotController {
             return;
         }
 
-        const activeIds = Array.from(this.sessions.entries())
-            .filter(([, session]) => !session.isIdle)
-            .map(([userId]) => String(userId));
+        const activeIds = await draftRepository.findActiveUserIds(this.config.timeOut);
 
         const audience = await this.broadcastUsersService.resolveAudience(activeIds, adminId);
         if (audience.length === 0) {
@@ -382,19 +314,20 @@ export class BotController {
             reply_markup: { inline_keyboard: buttons } });
     }
 
-    private async dispatchCallback(query: CallbackQuery, route: { action: CallbackAction; arg: string }): Promise<void> {
-        try {
-            if (route.action === "test") {
-                const key = route.arg;
-                if (!query.message) return;
-                this.api.answerCallbackQuery({ callback_query_id: query.id });
-                this.api.editMessageReplyMarkup({
-                    chat_id: query.message.chat.id,
-                    message_id: query.message.message_id,
-                    reply_markup: { inline_keyboard: [] },
-                }).catch((err: Error) => console.warn("[WARN - botController.testMenu] editMessageReplyMarkup failed:", err.message));
-                const fakeMsg = { ...query.message, from: query.from } as Message;
+    private async dispatchCallback(ctx: Context, query: CallbackQuery, route: { action: CallbackAction; arg: string }): Promise<void> {
+        if (route.action === "test") {
+            const key = route.arg;
+            if (!query.message) return;
+            this.api.answerCallbackQuery({ callback_query_id: query.id });
+            this.api.editMessageReplyMarkup({
+                chat_id: query.message.chat.id,
+                message_id: query.message.message_id,
+                reply_markup: { inline_keyboard: [] },
+            }).catch((err: Error) => console.warn("[WARN - botController.testMenu] editMessageReplyMarkup failed:", err.message));
+            const fakeMsg = { ...query.message, from: query.from } as Message;
 
+            // Test runs are long and never touch the session: detach them.
+            this.detach("/test", (async () => {
                 if (key === "all") {
                     for (const tc of Object.values(TEST_CASES)) {
                         await tc.run(this.api, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
@@ -404,83 +337,80 @@ export class BotController {
                     if (!tc) return;
                     await tc.run(this.api, this.config, localeService as LocaleService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
                 }
-                return;
-            }
+            })());
+            return;
+        }
 
-            if (route.action === "faq") {
-                await this.faqService.handleCallback(query);
-                return;
-            }
+        if (route.action === "faq") {
+            await this.faqService.handleCallback(query);
+            return;
+        }
 
-            if (route.action === "approve" || route.action === "reject") {
-                await this.moderationService.handleCallback(query);
-                return;
-            }
+        if (route.action === "approve" || route.action === "reject") {
+            await this.moderationService.handleCallback(ctx, query);
+            return;
+        }
 
-            if (route.action === "clearRejected") {
-                await this.myPostsService.handleClearStatus(query, "rejected");
-                return;
-            }
+        if (route.action === "clearRejected") {
+            await this.myPostsService.handleClearStatus(query, "rejected");
+            return;
+        }
 
-            if (route.action === "clearSold") {
-                await this.myPostsService.handleClearStatus(query, "sold");
-                return;
-            }
+        if (route.action === "clearSold") {
+            await this.myPostsService.handleClearStatus(query, "sold");
+            return;
+        }
 
-            if (route.action === "sold") {
-                await this.myPostsService.handleSoldCallback(query);
-                return;
-            }
+        if (route.action === "sold") {
+            await this.myPostsService.handleSoldCallback(query);
+            return;
+        }
 
-            if (route.action === "bump") {
-                await this.myPostsService.handleBumpCallback(query);
-                return;
-            }
+        if (route.action === "bump") {
+            await this.myPostsService.handleBumpCallback(query);
+            return;
+        }
 
-            if (route.action === "lang") {
-                const lang = route.arg;
-                await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
-                this.api.answerCallbackQuery({ callback_query_id: query.id });
-                // Confirm in the language the user just picked.
-                this.api.sendMessage({ chat_id: query.message!.chat.id, text: localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }) });
-                return;
-            }
+        if (route.action === "lang") {
+            const lang = route.arg;
+            await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
+            this.api.answerCallbackQuery({ callback_query_id: query.id });
+            // Confirm in the language the user just picked.
+            this.api.sendMessage({ chat_id: query.message!.chat.id, text: localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }) });
+            return;
+        }
 
-            // --- Donation Callbacks ---
-            if (route.action === "donate") {
-                const action = route.arg;
-                const chatId = query.message?.chat.id;
-                if (!chatId) return;
+        // --- Donation Callbacks ---
+        if (route.action === "donate") {
+            const action = route.arg;
+            const chatId = query.message?.chat.id;
+            if (!chatId) return;
 
-                // Clear buttons
-                this.api.editMessageReplyMarkup({
-                    chat_id: chatId,
-                    message_id: query.message?.message_id,
-                    reply_markup: { inline_keyboard: [] },
-                }).catch((err: Error) => console.warn("[WARN - botController.donate] editMessageReplyMarkup failed:", err.message));
-                this.api.answerCallbackQuery({ callback_query_id: query.id });
+            // Clear buttons
+            this.api.editMessageReplyMarkup({
+                chat_id: chatId,
+                message_id: query.message?.message_id,
+                reply_markup: { inline_keyboard: [] },
+            }).catch((err: Error) => console.warn("[WARN - botController.donate] editMessageReplyMarkup failed:", err.message));
+            this.api.answerCallbackQuery({ callback_query_id: query.id });
 
-                if (action === "other") {
-                    const session = this.getSession(query.from.id);
-                    session.awaitingDonation = true;
-                    this.api.sendMessage({ chat_id: chatId, text: localeService.t(this.config.lang, 'donateEnterAmount') });
-                } else {
-                    const amount = parseInt(action, 10);
-                    if (!isNaN(amount)) {
-                        await this.paymentService.sendDonationInvoice(chatId, amount);
-                    }
+            if (action === "other") {
+                const session = this.session.find(ctx);
+                if (session) session.data.awaitingDonation = true;
+                this.api.sendMessage({ chat_id: chatId, text: localeService.t(this.config.lang, 'donateEnterAmount') });
+            } else {
+                const amount = parseInt(action, 10);
+                if (!isNaN(amount)) {
+                    await this.paymentService.sendDonationInvoice(chatId, amount);
                 }
             }
-        } catch (err) {
-            console.error("[ERROR - callback_query]", (err as Error).message);
         }
     }
 
     /**
-     * Handlers never wait for the flow they start: the polling loop handles one
-     * update at a time, and /newPost, the reject-reason prompt and the /test
-     * flows wait for the user's next message or button press (as in v1, where
-     * the emitter did not await listeners either).
+     * Only for genuinely long jobs that never touch the session (broadcast
+     * loops, /test runs): a handler that calls expectReply must finish inside
+     * the middleware chain, because the session is saved when the chain returns.
      */
     private detach(name: string, task: Promise<unknown>): void {
         task.catch((err) => console.error(`[ERROR - ${name}]`, err));
@@ -488,16 +418,22 @@ export class BotController {
 
     registerRoutes(bot: Bot, botUsername: string): void {
         const isPrivate = (msg: Message) => msg.chat.type === "private";
-        const cmd = (names: string | string[], handler: (msg: Message, args: string) => unknown): Middleware<Context> =>
-            command(names, () => botUsername, (ctx) => {
+        const cmd = (
+            names: string | string[],
+            handler: (msg: Message, args: string, ctx: Context) => unknown,
+            { detached = false }: { detached?: boolean } = {}
+        ): Middleware<Context> =>
+            command(names, () => botUsername, async (ctx) => {
                 const { name, args } = ctx.state.command as ParsedCommand;
-                this.detach(`/${name}`, Promise.resolve().then(() => handler(ctx.message!, args)));
+                const run = async () => handler(ctx.message!, args, ctx);
+                if (detached) this.detach(`/${name}`, run());
+                else await run();
             });
 
         bot.use(ensureUserMiddleware(from => this.userService.ensureUser(from)));
-        bot.use(this.temporaryListeners.middleware());
+        bot.use(this.session);
 
-        // Global message handler for payments, group replies and the custom donation amount
+        // Global message handler for payments, reject-reason replies, group replies and the custom donation amount
         bot.use(async (ctx, next) => {
             const msg = ctx.message;
             if (!msg) return next();
@@ -508,31 +444,32 @@ export class BotController {
                 return;
             }
 
-            // 2. Handle Replies in the Approved Group (Buyer to Seller communication)
+            // 2. A moderator's reply to a reject-reason prompt (or a nudge to use Reply)
+            if (await this.moderationService.handleRejectReply(ctx)) return;
+
+            // 3. Handle Replies in the Approved Group (Buyer to Seller communication)
             if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message) {
                 await this.postService.handlePublicReply(msg);
                 return;
             }
 
-            // 3. Handle Custom Donation Amount
-            if (msg.from) {
-                const session = this.getSession(msg.from.id);
-                if (session.awaitingDonation && msg.text) {
-                    // Ignore commands so we don't block /cancel or /start
-                    if (msg.text.startsWith("/")) {
-                        session.awaitingDonation = false;
-                        return next();
-                    }
-                    // Try to parse amount
-                    const amount = parseInt(msg.text, 10);
-                    if (!isNaN(amount) && amount > 0) {
-                        session.awaitingDonation = false; // Reset state
-                        await this.paymentService.sendDonationInvoice(msg.chat.id, amount);
-                    } else {
-                        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'donateInvalidAmount') });
-                    }
-                    return;
+            // 4. Handle Custom Donation Amount
+            const session = this.session.find(ctx);
+            if (msg.from && session?.data.awaitingDonation && msg.text) {
+                // Ignore commands so we don't block /cancel or /start
+                if (msg.text.startsWith("/")) {
+                    delete session.data.awaitingDonation;
+                    return next();
                 }
+                // Try to parse amount
+                const amount = parseInt(msg.text, 10);
+                if (!isNaN(amount) && amount > 0) {
+                    delete session.data.awaitingDonation; // Reset state
+                    await this.paymentService.sendDonationInvoice(msg.chat.id, amount);
+                } else {
+                    await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'donateInvalidAmount') });
+                }
+                return;
             }
 
             return next();
@@ -544,7 +481,17 @@ export class BotController {
         }));
         bot.use(cmd("newpost", (msg) => {
             if (!isPrivate(msg)) return;
-            return this.HandleNewPost(msg);
+            return this.wizardService.handleNewPost(msg);
+        }));
+        bot.use(cmd("cancel", async (msg, _args, ctx) => {
+            if (isPrivate(msg)) return this.wizardService.cancel(msg);
+            const forgotten = await this.moderationService.forgetPendingRejects(ctx);
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
+            await this.api.sendMessage({
+                chat_id: msg.chat.id,
+                text: localeService.t(locale, forgotten > 0 ? 'cancelDone' : 'cancelNothing'),
+                ...(msg.message_thread_id && Number(msg.message_thread_id) !== 1 ? { message_thread_id: msg.message_thread_id } : {}),
+            });
         }));
         bot.use(cmd("myposts", (msg) => {
             if (!isPrivate(msg)) return;
@@ -593,10 +540,11 @@ export class BotController {
             if (!isPrivate(msg)) return;
             return this.adminService.handleBroadcast(msg, args);
         }));
+        // The sending loop is long and never touches the session.
         bot.use(cmd("broadcastusers", (msg, args) => {
             if (!isPrivate(msg)) return;
             return this.handleBroadcastUsers(msg, args);
-        }));
+        }, { detached: true }));
         bot.use(cmd("promote", (msg, args) => {
             if (!isPrivate(msg)) return;
             return this.adminService.handlePromote(msg, args);
@@ -633,6 +581,13 @@ export class BotController {
             return this.handleDonate(msg);
         }));
 
+        // After the commands: a private non-command message is the answer to the user's wizard step.
+        bot.use(async (ctx, next) => {
+            const msg = ctx.message;
+            if (msg && isPrivate(msg) && await this.wizardService.handleMessage(msg)) return;
+            return next();
+        });
+
         // --- Payment Events ---
         bot.on("pre_checkout_query", async (ctx) => {
             if ("pre_checkout_query" in ctx.update) {
@@ -640,11 +595,14 @@ export class BotController {
             }
         });
 
-        bot.on("callback_query", (ctx, next) => {
+        bot.on("callback_query", async (ctx, next) => {
             const query = ctx.callbackQuery!;
+            // Wizard and Skip buttons are validated against persisted state, not routed by prefix.
+            if (await this.wizardService.handleCallback(query)) return;
+            if (await this.moderationService.handleSkip(ctx)) return;
             const route = query.data ? routeCallback(query.data) : null;
             if (!route) return next();
-            this.detach("callback_query", this.dispatchCallback(query, route));
+            await this.dispatchCallback(ctx, query, route);
         });
 
         // Last: wizard/prompt buttons nobody handled belong to a flow that is gone.

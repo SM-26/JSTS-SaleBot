@@ -29,7 +29,6 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     simulate_donation: { label: "💰 Simulate Donation (50 Stars)", run: testCase_SimulateDonation },
     free_text_price: { label: "🏷 Free text price", run: testCase_FreeTextPrice },
     faq_view: { label: "❓ View FAQ", run: testCase_FaqView },
-    broadcast_custom: { label: "✍️ Broadcast Custom Message (to Moderation)", run: testCase_BroadcastCustom },
     broadcast_test: { label: "📢 Broadcast (to Moderation)", run: testCase_Broadcast },
     rbac_promotion: { label: "🎖 Test RBAC Promotion", run: testCase_RBACPromotion },
     rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
@@ -279,36 +278,6 @@ async function testCase_FaqView(
     } catch (err) {
         console.error("[ERROR - testCase_FaqView]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ FAQ test failed: " + (err as Error).message });
-    }
-}
-
-/**
- * TEST CASE: Broadcast a custom message typed by the admin.
- * Sends a user-provided formatted message to the moderation group.
- */
-async function testCase_BroadcastCustom(
-    api: Api,
-    config: BotConfig,
-    localeService: LocaleService,
-    postService: PostService,
-    userService: UserService,
-    paymentService: PaymentService,
-    inputService: InputService,
-    msg: Message
-): Promise<void> {
-    const moderationGroupId = config.moderationGroupId;
-    const moderationTopicId = config.moderationTopicId;
-    const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
-    const locale = localeService.resolveUserLocale(user);
-
-    try {
-        const customMessage = await inputService.inputWithPrompt(msg, localeService.t(locale, 'broadcastEnterCustomMessage'));
-        await api.sendMessage({ chat_id: moderationGroupId, text: customMessage, parse_mode: "HTML",
-            message_thread_id: moderationTopicId });
-        await api.sendMessage({ chat_id: msg.chat.id, text: "✅ Custom broadcast message sent to the moderation group." });
-    } catch (err) {
-        console.error("[ERROR - testCase_BroadcastCustom]", (err as Error).message);
-        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Custom broadcast test failed: " + (err as Error).message });
     }
 }
 

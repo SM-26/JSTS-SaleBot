@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 Unreleased
+  - Persistent flows (issue #84, phase 5). The /newPost wizard is now a step machine over a new additive `drafts` collection, the moderators' reject-reason prompt uses v2 reply tracking, and the custom donation amount lives in the v2 session, so a restart no longer loses any of them. Drafts expire against the live `timeOut` (0 = never); a startup sweep removes old ones. New `/cancel` command; `/newPost` with a draft in progress offers Continue / Start over. The in-memory listener bridge and session map are gone. The `/test` "Broadcast Custom Message" case was removed (it waited on a typed reply). Covered by `pnpm run check-flows`.
   - Golden test (`pnpm run check-callbacks`) pinning the `callback_data` formats of existing buttons, ahead of the node-telegram-bot-api v2 port. Button routing now goes through `routeCallback` in `src/controllers/callbackRoutes.ts`; behavior is unchanged.
   - Read-only database census (`scripts/census.js`) and a backup/restore runbook (`docs/BACKUP.md`), part of the data-safety track of issue #84.
 

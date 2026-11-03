@@ -4,6 +4,8 @@ import type { Update } from "node-telegram-bot-api/types";
 export interface RecordedCall {
     method: string;
     params: Record<string, unknown>;
+    /** What the fake Telegram answered (e.g. the sent message, for its message_id). */
+    result?: unknown;
 }
 
 type ResponseFn = (params: Record<string, unknown>) => unknown;
@@ -17,12 +19,15 @@ export interface SendTextOptions {
     chatId?: number;
     userId?: number;
     chatType?: "private" | "group" | "supergroup";
+    /** Makes the message a reply to this message id (in the same chat). */
+    replyToMessageId?: number;
 }
 
 export interface PressButtonOptions {
     chatId?: number;
     userId?: number;
     messageId?: number;
+    chatType?: "private" | "group" | "supergroup";
 }
 
 export const BOT_USERNAME = "JSTS_testing_bot";
@@ -53,7 +58,8 @@ export function createHarness(options: HarnessOptions = {}) {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const method = url.split("/").pop()!.split("?")[0];
         const params = await decodeBody(init?.body);
-        calls.push({ method, params });
+        const call: RecordedCall = { method, params };
+        calls.push(call);
 
         let result: unknown = true;
         const override = options.responses?.[method];
@@ -68,6 +74,7 @@ export function createHarness(options: HarnessOptions = {}) {
                 date: Math.floor(Date.now() / 1000)
             };
         }
+        call.result = result;
         // an override shaped like { ok: false, ... } is returned as a Telegram error envelope
         const failure = typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
         return new Response(JSON.stringify(failure ? result : { ok: true, result }), {
@@ -81,7 +88,7 @@ export function createHarness(options: HarnessOptions = {}) {
     const send = (update: Record<string, unknown>) =>
         bot.handleUpdate({ update_id: nextUpdateId++, ...update } as Update);
 
-    const sendText = (text: string, { chatId, userId = 42, chatType = "private" }: SendTextOptions = {}) => {
+    const message = (content: Record<string, unknown>, { chatId, userId = 42, chatType = "private", replyToMessageId }: SendTextOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             message: {
@@ -89,12 +96,21 @@ export function createHarness(options: HarnessOptions = {}) {
                 date: Math.floor(Date.now() / 1000),
                 chat: { id: chat, type: chatType },
                 from: { id: userId, is_bot: false, first_name: "Tester" },
-                text
+                ...content,
+                ...(replyToMessageId === undefined ? {} : {
+                    reply_to_message: { message_id: replyToMessageId, date: Math.floor(Date.now() / 1000), chat: { id: chat, type: chatType } }
+                })
             }
         });
     };
 
-    const pressButton = (data: string, { chatId, userId = 42, messageId = 7 }: PressButtonOptions = {}) => {
+    const sendText = (text: string, options: SendTextOptions = {}) => message({ text }, options);
+
+    /** One photo update (a single size, like each item of an album). */
+    const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>
+        message({ photo: [{ file_id: fileId, file_unique_id: fileId, width: 10, height: 10 }] }, options);
+
+    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private" }: PressButtonOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             callback_query: {
@@ -105,11 +121,11 @@ export function createHarness(options: HarnessOptions = {}) {
                 message: {
                     message_id: messageId,
                     date: Math.floor(Date.now() / 1000),
-                    chat: { id: chat, type: "private" }
+                    chat: { id: chat, type: chatType }
                 }
             }
         });
     };
 
-    return { bot, calls, send, sendText, pressButton };
+    return { bot, calls, send, sendText, sendPhoto, pressButton };
 }
