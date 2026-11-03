@@ -322,6 +322,11 @@ export class BotController {
             const lang = route.arg;
             await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
             this.api.answerCallbackQuery({ callback_query_id: query.id });
+            // One pick per menu: drop the buttons so the menu can't keep switching (#97).
+            if (query.message) {
+                this.api.editMessageReplyMarkup({ chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } })
+                    .catch((err: Error) => console.warn("[WARN - botController.lang] editMessageReplyMarkup failed:", err.message));
+            }
             // Confirm in the language the user just picked.
             this.api.sendMessage({ chat_id: query.message!.chat.id, text: localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }) });
             return;

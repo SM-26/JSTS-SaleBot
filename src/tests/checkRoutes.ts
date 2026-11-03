@@ -102,6 +102,12 @@ async function run() {
         assert.strictEqual(toast.params.text, localeService.t(localeService.resolveUserLocale(user), "staleButton"));
         assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "a stale button must lose its keyboard");
 
+        // A language pick saves it and removes the menu's buttons (#97).
+        h.calls.length = 0;
+        await h.pressButton("lang_en", { userId, messageId: 55 });
+        assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageReplyMarkup" && Number(c.params.message_id) === 55)), "the /lang menu must lose its buttons");
+        assert.strictEqual((await userRepository.findByUserId(String(userId)))?.preferredLocale, "en");
+
         // /newPost (mixed case) sends the first prompt and stores the draft; answering it sends the second.
         h.calls.length = 0;
         await h.sendText("/NewPost", { userId });
