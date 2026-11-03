@@ -506,6 +506,47 @@ async function run() {
             console.log("  [OK] (k) the donation amount flag survives a restart.");
         }
 
+        // (l) /myposts cards keep their message (issue #99); only the summary's clear_* buttons refresh the summary
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("hi", { userId: u }); // creates the user record
+            const seedApproved = async (title: string, status: "approved" | "sold", media: { type: "photo"; fileId: string }[] = []) => {
+                const post = await Post.create({ userId: String(u), title, description: "d", price: "10", location: "l", media, status });
+                postIds.push(String(post._id));
+                return String(post._id);
+            };
+            const soldId = await seedApproved("Card", "approved", [{ type: "photo", fileId: "f1" }]);
+            const bumpId = await seedApproved("Card2", "approved");
+            await seedApproved("Old", "sold");
+            const edits = () => h.calls.filter((c) => c.method === "editMessageText");
+
+            h.calls.length = 0;
+            await h.pressButton(`sold_${soldId}`, { userId: u, messageId: 501 });
+            await settle();
+            assert.strictEqual(edits().length, 1, "Mark sold edits exactly one message");
+            assert.strictEqual(Number(edits()[0].params.message_id), 501, "the pressed card itself is edited");
+            const body = JSON.stringify(edits()[0].params.rich_message);
+            assert.ok(body.includes(T("soldTag")) && body.includes("strikethrough") && body.includes("f1"), "sold footer, struck title and photo kept");
+            assert.ok(!edits()[0].params.text, "a rich edit, not the summary text");
+            const markup = edits()[0].params.reply_markup as Keyboard | undefined;
+            assert.ok(!markup || markup.inline_keyboard.flat().length === 0, "no buttons on the sold card");
+
+            h.calls.length = 0;
+            await h.pressButton(`bump_${bumpId}`, { userId: u, messageId: 502 });
+            await settle();
+            assert.strictEqual(edits().length, 0, "Bump leaves the card alone");
+            assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery"), "Bump still answers with a popup");
+
+            h.calls.length = 0;
+            await h.pressButton("clear_sold", { userId: u, messageId: 500 });
+            await settle();
+            assert.strictEqual(edits().length, 1, "clear_sold still refreshes the summary");
+            assert.strictEqual(Number(edits()[0].params.message_id), 500);
+            assert.ok(text(edits()[0]).startsWith(T("myPostsTitle")), "the summary text");
+            console.log("  [OK] (l) a sold card is re-rendered in place, bump leaves it, clear_sold refreshes the summary.");
+        }
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);
