@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Bot } from "node-telegram-bot-api";
+import type { Context, Middleware } from "node-telegram-bot-api";
 import { run } from "node-telegram-bot-api/node";
 import * as fs from "fs";
 import * as path from "path";
@@ -28,10 +29,28 @@ async function main() {
     const me = await bot.api.getMe();
 
     const controller = new BotController(bot.api);
+
+    // Startup sweeps and the Mongo disconnect ride the bot lifecycle: run() calls
+    // bot.init() before the first poll and bot.close() on the way out (also after a
+    // fatal poll error). A passthrough middleware carrying init/close is how v2 picks
+    // that up. Registered BEFORE the session middleware (inside registerRoutes) so
+    // close(), which runs in reverse order, disconnects Mongo after the session
+    // store has closed. The sweeps catch and log their own errors, so a failed init
+    // never stops the bot.
+    const lifecycle: Middleware<Context> = Object.assign(
+        (_ctx: Context, next: () => Promise<void>) => next(),
+        {
+            init: async () => {
+                await controller.syncSoldPosts();
+                await controller.deleteExpiredDrafts();
+            },
+            close: () => disconnectDB(),
+        }
+    );
+    bot.use(lifecycle);
+
     controller.registerRoutes(bot, me.username!);
     bot.catch(errorBoundary);
-    await controller.syncSoldPosts();
-    await controller.deleteExpiredDrafts();
 
     const pkgPath = path.join(__dirname, "../package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
@@ -41,8 +60,6 @@ async function main() {
     // run() installs the SIGINT/SIGTERM handlers (`docker stop` sends SIGTERM,
     // and Node running as a container's PID 1 ignores it without a handler).
     await run(bot, { exitOnError: true, onError: createPollErrorLogger() });
-
-    await disconnectDB();
 }
 
 main().catch((err) => {

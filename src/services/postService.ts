@@ -1,6 +1,8 @@
+import { RichMessageBuilder, RichTextBuilder, richListItem } from "node-telegram-bot-api";
 import type { Api } from "node-telegram-bot-api";
 import type { Message, InputRichMessage, SendRichMessageParams } from "node-telegram-bot-api/types";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
+import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
@@ -33,69 +35,58 @@ export class PostService {
     }
 
     // The `text_mention` rich-text object links a display name to a user id.
-    formatUserMentionRich(userId: number, username?: string, firstName?: string): unknown {
-        return username
-            ? `@${username}`
-            : { type: "text_mention", text: firstName || "User", user: { id: userId, is_bot: false, first_name: firstName || "User" } };
+    private appendUserMentionRich(text: RichTextBuilder, userId: number, username?: string, firstName?: string): RichTextBuilder {
+        if (username) return text.plain(`@${username}`);
+        const name = firstName || "User";
+        return text.textMention(name, { id: userId, is_bot: false, first_name: name });
     }
 
-    // Approved-group post as a Rich Message (Bot API 10.1+). The shipped RichText
-    // types omit the plain-string/array forms the API accepts, so we assemble the
-    // blocks loosely and cast once at the boundary. Block/text "type"
+    // Approved-group post as a Rich Message (Bot API 10.1+). Block/text "type"
     // discriminators verified against https://core.telegram.org/bots/api.
+    // checkRichMessages.ts pins the exact wire JSON: posts already published
+    // must keep looking identical. Single-node rich texts (title, link) stay
+    // plain objects because RichTextBuilder.build() always wraps in an array.
     formatPostRichMessage(
         data: PostData,
         opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string } } = {}
     ): InputRichMessage {
-        const bold = (text: unknown) => ({ type: "bold", text });
-        const para = (text: unknown) => ({ type: "paragraph", text });
-        const item = (text: unknown) => ({ blocks: [para(text)] });
+        const message = new RichMessageBuilder();
+        if (opts.previewLabel) message.paragraph(opts.previewLabel);
 
-        const titleText = opts.sold ? { type: "strikethrough", text: data.title } : data.title;
+        message
+            .heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2)
+            .blockquote(b => b.paragraph(data.description))
+            .divider()
+            .list([
+                richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
+                richListItem(b => b.paragraph(`📍 ${data.location}`)),
+                richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
+            ]);
 
-        const blocks: unknown[] = [
-            ...(opts.previewLabel ? [para(opts.previewLabel)] : []),
-            { type: "heading", text: titleText, size: 2 },
-            { type: "blockquote", blocks: [para(data.description)] },
-            { type: "divider" },
-            {
-                type: "list",
-                items: [
-                    item(["💰 ", bold(data.price)]),
-                    item(`📍 ${data.location}`),
-                    item(["👤 ", this.formatUserMentionRich(data.userId, data.username, data.firstName)]),
-                ],
-            },
-        ];
+        const addMedia = (b: RichMessageBuilder, m: MediaItem) =>
+            m.type === "video" ? b.video({ type: "video", media: m.fileId }) : b.photo({ type: "photo", media: m.fileId });
 
-        const mediaBlocks = data.media.map((m) =>
-            m.type === "video"
-                ? { type: "video", video: { type: "video", media: m.fileId } }
-                : { type: "photo", photo: { type: "photo", media: m.fileId } }
-        );
-
-        if (mediaBlocks.length === 1) {
-            blocks.push(mediaBlocks[0]);
-        } else if (mediaBlocks.length > 1) {
+        if (data.media.length === 1) {
+            addMedia(message, data.media[0]);
+        } else if (data.media.length > 1) {
             // slideshow (swipeable) vs collage (grid) — chosen in config.json.
-            const layout = this.config.mediaLayout ?? "slideshow";
-            blocks.push({ type: layout, blocks: mediaBlocks });
+            const addAll = (b: RichMessageBuilder) => data.media.forEach(m => addMedia(b, m));
+            if (this.config.mediaLayout === "collage") message.collage(addAll);
+            else message.slideshow(addAll);
         }
 
         // e.g. the /pending "Review" deep-link to the moderation message.
         if (opts.link) {
-            blocks.push({ type: "footer", text: { type: "url", text: opts.link.label, url: opts.link.url } });
+            message.footer({ type: "url", text: opts.link.label, url: opts.link.url });
         }
 
         // Sold posts show the sold marker; only the public post gets a contact CTA.
         const footer = opts.sold
             ? localeService.t(this.lang, 'soldTag')
             : opts.showCta ? localeService.t(this.lang, 'contactSellerCta') : null;
-        if (footer) {
-            blocks.push({ type: "footer", text: footer });
-        }
+        if (footer) message.footer(footer);
 
-        return { blocks } as unknown as InputRichMessage;
+        return message.build();
     }
 
     // One Rich Message carrying the post AND the approve/reject buttons. A media
@@ -167,11 +158,11 @@ export class PostService {
                 console.warn("[WARN - markSoldInGroup]", `Message with ID ${approvedMessageId} not found in group ${approvedGroupId}. Clearing approvedMessageId reference.`);
                 return false;
             }
-            if (errorMessage.includes("message is not modified")) {
+            if (isApiError(err, 400, "message is not modified")) {
                 return true;
             }
 
-            console.error("[ERROR - markSoldInGroup]", errorMessage);
+            console.error("[ERROR - markSoldInGroup]", (err as Error).message);
             return false;
         }
     }

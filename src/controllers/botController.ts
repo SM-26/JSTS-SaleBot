@@ -1,6 +1,6 @@
 import { createSession } from "node-telegram-bot-api";
 import type { Api, Bot, Context, Middleware } from "node-telegram-bot-api";
-import type { Message, CallbackQuery, InputRichMessage } from "node-telegram-bot-api/types";
+import type { Message, CallbackQuery } from "node-telegram-bot-api/types";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
@@ -18,7 +18,8 @@ import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
-import { BroadcastUsersService, truncateFailures } from "../services/broadcastUsersService";
+import { BroadcastUsersService } from "../services/broadcastUsersService";
+import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
 import { AuthLevel } from "../types";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
@@ -121,45 +122,10 @@ export class BotController {
         const locale = localeService.resolveUserLocale(user);
         const t = (key: string) => localeService.t(locale, key);
 
-        // Section titles carry <b> tags for the old HTML path; strip them since
-        // rich headings style themselves. Command lines are "/cmd - desc" — bold
-        // the command part so the list is scannable.
-        const heading = (key: string, size: number) => ({ type: "heading", text: t(key).replace(/<\/?b>/g, ""), size });
-        const cmd = (key: string) => {
-            const line = t(key);
-            const i = line.indexOf(" - ");
-            const text = i === -1 ? line : [{ type: "bold", text: line.slice(0, i) }, line.slice(i)];
-            return { blocks: [{ type: "paragraph", text }] };
-        };
-
-        const generalCmds = ['helpStart', 'helpNewPost', 'helpCancel', 'helpMyPosts', 'helpLang', 'helpHelp'];
-        if (this.config.enableFaq !== false) generalCmds.push('helpFaq');
-        if (this.config.donationsEnabled !== false) generalCmds.push('helpDonate');
-
-        const blocks: unknown[] = [
-            heading('helpTitle', 2),
-            { type: "list", items: generalCmds.map(cmd) },
-        ];
-
         const authLevel = user?.authLevel ?? AuthLevel.USER;
+        const rich_message = buildHelpMessage(t, authLevel, this.config);
 
-        if (authLevel >= AuthLevel.MOD) {
-            blocks.push(
-                { type: "divider" },
-                heading('helpModSection', 3),
-                { type: "list", items: ['helpPending', 'helpClearPending', 'helpAuth'].map(cmd) },
-            );
-        }
-
-        if (authLevel >= AuthLevel.ADMIN) {
-            blocks.push(
-                { type: "divider" },
-                heading('helpAdminSection', 3),
-                { type: "list", items: ['helpConfig', 'helpActiveUsers', 'helpPromote', 'helpDemote', 'helpBroadcastTopic', 'helpBroadcastUsers', 'helpTest'].map(cmd) },
-            );
-        }
-
-        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: { blocks } as unknown as InputRichMessage, message_thread_id: msg.message_thread_id });
+        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message, message_thread_id: msg.message_thread_id });
     }
 
     async handleActiveUsers(msg: Message): Promise<void> {
@@ -245,32 +211,13 @@ export class BotController {
             console.log('[INFO - handleBroadcastUsers] Failures:', report.failures);
         }
 
-        const blocks: unknown[] = [
-            { type: "heading", text: localeService.t(locale, 'broadcastUsersReportTitle'), size: 2 },
-            { type: "paragraph", text: localeService.t(locale, 'broadcastUsersReport', { sent: report.sent, failed: report.failures.length, total: report.total }) },
-        ];
+        const usersFromDb = report.failures.length > 0
+            ? await userRepository.findManyByIds(report.failures.map(f => f.userId))
+            : [];
+        const mentionById = new Map(usersFromDb.map(u => [u.userId, u.userName ? `@${u.userName}` : 'N/A']));
+        const rich_message = buildBroadcastReportMessage((key, params) => localeService.t(locale, key, params), report, mentionById);
 
-        if (report.failures.length > 0) {
-            const usersFromDb = await userRepository.findManyByIds(report.failures.map(f => f.userId));
-            const mentionById = new Map(usersFromDb.map(u => [u.userId, u.userName ? `@${u.userName}` : 'N/A']));
-
-            const { shown, remainder } = truncateFailures(report.failures);
-            blocks.push(
-                { type: "divider" },
-                {
-                    type: "list",
-                    items: shown.map(f => ({
-                        blocks: [{ type: "paragraph", text: `• ${mentionById.get(f.userId) ?? 'N/A'} (${f.userId}) — ${f.reason}` }],
-                    })),
-                },
-            );
-
-            if (remainder > 0) {
-                blocks.push({ type: "paragraph", text: localeService.t(locale, 'broadcastUsersMore', { n: remainder }) });
-            }
-        }
-
-        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: { blocks } as unknown as InputRichMessage, message_thread_id: msg.message_thread_id });
+        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message, message_thread_id: msg.message_thread_id });
     }
 
     async handleLang(msg: Message): Promise<void> {
