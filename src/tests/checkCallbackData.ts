@@ -1,0 +1,71 @@
+import assert from "assert";
+import fs from "fs";
+import path from "path";
+import { routeCallback } from "../controllers/callbackRoutes";
+
+/**
+ * Golden test for callback_data routing.
+ * The table below is literal on purpose: never edit an existing row to make a
+ * refactor pass, because these strings live in old Telegram messages forever.
+ * Run: pnpm exec ts-node src/tests/checkCallbackData.ts
+ */
+
+console.log("[INFO] Checking callback_data routing...");
+
+const ID = "65f1c2a9e4b0c3d2a1f09876";
+
+const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
+    [`approve_${ID}`, { action: "approve", arg: ID }],
+    [`reject_${ID}`, { action: "reject", arg: ID }],
+    [`sold_${ID}`, { action: "sold", arg: ID }],
+    [`bump_${ID}`, { action: "bump", arg: ID }],
+    ["clear_rejected", { action: "clearRejected", arg: "" }],
+    ["clear_sold", { action: "clearSold", arg: "" }],
+    ["lang_en", { action: "lang", arg: "en" }],
+    ["lang_he", { action: "lang", arg: "he" }],
+    ["lang_ru", { action: "lang", arg: "ru" }],
+    ["faq_root", { action: "faq", arg: "root" }],
+    ["faq_1", { action: "faq", arg: "1" }],
+    ["faq_1.2.1", { action: "faq", arg: "1.2.1" }],
+    ["donate_50", { action: "donate", arg: "50" }],
+    ["donate_150", { action: "donate", arg: "150" }],
+    ["donate_other", { action: "donate", arg: "other" }],
+    ["test_all", { action: "test", arg: "all" }],
+    // Unknown or ephemeral (handled by temporary listeners): must not route.
+    ["confirm_123", null],
+    ["done_media_123", null],
+    ["skip_reason_abc", null],
+    ["clear_other", null],
+    ["garbage", null],
+    ["", null],
+];
+
+for (const [data, expected] of GOLDEN) {
+    assert.deepStrictEqual(routeCallback(data), expected, `golden row failed: "${data}"`);
+}
+console.log(`  [SUCCESS] ${GOLDEN.length} golden rows route as expected.`);
+
+// --- strings the bot generates from data on disk ---------------------------------
+const localesDir = path.join(__dirname, "..", "locales");
+const localeDirs = fs.readdirSync(localesDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+assert.ok(localeDirs.length > 0, "no locale directories found");
+
+const generated: string[] = [];
+for (const dir of localeDirs) {
+    assert.deepStrictEqual(routeCallback(`lang_${dir}`), { action: "lang", arg: dir });
+    generated.push(`lang_${dir}`);
+
+    const faq = JSON.parse(fs.readFileSync(path.join(localesDir, dir, "faq.json"), "utf8")) as { nodes: Record<string, string> };
+    for (const nodeId of Object.keys(faq.nodes)) {
+        assert.deepStrictEqual(routeCallback(`faq_${nodeId}`), { action: "faq", arg: nodeId });
+        generated.push(`faq_${nodeId}`);
+    }
+}
+for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`]) generated.push(s);
+
+for (const s of generated) {
+    assert.ok(Buffer.byteLength(s) <= 64, `callback_data over 64 bytes: "${s}"`);
+}
+console.log(`  [SUCCESS] ${generated.length} generated strings route correctly and fit Telegram's 64-byte limit.`);
+
+console.log("[SUCCESS] All callback_data checks passed.");

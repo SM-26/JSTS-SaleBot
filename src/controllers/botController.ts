@@ -16,6 +16,7 @@ import { FaqService } from "../services/faqService";
 import { BroadcastUsersService, truncateFailures } from "../services/broadcastUsersService";
 import { localeService } from "../services/localeService";
 import { AuthLevel } from "../types";
+import { routeCallback } from "./callbackRoutes";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
@@ -483,10 +484,12 @@ export class BotController {
 
         this.bot.on("callback_query", async (query) => {
             if (!query.data) return;
+            const route = routeCallback(query.data);
+            if (!route) return;
 
             try {
-                if (query.data.startsWith("test_")) {
-                    const key = query.data.replace("test_", "");
+                if (route.action === "test") {
+                    const key = route.arg;
                     if (!query.message) return;
                     this.bot.answerCallbackQuery(query.id);
                     this.bot.editMessageReplyMarkup(
@@ -507,38 +510,38 @@ export class BotController {
                     return;
                 }
 
-                if (query.data.startsWith("faq_")) {
+                if (route.action === "faq") {
                     await this.faqService.handleCallback(query);
                     return;
                 }
 
-                if (query.data.startsWith("approve_") || query.data.startsWith("reject_")) {
+                if (route.action === "approve" || route.action === "reject") {
                     await this.moderationService.handleCallback(query);
                     return;
                 }
 
-                if (query.data === "clear_rejected") {
+                if (route.action === "clearRejected") {
                     await this.myPostsService.handleClearStatus(query, "rejected");
                     return;
                 }
 
-                if (query.data === "clear_sold") {
+                if (route.action === "clearSold") {
                     await this.myPostsService.handleClearStatus(query, "sold");
                     return;
                 }
 
-                if (query.data.startsWith("sold_")) {
+                if (route.action === "sold") {
                     await this.myPostsService.handleSoldCallback(query);
                     return;
                 }
 
-                if (query.data.startsWith("bump_")) {
+                if (route.action === "bump") {
                     await this.myPostsService.handleBumpCallback(query);
                     return;
                 }
 
-                if (query.data.startsWith("lang_")) {
-                    const lang = query.data.replace("lang_", "");
+                if (route.action === "lang") {
+                    const lang = route.arg;
                     await userRepository.updateUser(String(query.from!.id), { preferredLocale: lang });
                     this.bot.answerCallbackQuery(query.id);
                     // Confirm in the language the user just picked.
@@ -547,8 +550,8 @@ export class BotController {
                 }
 
                 // --- Donation Callbacks ---
-                if (query.data.startsWith("donate_")) {
-                    const action = query.data.replace("donate_", "");
+                if (route.action === "donate") {
+                    const action = route.arg;
                     const chatId = query.message?.chat.id;
                     if (!chatId) return;
 

@@ -26,7 +26,8 @@
 │   ├── config/
 │   │   └── db.ts                 # Mongoose connection helper
 │   ├── controllers/
-│   │   └── botController.ts      # Main router: registers all Telegram command/callback handlers
+│   │   ├── botController.ts      # Main router: registers all Telegram command/callback handlers
+│   │   └── callbackRoutes.ts     # callback_data prefix → action; formats are frozen (golden test)
 │   ├── services/
 │   │   ├── inputService.ts       # Prompts user for text, price, and media input via chat
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
@@ -51,6 +52,8 @@
 │       │   └── common.json       # English locale strings
 │       └── he/
 │           └── common.json       # Hebrew locale strings
+├── scripts/
+│   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
 ├── .env.example                  # Environment variable template (copy to .env)
 ├── dockerfile                    # Multi-stage Docker build (development + production targets)

@@ -303,6 +303,8 @@ docker compose -f compose.prod.yaml up -d
 docker compose -f compose.prod.yaml logs -f bot
 ```
 
+Backups, restores and the read-only database census are in [BACKUP.md](BACKUP.md).
+
 ## Dev build  
 ### Prerequisites
 
