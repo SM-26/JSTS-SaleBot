@@ -31,6 +31,7 @@ async function main() {
     controller.registerRoutes(bot, me.username!);
     bot.catch(errorBoundary);
     await controller.syncSoldPosts();
+    await controller.deleteExpiredDrafts();
 
     const pkgPath = path.join(__dirname, "../package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));

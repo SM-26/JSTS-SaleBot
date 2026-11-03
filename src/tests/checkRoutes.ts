@@ -4,13 +4,15 @@ import * as path from "path";
 import mongoose from "mongoose";
 import User from "../models/User";
 import Post from "../models/Post";
+import Draft from "../models/Draft";
 import { createHarness, BOT_USERNAME } from "./harness";
 import type { BotConfig } from "../types";
 
 // Smoke test for BotController.registerRoutes on the offline harness: every
-// user command is routed, look-alikes are not, the /newPost wizard works
-// through the temporary-listener bridge, and a stale button gets the toast.
-// Needs Mongo because the middleware and handlers read/write user records.
+// user command is routed, look-alikes are not, the /newPost wizard answers
+// from the persisted draft, and a stale button gets the toast. (checkFlows
+// covers the flows in depth.) Needs Mongo because the middleware and handlers
+// read/write user, draft and session records.
 const MONGO_URI = process.env.MONGO_URI;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,7 +23,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<bool
     return condition();
 }
 
-// Handlers are fire-and-forget, so give them a moment before asserting silence.
+// Handlers are awaited, but their fire-and-forget API calls land a tick later.
 const QUIET_MS = 300;
 
 async function run() {
@@ -61,7 +63,7 @@ async function run() {
         const commands = [
             "/start", "/myposts", "/help", "/lang", "/config", "/activeUsers", "/pending",
             "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
-            "/auth", "/test", "/donate",
+            "/auth", "/test", "/donate", "/cancel",
             "/start@" + BOT_USERNAME, "/START",
         ];
         if (config.enableFaq !== false) commands.push("/faq");
@@ -100,23 +102,27 @@ async function run() {
         assert.strictEqual(toast.params.text, localeService.t(localeService.resolveUserLocale(user), "staleButton"));
         assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "a stale button must lose its keyboard");
 
-        // /newPost (mixed case) sends the first prompt; answering it reaches the second through the bridge.
+        // /newPost (mixed case) sends the first prompt and stores the draft; answering it sends the second.
         h.calls.length = 0;
         await h.sendText("/NewPost", { userId });
         assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")), "/NewPost must send the first prompt");
         await sleep(QUIET_MS);
         assert.strictEqual(h.calls.filter((c) => c.method === "sendMessage").length, 1, "only the first prompt so far");
+        assert.strictEqual((await Draft.findOne({ userId: String(userId) }))?.step, "title", "the draft is in Mongo");
 
         await h.sendText("A bicycle", { userId });
         assert.ok(
             await waitFor(() => h.calls.filter((c) => c.method === "sendMessage").length === 2),
             "answering the first prompt must send the second prompt"
         );
+        assert.strictEqual((await Draft.findOne({ userId: String(userId) }))?.title, "A bicycle");
 
-        console.log("[OK] commands, look-alikes, stale button and the wizard bridge are routed correctly.");
+        console.log("[OK] commands, look-alikes, stale button and the persisted wizard are routed correctly.");
     } finally {
         await User.deleteOne({ userId: String(userId) });
         await Post.deleteMany({ userId: String(userId) });
+        await Draft.deleteMany({ userId: String(userId) });
+        await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:${userId}$` } });
         await mongoose.disconnect();
     }
 }

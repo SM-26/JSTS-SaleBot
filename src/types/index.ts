@@ -56,6 +56,14 @@ export interface LocaleStrings {
     approveButton: string;
     rejectButton: string;
     staleButton: string;
+    notYourButton: string;
+    replyToPromptHint: string;
+    draftExpired: string;
+    draftInProgress: string;
+    draftContinueButton: string;
+    draftRestartButton: string;
+    cancelDone: string;
+    cancelNothing: string;
     statusApproved: string;
     statusRejected: string;
     rejectReasonPrompt: string;
@@ -93,6 +101,7 @@ export interface LocaleStrings {
     helpNewPost: string;
     helpMyPosts: string;
     helpHelp: string;
+    helpCancel: string;
     helpAdminSection: string;
     helpConfig: string;
     helpPending: string;
@@ -143,9 +152,12 @@ export interface LocaleService {
     availableLocales: string[];
 }
 
+// The `data` bag of the v2 session (one per chat+user, persisted in Mongo).
 export interface UserSession {
-    isIdle: boolean;
     awaitingDonation?: boolean;
+    // Mirror of the moderator's pending reject-reason prompts in this chat; the
+    // reply-tracking table itself has no read-only peek.
+    pendingRejects?: { promptId: number; skipMsgId: number }[];
 }
 
 export interface Post {
