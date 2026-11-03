@@ -11,7 +11,7 @@
     "donationsEnabled": true,
     "enableFaq": true,
     "mediaLayout": "slideshow",
-    "faqAllowInGroups": boolean,
+    "faqAllowInGroups": false,
     "faqMaxButtonsPerRow": 3,
     "faqMaxDepth": null,
     "broadcastTopicId": null

@@ -29,11 +29,23 @@ export async function connectDB(): Promise<void> {
     throw new Error(`Could not reach MongoDB at ${safeUri} after ${MAX_ATTEMPTS} attempts`);
 }
 
+// Set by disconnectDB, so a deliberate shutdown isn't logged as a lost connection.
+let closing = false;
+
+export async function disconnectDB(): Promise<void> {
+    closing = true;
+    await mongoose.disconnect();
+}
+
 // Log connection issues after the initial connection
 mongoose.connection.on('error', (err) => {
     console.error("⚠️ MongoDB runtime error:", err);
 });
 
 mongoose.connection.on('disconnected', () => {
+    if (closing) {
+        console.log("MongoDB connection closed.");
+        return;
+    }
     console.warn("⚠️ MongoDB disconnected. Attempting to reconnect...");
 });
