@@ -1,9 +1,13 @@
 import mongoose, { Schema, Document } from "mongoose";
+import type { MessageEntity } from "node-telegram-bot-api/types";
 
 export interface IMediaItem {
     fileId: string;
     type: "photo" | "video";
 }
+
+// Telegram's MessageEntity as stored (plain objects), only the fields we render.
+export type StoredEntity = Pick<MessageEntity, "type" | "offset" | "length" | "url" | "user" | "language" | "custom_emoji_id">;
 
 export interface IPost extends Document {
     userId: string;
@@ -11,6 +15,7 @@ export interface IPost extends Document {
     price: string;
     title: string;
     description: string;
+    descriptionEntities?: StoredEntity[];
     location: string;
     media: IMediaItem[];
     createdAt: Date;
@@ -27,12 +32,25 @@ const mediaItemSchema = new Schema<IMediaItem>({
     type: { type: String, enum: ["photo", "video"], required: true },
 }, { _id: false });
 
+// Shared with the Draft model. `user` is the raw Telegram User object.
+export const entitySchema: Schema<StoredEntity> = new Schema<StoredEntity>({
+    type: { type: String, required: true },
+    offset: { type: Number, required: true },
+    length: { type: Number, required: true },
+    url: { type: String },
+    user: { type: Schema.Types.Mixed },
+    language: { type: String },
+    custom_emoji_id: { type: String },
+}, { _id: false });
+
 const postSchema = new Schema<IPost>({
     userId: { type: String, required: true },
     status: { type: String, enum: ["pending", "approved", "rejected", "sold"], default: "pending" },
     price: { type: String, required: true },
     title: { type: String, required: true },
     description: { type: String, default: "" },
+    // default undefined: absent (not []) unless the description had formatting.
+    descriptionEntities: { type: [entitySchema], default: undefined },
     location: { type: String, default: "" },
     media: [mediaItemSchema],
     createdAt: { type: Date, default: Date.now },

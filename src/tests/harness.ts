@@ -21,6 +21,8 @@ export interface SendTextOptions {
     chatType?: "private" | "group" | "supergroup";
     /** Makes the message a reply to this message id (in the same chat). */
     replyToMessageId?: number;
+    /** Telegram message entities (formatting) of the text. */
+    entities?: Record<string, unknown>[];
 }
 
 export interface PressButtonOptions {
@@ -104,7 +106,7 @@ export function createHarness(options: HarnessOptions = {}) {
         });
     };
 
-    const sendText = (text: string, options: SendTextOptions = {}) => message({ text }, options);
+    const sendText = (text: string, options: SendTextOptions = {}) => message({ text, ...(options.entities ? { entities: options.entities } : {}) }, options);
 
     /** One photo update (a single size, like each item of an album). */
     const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>

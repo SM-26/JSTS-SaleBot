@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
-import type { IMediaItem } from "./Post";
+import { entitySchema } from "./Post";
+import type { IMediaItem, StoredEntity } from "./Post";
 
 export type DraftStep = "title" | "description" | "price" | "location" | "media" | "confirm";
 
@@ -13,6 +14,7 @@ export interface IDraft extends Document {
     step: DraftStep;
     title?: string;
     description?: string;
+    descriptionEntities?: StoredEntity[];
     price?: string;
     location?: string;
     media: IMediaItem[];
@@ -33,6 +35,7 @@ const draftSchema = new Schema<IDraft>({
     step: { type: String, enum: ["title", "description", "price", "location", "media", "confirm"], required: true },
     title: { type: String },
     description: { type: String },
+    descriptionEntities: { type: [entitySchema], default: undefined },
     price: { type: String },
     location: { type: String },
     media: { type: [mediaItemSchema], default: [] },

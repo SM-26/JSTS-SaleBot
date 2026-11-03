@@ -140,7 +140,56 @@ async function run() {
             assert.strictEqual(Number(toModeration?.params.chat_id), MOD_GROUP, "sent to the moderation group");
             assert.ok(h.calls.some((c) => c.method === "sendMessage" && text(c) === T("postCreated")));
             assert.strictEqual(await draftOf(u), null, "the draft is deleted after confirm");
+            const raw = await Post.collection.findOne({ _id: post._id });
+            assert.ok(raw && !("descriptionEntities" in raw), "an unformatted description leaves descriptionEntities absent (not [])");
             console.log("  [OK] (a) full wizard ends in a pending post sent to moderation.");
+        }
+
+        // (a2) formatting in the description (issue #98): a spoiler lands in the post doc and the moderation message
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("/newpost", { userId: u });
+            await h.sendText("Bike", { userId: u });
+            // "Hi " (3) + fire emoji (2 UTF-16 units) + " " -> "secret" starts at offset 6.
+            const spoiler = { type: "spoiler", offset: 6, length: 6 };
+            await h.sendText("Hi \u{1F525} secret", { userId: u, entities: [spoiler, { type: "unknown_future_type", offset: 0, length: 2, extra: "x" }] });
+            await settle();
+            const d1 = (await draftOf(u))!;
+            assert.deepStrictEqual(d1.descriptionEntities?.map((e) => ({ type: e.type, offset: e.offset, length: e.length })), [
+                spoiler,
+                { type: "unknown_future_type", offset: 0, length: 2 },
+            ], "the draft keeps the entities");
+
+            // Re-answering without entities clears them.
+            await draftRepository.update(String(u), { descriptionEntities: undefined });
+            assert.strictEqual((await Draft.collection.findOne({ userId: String(u) }))?.descriptionEntities, undefined, "update(undefined) unsets the field");
+            await draftRepository.update(String(u), { descriptionEntities: [spoiler] });
+
+            await h.sendText("1,500", { userId: u });
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (const id of ["p1", "p2"]) await h.sendPhoto(id, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            const preview = h.calls.find((c) => c.method === "sendRichMessage")!;
+            const blockquote = (c: RecordedCall) => (c.params.rich_message as { blocks: { type: string; blocks?: { text: unknown }[] }[] }).blocks.find((b) => b.type === "blockquote")!;
+            const expected = ["Hi \u{1F525} ", { type: "spoiler", text: "secret" }];
+            assert.deepStrictEqual(blockquote(preview).blocks![0].text, expected, "the preview renders the spoiler");
+
+            h.calls.length = 0;
+            await h.pressButton(keyboard(preview)[0].callback_data, { userId: u, messageId: messageId(preview) });
+            await settle();
+            const post = await Post.findOne({ userId: String(u) }).lean();
+            assert.ok(post, "the post must be saved");
+            postIds.push(String(post._id));
+            assert.deepStrictEqual(post.descriptionEntities, [spoiler], "the post stores the entities as plain objects");
+            const toModeration = h.calls.find((c) => c.method === "sendRichMessage")!;
+            assert.strictEqual(Number(toModeration.params.chat_id), MOD_GROUP);
+            assert.deepStrictEqual(blockquote(toModeration).blocks![0].text, expected, "moderation gets the spoiler");
+            console.log("  [OK] (a2) a formatted description is stored and rendered.");
         }
 
         // (b) restart survival after the price step

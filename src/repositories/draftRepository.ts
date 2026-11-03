@@ -1,7 +1,7 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
 import type { IMediaItem } from "../models/Post";
 
-export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "price" | "location" | "promptMessageId">>;
+export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId">>;
 
 /** `timeOut` is minutes from config.json; 0 (or less) means drafts never expire. */
 export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes: number, now = Date.now()): boolean {
@@ -20,14 +20,21 @@ class DraftRepository {
             { userId },
             {
                 $set: { chatId, locale, step: "title", media: [], promptMessageId, startedAt: now, updatedAt: now },
-                $unset: { title: 1, description: 1, price: 1, location: 1 },
+                $unset: { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1 },
             },
             { upsert: true, returnDocument: "after" }
         ).exec();
     }
 
+    // A field passed as `undefined` is removed from the document.
     update(userId: string, fields: DraftFields) {
-        return Draft.findOneAndUpdate({ userId }, { $set: { ...fields, updatedAt: new Date() } }, { returnDocument: "after" }).exec();
+        const $set: Record<string, unknown> = { updatedAt: new Date() };
+        const $unset: Record<string, 1> = {};
+        for (const [key, value] of Object.entries(fields)) {
+            if (value === undefined) $unset[key] = 1;
+            else $set[key] = value;
+        }
+        return Draft.findOneAndUpdate({ userId }, Object.keys($unset).length ? { $set, $unset } : { $set }, { returnDocument: "after" }).exec();
     }
 
     // ponytail: atomic $push, so an album burst (several updates at once) cannot lose items.

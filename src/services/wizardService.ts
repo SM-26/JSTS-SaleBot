@@ -1,5 +1,6 @@
 import type { Api } from "node-telegram-bot-api";
-import type { CallbackQuery, Message, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
+import type { CallbackQuery, Message, MessageEntity, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
+import type { StoredEntity } from "../models/Post";
 import type { IDraft, DraftStep } from "../models/Draft";
 import draftRepository, { DraftFields, isDraftExpired } from "../repositories/draftRepository";
 import postRepository from "../repositories/postRepository";
@@ -8,6 +9,12 @@ import { BotConfig, MediaItem, Post } from "../types";
 import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
+
+// Only the fields we store/render, as a plain object (also detaches Mongoose subdocuments).
+function storedEntity(e: MessageEntity): StoredEntity {
+    const { type, offset, length, url, user, language, custom_emoji_id } = e;
+    return JSON.parse(JSON.stringify({ type, offset, length, url, user, language, custom_emoji_id }));
+}
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
@@ -115,6 +122,7 @@ export class WizardService {
         return {
             title: draft.title ?? "",
             description: draft.description ?? "",
+            descriptionEntities: draft.descriptionEntities?.length ? draft.descriptionEntities.map(storedEntity) : undefined,
             price: draft.price ?? "",
             location: draft.location ?? "",
             media: draft.media.map((m): MediaItem => ({ fileId: m.fileId, type: m.type })),
@@ -204,6 +212,7 @@ export class WizardService {
             const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next }, msg.from);
             const fields: DraftFields = { step: next, promptMessageId: messageId };
             fields[draft.step] = msg.text;
+            if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
             await draftRepository.update(draft.userId, fields);
             return true;
         });
@@ -288,6 +297,7 @@ export class WizardService {
             userId: draft.userId,
             title: postData.title,
             description: postData.description,
+            descriptionEntities: postData.descriptionEntities,
             price: postData.price,
             media: postData.media,
             location: postData.location,

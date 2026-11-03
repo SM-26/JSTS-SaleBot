@@ -56,6 +56,7 @@ export class PendingService {
                 const richMessage = this.postService.formatPostRichMessage({
                     title: post.title,
                     description: post.description,
+                    descriptionEntities: post.descriptionEntities,
                     price: post.price,
                     location: post.location,
                     media: post.media,

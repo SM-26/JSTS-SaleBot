@@ -4,6 +4,7 @@ import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
+import type { StoredEntity } from "../models/Post";
 
 export interface MediaItem {
     fileId: string;
@@ -165,6 +166,7 @@ export interface Post {
     userId: string;
     title: string;
     description: string;
+    descriptionEntities?: StoredEntity[];
     price: string;
     media: MediaItem[];
     location: string;
