@@ -4,6 +4,7 @@ import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService } from "./postService";
 import { localeService } from "./localeService";
+import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
 
 export class MyPostsService {
@@ -155,23 +156,39 @@ export class MyPostsService {
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
 
+        const postUser = await userRepository.findByUserId(post.userId);
+        const richMessage = this.postService.formatPostRichMessage({
+            title: post.title,
+            description: post.description,
+            price: post.price,
+            location: post.location,
+            media: post.media,
+            userId: Number(post.userId),
+            username: postUser?.userName || undefined,
+            firstName: postUser?.firstName || "User",
+        }, { sold: true });
+
         // Edit the message in the approved group
         if (post.approvedMessageId) {
-            const user = await userRepository.findByUserId(post.userId);
-            const richMessage = this.postService.formatPostRichMessage({
-                title: post.title,
-                description: post.description,
-                price: post.price,
-                location: post.location,
-                media: post.media,
-                userId: Number(post.userId),
-                username: user?.userName || undefined,
-                firstName: user?.firstName || "User",
-            }, { sold: true });
             await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
         }
 
-        await this.refreshMessage(query);
+        // The pressed card stays: re-render it as sold (photos kept), no buttons.
+        // The /myposts summary is never touched by a card press.
+        if (query.message) {
+            try {
+                await this.api.editMessageText({
+                    chat_id: query.message.chat.id,
+                    message_id: query.message.message_id,
+                    rich_message: richMessage,
+                    reply_markup: { inline_keyboard: [] },
+                });
+            } catch (err) {
+                if (!isApiError(err, 400, "message is not modified")) {
+                    console.error("[ERROR - handleSoldCallback]", (err as Error).message);
+                }
+            }
+        }
     }
 
     private isSameDay(d1: Date, d2: Date): boolean {
@@ -237,7 +254,5 @@ export class MyPostsService {
         if (newMessageId) {
             await postRepository.setApprovedMessageId(postId, newMessageId);
         }
-
-        await this.refreshMessage(query);
     }
 }
