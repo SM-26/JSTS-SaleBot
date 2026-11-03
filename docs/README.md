@@ -14,6 +14,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Price Validation** — Optional numeric price validation, accepting thousands separators (`2,000`)
 - **Media Upload** — Multi-photo and video support
 - **Rich Messages** — Posts, `/help`, and reports render as Telegram **Rich Messages** (Bot API 10.2): headings, block quotes, lists, dividers and media galleries — with inline buttons attached to the same message
+  - ⚠️ **Not supported in Telegram X.** It shows Rich Messages as "Unsupported message", so posts can't be read there. Use an official Telegram app.
 - **Configurable Media Layout** — Multiple photos render as a swipeable **slideshow** or a **collage** grid (`mediaLayout`)
 - **Live Preview** — Users see a formatted preview, with Confirm/Cancel on the same message
 - **Admin Moderation** — Posts sent to a moderation group with approve/reject buttons
