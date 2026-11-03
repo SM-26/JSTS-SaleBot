@@ -1,6 +1,7 @@
 import type { Context, Middleware } from "node-telegram-bot-api";
 import type { User } from "node-telegram-bot-api/types";
 import { AuthLevel } from "../types";
+import { isApiError } from "../config/telegramErrors";
 
 /** Per-user-per-chat session key; undefined when the update has no chat or no user. */
 export function sessionKey(ctx: Context): string | undefined {
@@ -77,7 +78,7 @@ export function staleButtonCatchAll(toastText: (ctx: Context) => Promise<string>
                 reply_markup: { inline_keyboard: [] }
             });
         } catch (error) {
-            if (!String(error).includes("message is not modified")) {
+            if (!isApiError(error, 400, "message is not modified")) {
                 console.error("[ERROR - staleButtonCatchAll]", error);
             }
         }
