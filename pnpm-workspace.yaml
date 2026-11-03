@@ -1,4 +1,0 @@
-# Temporary (issue #84): 2.2.0 was under pnpm's minimum release age when the
-# migration started. Remove once the lockfile no longer needs it.
-minimumReleaseAgeExclude:
-  - node-telegram-bot-api@2.2.0
