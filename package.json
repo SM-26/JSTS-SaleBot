@@ -12,8 +12,10 @@
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
     "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
+    "check-platform": "ts-node src/tests/checkPlatform.ts",
+    "check-store": "ts-node src/tests/checkSessionStore.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",

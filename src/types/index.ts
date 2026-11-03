@@ -54,6 +54,7 @@ export interface LocaleStrings {
     postCancelled: string;
     approveButton: string;
     rejectButton: string;
+    staleButton: string;
     statusApproved: string;
     statusRejected: string;
     rejectReasonPrompt: string;
