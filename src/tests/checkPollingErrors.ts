@@ -1,6 +1,7 @@
 import assert from "assert";
 import { EventEmitter } from "events";
-import { registerPollingErrorHandler, isTransient } from "../config/pollingErrors";
+import { NetworkError, TelegramApiError } from "tgv2";
+import { registerPollingErrorHandler, isTransient, createPollErrorLogger } from "../config/pollingErrors";
 
 // Guards the polling-noise handling from issue #48: outages must log as
 // warnings, repeats must collapse, and -- the dangerous failure mode -- the
@@ -36,12 +37,32 @@ function run() {
         assert.ok(warns[1].includes("18 more"), `expected collapsed count, got: ${warns[1]}`);
         assert.strictEqual(errors.length, 1, "a non-transient error must be logged at error level");
         assert.ok(errors[0].includes("401"), "the 401 must not be swallowed by deduplication");
+
+        // v2: onError only sees transient errors, so everything is a warning.
+        warns.length = 0;
+        errors.length = 0;
+        const onError = createPollErrorLogger();
+
+        for (let i = 0; i < 19; i++) onError(new NetworkError("fetch failed"));
+        assert.strictEqual(warns.length, 1, `v2: 19 identical errors should log once, got ${warns.length}`);
+        assert.ok(warns[0].includes("transient") && warns[0].includes("fetch failed"), `v2: unexpected line: ${warns[0]}`);
+
+        onError(new TelegramApiError(502, "Bad Gateway"));
+        assert.ok(warns[1].includes("18 more"), `v2: expected collapsed count, got: ${warns[1]}`);
+        assert.strictEqual(warns.length, 3, "v2: the different error must be logged after the count");
+        assert.ok(warns[2].includes("502"), "v2: the 502 must not be swallowed by deduplication");
+
+        // Same message, different class: still a distinct error.
+        onError(new NetworkError("same text"));
+        onError(new Error("same text"));
+        assert.strictEqual(warns.length, 3 + 2, "v2: same message with a different class must still log");
+        assert.strictEqual(errors.length, 0, "v2: transient errors must never use console.error");
     } finally {
         console.warn = realWarn;
         console.error = realError;
     }
 
-    console.log("[OK] transient errors warn, repeats collapse, distinct errors still surface.");
+    console.log("[OK] transient errors warn, repeats collapse, distinct errors still surface (v1 + v2).");
 }
 
 run();

@@ -1,3 +1,5 @@
+import { TelegramBotError } from "tgv2";
+
 type PollingError = Error & { code?: string };
 
 // Telegram outages (5xx) and network blips are routine for a long-running
@@ -19,21 +21,17 @@ interface PollingEmitter {
     on(event: "polling_error", listener: (err: PollingError) => void): unknown;
 }
 
-/**
- * Logs polling failures, collapsing consecutive repeats of the same failure
- * into a single count so one outage is a couple of lines instead of dozens.
- */
-export function registerPollingErrorHandler(bot: PollingEmitter): void {
+// Shared by the v1 and v2 paths: remembers the previous error key and turns
+// consecutive repeats into one "...and N more" line. Returns true when the
+// caller should log this error (it differs from the previous one).
+function createCollapser(): (key: string) => boolean {
     let lastKey = "";
     let repeats = 0;
 
-    bot.on("polling_error", (err) => {
-        const message = err.message ?? String(err);
-        const key = `${err.code ?? "unknown"}|${message}`;
-
+    return (key) => {
         if (key === lastKey) {
             repeats++;
-            return;
+            return false;
         }
 
         if (repeats > 0) {
@@ -41,6 +39,21 @@ export function registerPollingErrorHandler(bot: PollingEmitter): void {
         }
         lastKey = key;
         repeats = 0;
+        return true;
+    };
+}
+
+/**
+ * Logs polling failures, collapsing consecutive repeats of the same failure
+ * into a single count so one outage is a couple of lines instead of dozens.
+ */
+export function registerPollingErrorHandler(bot: PollingEmitter): void {
+    const shouldLog = createCollapser();
+
+    bot.on("polling_error", (err) => {
+        const message = err.message ?? String(err);
+
+        if (!shouldLog(`${err.code ?? "unknown"}|${message}`)) return;
 
         if (isTransient(err)) {
             console.warn(`[polling_error] transient, polling will retry: ${message}`);
@@ -48,4 +61,22 @@ export function registerPollingErrorHandler(bot: PollingEmitter): void {
             console.error(`[polling_error] ${message}`);
         }
     });
+}
+
+/**
+ * v2 `LongPollOptions.onError`. tgv2 only calls it for transient errors
+ * (network / timeout / 5xx / 429 / 409 retries); fatal ones stop the loop and
+ * are logged by `run()`, so everything here is a warning.
+ */
+export function createPollErrorLogger(): (err: unknown) => void {
+    const shouldLog = createCollapser();
+
+    return (err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const name = err instanceof Error ? err.constructor.name : typeof err;
+        const code = err instanceof TelegramBotError ? err.code : "unknown";
+
+        if (!shouldLog(`${name}|${code}|${message}`)) return;
+        console.warn(`[polling_error] transient, polling will retry: ${message}`);
+    };
 }

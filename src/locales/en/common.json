@@ -116,6 +116,7 @@
     "rejectReasonPrompt": "Enter rejection reason (or press skip):",
     "skipReasonButton": "⏩ Skip",
     "soldTag": "🔴 SOLD",
+    "staleButton": "This button has expired.",
     "statusApproved": "✅ Approved",
     "statusRejected": "❌ Rejected",
     "welcome": "Welcome! Let's create a sale post. Please enter a title:",
