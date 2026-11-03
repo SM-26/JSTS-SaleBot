@@ -8,11 +8,12 @@ import { InputService } from "../services/inputService";
 import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from "../types";
 import userRepository from "../repositories/userRepository";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
+import draftRepository from "../repositories/draftRepository";
 
 /**
- * Test cases for HandleNewPost flow.
- * Uncomment a case in runTests() to auto-create a post and send it to moderation.
- * This skips the interactive input so you can test admin approve/reject quickly.
+ * In-bot test cases, run from the admin-only /test menu. The post cases skip the
+ * (persistent) /newPost wizard and create a post straight into moderation, so you
+ * can test approve/reject quickly. None of them waits on a typed reply.
  */
 
 // Telegram file_ids from previously uploaded photos (reusable within the same bot)
@@ -33,6 +34,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     rbac_promotion: { label: "🎖 Test RBAC Promotion", run: testCase_RBACPromotion },
     rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
+    wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
 };
 
 /**
@@ -435,5 +437,40 @@ async function testCase_BroadcastUsers(
     } finally {
         if (pendingPostId) await postRepository.deleteById(pendingPostId);
         if (approvedPostId) await postRepository.deleteById(approvedPostId);
+    }
+}
+/**
+ * TEST CASE: report the calling admin's /newPost draft (step, media count, age vs
+ * timeOut), so persistence can be inspected from Telegram: start /newPost, restart
+ * the bot, run this. Read-only.
+ */
+async function testCase_WizardDraftStatus(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    const userId = String(msg.from.id);
+
+    try {
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        const draft = await draftRepository.findByUserId(userId);
+        const text = draft
+            ? localeService.t(locale, "testDraftStatus", {
+                step: draft.step,
+                media: draft.media.length,
+                age: Math.floor((Date.now() - draft.updatedAt.getTime()) / 60_000),
+                limit: config.timeOut > 0 ? `${config.timeOut} min` : localeService.t(locale, "testDraftNever"),
+            })
+            : localeService.t(locale, "testDraftNone");
+        await api.sendMessage({ chat_id: msg.chat.id, text });
+    } catch (err) {
+        console.error("[ERROR - testCase_WizardDraftStatus]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Wizard draft status failed: " + (err as Error).message });
     }
 }
