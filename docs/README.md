@@ -16,10 +16,12 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Rich Messages** — Posts, `/help`, and reports render as Telegram **Rich Messages** (Bot API 10.2): headings, block quotes, lists, dividers and media galleries — with inline buttons attached to the same message
   - ⚠️ **Not supported in Telegram X.** It shows Rich Messages as "Unsupported message", so posts can't be read there. Use an official Telegram app.
 - **Configurable Media Layout** — Multiple photos render as a swipeable **slideshow** or a **collage** grid (`mediaLayout`)
+- **Persistent Flows** — A post in progress, a donation amount prompt and a pending reject reason are stored in MongoDB, so a bot restart or deploy loses nothing. Abandoned drafts expire after `timeOut` minutes (`0` = never)
+- **Continue or Start Over** — `/newPost` with a draft in progress asks whether to continue or start over; `/cancel` drops it
 - **Live Preview** — Users see a formatted preview, with Confirm/Cancel on the same message
 - **Admin Moderation** — Posts sent to a moderation group with approve/reject buttons
 - **Pending Management** — Admins can list (`/pending`) and bulk-expire (`/clearpending`) posts
-- **Rejection Reasons** — Admins can provide an optional reason when rejecting
+- **Rejection Reasons** — Moderators can give an optional reason by replying to the bot's prompt, or press **Skip**
 - **Post Bumping** — Users can bump their approved posts to the top (subject to daily limits)
 - **Donations** — Users can support the bot via Telegram Stars (`/donate`)
 - **Auto-Publish** — Approved posts are forwarded to a public sales group
@@ -62,7 +64,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | Command | Description |
 | :--- | :--- |
 | `/start` | Show a welcome greeting. |
-| `/newPost` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). |
+| `/newPost` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). With a draft in progress it offers Continue or Start over. |
+| `/cancel` | Cancel your post in progress. |
 | `/myposts` | View your active posts, bump them to the top, or mark them as sold. |
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
@@ -75,13 +78,18 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/pending` | View a list of posts waiting for approval with inline Approve/Reject buttons. |
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
 | `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
+| `/cancel` | In the moderation group: forget your pending reject-reason prompts. |
+
+### 📝 For moderators
+
+When you press **Reject**, the bot posts a prompt in the group. To give a reason, **reply to that prompt message** with the reason text, or press **Skip** to reject without one. A message that is not a reply to the prompt is ignored (the bot reminds you to reply), so the reason can't be attached to the wrong post. The author is notified once you reply or skip. The prompt is stored in the database, so it survives a bot restart.
 
 ### ⚙️ Admin Commands
 | Command | Description |
 | :--- | :--- |
 | `/promote` | Increase a user's authorization level (e.g., User to Moderator, Moderator to Admin). |
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
-| `/activeUsers` | List users currently in the process of creating a post. |
+| `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
 | `/broadcast` | Send a message to the approved channel, either by replying to an existing message or by typing a new message. |
@@ -205,20 +213,28 @@ pnpm run test
 src/
 ├── bot.ts                    # Entry point — connects DB, starts polling
 ├── config/
-│   └── db.ts                 # MongoDB connection
+│   ├── db.ts                 # MongoDB connection
+│   └── pollingErrors.ts      # Classifies and de-duplicates polling errors for the log
 ├── controllers/
-│   └── botController.ts      # Route registration & flow orchestration
+│   ├── botController.ts      # Route registration (middleware chain) & flow orchestration
+│   ├── commands.ts           # Anchored, case-insensitive command matcher (`@ourbot` only)
+│   ├── middleware.ts         # ensureUser, session key, auth guard, error boundary, expired-button catch-all
+│   └── callbackRoutes.ts     # callback_data → action routing
 ├── models/
 │   ├── Post.ts               # Post schema (title, price, photos, status…)
-│   └── User.ts               # User schema (userId, name, authLevel, preferredLocale…)
+│   ├── User.ts               # User schema (userId, name, authLevel, preferredLocale…)
+│   └── Draft.ts              # /newPost wizard draft (collection `drafts`, one per user)
 ├── repositories/
 │   ├── postRepository.ts     # Post CRUD
-│   └── userRepository.ts     # User CRUD (upsert)
+│   ├── userRepository.ts     # User CRUD (upsert)
+│   ├── draftRepository.ts    # Draft CRUD, atomic media push/claim, expiry against timeOut
+│   └── sessionStore.ts       # Mongo store for v2 sessions (collection `bot_sessions`)
 ├── services/
-│   ├── inputService.ts       # Reusable input collection (text, price, photos, confirm)
+│   ├── wizardService.ts      # /newPost wizard as a step machine over drafts; /cancel
+│   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
 │   ├── postService.ts        # Post Rich Message formatting, publish to groups, bump/sold edits
 │   ├── myPostsService.ts     # User post management (list, bump, mark sold)
-│   ├── moderationService.ts  # Approve/reject logic & rejection reasons
+│   ├── moderationService.ts  # Approve/reject logic; reject-reason prompt (reply or Skip)
 │   ├── pendingService.ts     # /pending listing & /clearpending bulk expire
 │   ├── adminService.ts       # /config, /broadcast, promote/demote/auth
 │   ├── configSchema.ts       # Per-key type rules validating /config values
@@ -233,11 +249,21 @@ src/
 │   └── ru/                   # Russian
 ├── tests/
 │   ├── checkLocals.ts        # Localization integrity script (run by `pnpm test`)
+│   ├── checkCallbackData.ts  # Golden test pinning callback_data formats
+│   ├── checkPlatform.ts      # Offline checks: command matcher, middleware
+│   ├── checkSessionStore.ts  # Session store (needs MONGO_URI)
+│   ├── checkRoutes.ts        # Route smoke test (needs MONGO_URI)
+│   ├── checkFlows.ts         # Wizard + reject-reason flows, incl. simulated restart (needs MONGO_URI)
+│   ├── checkModerationClaim.ts # Atomic approve/reject claim (needs MONGO_URI)
+│   ├── checkPollingErrors.ts # Polling error classification
+│   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
 │   ├── configSchema.check.ts # Asserts for /config value parsing
 │   ├── broadcastUsers.check.ts # Asserts for send-error mapping & failure truncation
 │   └── testCases.ts          # Manual test scenarios (in-bot /test)
 └── types/
     └── index.ts              # TypeScript interfaces (BotConfig, LocaleStrings…)
+scripts/
+└── census.js                 # Read-only database census (see docs/BACKUP.md)
 ```
 
 ---
@@ -356,6 +382,7 @@ Edit `config.json`:
   "dailyBumpLimit": 2,
   "donationsEnabled": true,
   "enableFaq": true,
+  "timeOut": 1440,
   "mediaLayout": "slideshow",
   "broadcastTopicId": null
 }
@@ -377,7 +404,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `donationsEnabled`   | boolean | Enable/Disable the /donate command                |
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
-| ~~`timeOut`~~        | number | ~~Post expiration timeout in minutes~~            |
+| `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
 
 ### 4. Run
 
@@ -398,6 +425,7 @@ pnpm start
 User sends /newPost
     ↓
 Bot collects: title → description → price → location → photos
+(each answer is saved in the drafts collection, so a restart loses nothing)
     ↓
 Preview shown to user → Confirm / Cancel
     ↓
@@ -406,7 +434,7 @@ Post saved to MongoDB (status: pending)
 Sent to moderation group with ✅ Approve / ❌ Reject buttons
     ↓
 ┌─ Approved → Published to sales group + user notified
-└─ Rejected → Optional reason prompt → user notified
+└─ Rejected → Moderator replies to the reason prompt (or presses Skip) → user notified
 ```
 
 ---
@@ -417,11 +445,11 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 |--------------|-----------------------------|
 | Runtime      | Node.js + TypeScript        |
 | Package manager | pnpm (pinned via `packageManager`) |
-| Telegram API | [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) v1.x (Bot API 10.2, Rich Messages) |
-| Database     | MongoDB + Mongoose          |
+| Telegram API | [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) **v2.2.0** (Bot API 10.2, Rich Messages) |
+| Database     | MongoDB + Mongoose (collections `posts`, `users`, plus `drafts` and `bot_sessions` for persistent flows) |
 | Config       | JSON (`config.json`), validated by `src/services/configSchema.ts` |
 | i18n         | Structured JSON (`src/locales/<lang>/common.json` + `src/locales/<lang>/faq.json`)  |
-| Validation   | `pnpm run test` — Validates locale file syntax, key consistency, and FAQ structure |
+| Validation   | `pnpm run test` — locale syntax/keys/FAQ structure, callback_data formats, command matcher, and the wizard/moderation flows (the Mongo-backed checks need `MONGO_URI`) |
 
 ---
 
