@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased
+2.0.1 - UX fixes found while testing 2.0.0.
   - `/lang`: picking a language removes the menu's buttons, so it can't keep switching (#97).
+  - Sellers' formatting in the description (spoiler, bold, italic, links, ...) is kept and shown in the post. It is stored in a new optional `descriptionEntities` field (additive; posts without formatting are unchanged) (#98).
+  - `/myposts`: Mark sold re-renders the post card as sold in place, and Bump leaves the card alone. Before, both replaced the card with the summary list (#99).
 
 2.0.0 - Ported to node-telegram-bot-api 2.2.0, and conversations now survive restarts. Release 1 of the v2 migration (issue #84).
   - Upgraded `node-telegram-bot-api` 1.2.0 → 2.2.0 (pinned exactly). The bot is now a v2 middleware chain (`ensureUser`, session, global message handler, commands, callback router, dead-button catch-all), and services call the v2 `Api` with params objects. Every command, button, `callback_data` format and message the user sees is unchanged, except for the items below. Commands and buttons keep working on messages sent by earlier versions.
