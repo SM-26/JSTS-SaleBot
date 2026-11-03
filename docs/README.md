@@ -15,6 +15,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Media Upload** — Multi-photo and video support
 - **Rich Messages** — Posts, `/help`, and reports render as Telegram **Rich Messages** (Bot API 10.2): headings, block quotes, lists, dividers and media galleries — with inline buttons attached to the same message
   - ⚠️ **Not supported in Telegram X.** It shows Rich Messages as "Unsupported message", so posts can't be read there. Use an official Telegram app.
+- **Description Formatting** — Bold, italic, underline, strikethrough, spoiler, code and text links typed in the description step are kept and rendered in the post
 - **Configurable Media Layout** — Multiple photos render as a swipeable **slideshow** or a **collage** grid (`mediaLayout`)
 - **Persistent Flows** — A post in progress, a donation amount prompt and a pending reject reason are stored in MongoDB, so a bot restart or deploy loses nothing. Abandoned drafts expire after `timeOut` minutes (`0` = never)
 - **Continue or Start Over** — `/newPost` with a draft in progress asks whether to continue or start over; `/cancel` drops it

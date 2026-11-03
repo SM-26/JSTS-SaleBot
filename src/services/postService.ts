@@ -4,12 +4,15 @@ import type { Message, InputRichMessage, SendRichMessageParams } from "node-tele
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
+import { entitiesToRichText } from "./richMessages";
+import type { StoredEntity } from "../models/Post";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 
 export interface PostData {
     title: string;
     description: string;
+    descriptionEntities?: StoredEntity[];
     price: string;
     location: string;
     media: MediaItem[];
@@ -55,7 +58,7 @@ export class PostService {
 
         message
             .heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2)
-            .blockquote(b => b.paragraph(data.description))
+            .blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)))
             .divider()
             .list([
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
