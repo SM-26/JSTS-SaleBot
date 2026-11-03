@@ -1,4 +1,5 @@
-import TelegramBot, { Message, SendMessageParams, EditMessageTextParams } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, SendMessageParams, EditMessageTextParams } from "node-telegram-bot-api/types";
 import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
@@ -175,7 +176,7 @@ export interface User {
 }
 
 export type TestCaseFn = (
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,

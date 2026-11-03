@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import type { SessionStore, SessionWriteOptions } from "tgv2";
+import type { SessionStore, SessionWriteOptions } from "node-telegram-bot-api";
 
-// Mongo backing store for tgv2's session middleware (collection `bot_sessions`).
+// Mongo backing store for node-telegram-bot-api's session middleware (collection `bot_sessions`).
 //
 // Additive: v1 code never touches this collection, so rolling back to v1 leaves
 // it as harmless leftovers. Documents are exactly:

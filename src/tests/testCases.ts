@@ -1,4 +1,5 @@
-import TelegramBot, { Message, User as TgUser } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, User as TgUser } from "node-telegram-bot-api/types";
 import postRepository from "../repositories/postRepository";
 import { PostService } from "../services/postService";
 import { UserService } from "../services/userService";
@@ -39,7 +40,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
  * CASE 1: Full post with multiple photos.
  */
 async function testCase1_FullPost(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -60,7 +61,7 @@ async function testCase1_FullPost(
     const media = TEST_MEDIA;
 
     if (!inputService.validatePriceValue(price)) {
-        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        api.sendMessage({ chat_id: msg.chat.id, text: `❌ Test Case Failed: Price "${price}" is invalid under current config.` });
         return;
     }
 
@@ -76,14 +77,14 @@ async function testCase1_FullPost(
         username: user.username,
         firstName: user.first_name,
     });
-    bot.sendMessage(msg.chat.id, `✅ Test post created and sent to moderation (ID: ${post._id})`);
+    api.sendMessage({ chat_id: msg.chat.id, text: `✅ Test post created and sent to moderation (ID: ${post._id})` });
 }
 
 /**
  * CASE 2: Post without media.
  */
 async function testCase2_NoMedia(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -104,7 +105,7 @@ async function testCase2_NoMedia(
     const media: MediaItem[] = [];
 
     if (!inputService.validatePriceValue(price)) {
-        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        api.sendMessage({ chat_id: msg.chat.id, text: `❌ Test Case Failed: Price "${price}" is invalid under current config.` });
         return;
     }
 
@@ -120,14 +121,14 @@ async function testCase2_NoMedia(
         username: user.username,
         firstName: user.first_name,
     });
-    bot.sendMessage(msg.chat.id, `✅ Test post (no media) sent to moderation (ID: ${post._id})`);
+    api.sendMessage({ chat_id: msg.chat.id, text: `✅ Test post (no media) sent to moderation (ID: ${post._id})` });
 }
 
 /**
  * CASE 3: Post with a single photo.
  */
 async function testCase3_OnePhoto(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -148,7 +149,7 @@ async function testCase3_OnePhoto(
     const media = [TEST_MEDIA[0]];
 
     if (!inputService.validatePriceValue(price)) {
-        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        api.sendMessage({ chat_id: msg.chat.id, text: `❌ Test Case Failed: Price "${price}" is invalid under current config.` });
         return;
     }
 
@@ -164,14 +165,14 @@ async function testCase3_OnePhoto(
         username: user.username,
         firstName: user.first_name,
     });
-    bot.sendMessage(msg.chat.id, `✅ Test post (1 photo) sent to moderation (ID: ${post._id})`);
+    api.sendMessage({ chat_id: msg.chat.id, text: `✅ Test post (1 photo) sent to moderation (ID: ${post._id})` });
 }
 
 /**
  * CASE 4: Simulate a successful donation.
  */
 async function testCase_SimulateDonation(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -198,14 +199,14 @@ async function testCase_SimulateDonation(
     await paymentService.handleSuccessfulPayment(fakePaymentMessage);
 
     // Send confirmation of test
-    bot.sendMessage(msg.chat.id, "✅ Simulated donation event triggered. You should see the 'Thank you' message above.");
+    api.sendMessage({ chat_id: msg.chat.id, text: "✅ Simulated donation event triggered. You should see the 'Thank you' message above." });
 }
 
 /**
  * CASE 5: Free text price (e.g. for when validation is disabled).
  */
 async function testCase_FreeTextPrice(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -226,7 +227,7 @@ async function testCase_FreeTextPrice(
     const media: MediaItem[] = [];
 
     if (!inputService.validatePriceValue(price)) {
-        bot.sendMessage(msg.chat.id, `❌ Test Case Failed: Price "${price}" is invalid under current config.`);
+        api.sendMessage({ chat_id: msg.chat.id, text: `❌ Test Case Failed: Price "${price}" is invalid under current config.` });
         return;
     }
 
@@ -242,14 +243,14 @@ async function testCase_FreeTextPrice(
         username: user.username,
         firstName: user.first_name,
     });
-    bot.sendMessage(msg.chat.id, `✅ Test post (free text price) sent to moderation (ID: ${post._id})`);
+    api.sendMessage({ chat_id: msg.chat.id, text: `✅ Test post (free text price) sent to moderation (ID: ${post._id})` });
 }
 
 /**
  * TEST CASE: View FAQ command.
  */
 async function testCase_FaqView(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -263,7 +264,7 @@ async function testCase_FaqView(
         const faqs = localeService.getFaqs(locale);
 
         if (!faqs || Object.keys(faqs).length === 0) {
-            await bot.sendMessage(msg.chat.id, "❌ No FAQ data found for your locale");
+            await api.sendMessage({ chat_id: msg.chat.id, text: "❌ No FAQ data found for your locale" });
             return;
         }
 
@@ -274,10 +275,10 @@ async function testCase_FaqView(
         }
         faqText += `✅ Total FAQ entries: ${Object.keys(faqs).length}`;
 
-        await bot.sendMessage(msg.chat.id, faqText, { parse_mode: "HTML" });
+        await api.sendMessage({ chat_id: msg.chat.id, text: faqText, parse_mode: "HTML" });
     } catch (err) {
         console.error("[ERROR - testCase_FaqView]", (err as Error).message);
-        await bot.sendMessage(msg.chat.id, "❌ FAQ test failed: " + (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ FAQ test failed: " + (err as Error).message });
     }
 }
 
@@ -286,7 +287,7 @@ async function testCase_FaqView(
  * Sends a user-provided formatted message to the moderation group.
  */
 async function testCase_BroadcastCustom(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -302,14 +303,12 @@ async function testCase_BroadcastCustom(
 
     try {
         const customMessage = await inputService.inputWithPrompt(msg, localeService.t(locale, 'broadcastEnterCustomMessage'));
-        await bot.sendMessage(moderationGroupId, customMessage, {
-            parse_mode: "HTML",
-            message_thread_id: moderationTopicId
-        });
-        await bot.sendMessage(msg.chat.id, "✅ Custom broadcast message sent to the moderation group.");
+        await api.sendMessage({ chat_id: moderationGroupId, text: customMessage, parse_mode: "HTML",
+            message_thread_id: moderationTopicId });
+        await api.sendMessage({ chat_id: msg.chat.id, text: "✅ Custom broadcast message sent to the moderation group." });
     } catch (err) {
         console.error("[ERROR - testCase_BroadcastCustom]", (err as Error).message);
-        await bot.sendMessage(msg.chat.id, "❌ Custom broadcast test failed: " + (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Custom broadcast test failed: " + (err as Error).message });
     }
 }
 
@@ -319,7 +318,7 @@ async function testCase_BroadcastCustom(
  * to test delivery and formatting without affecting the public channel.
  */
 async function testCase_Broadcast(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -334,14 +333,12 @@ async function testCase_Broadcast(
     const testMessage = "<b>🚀 Broadcast Test Message</b>\n\nThis message simulates an admin broadcast. It is sent to the <i>moderation group</i> to avoid cluttering the public channel during tests.\n\nFormatting check:\n- <b>Bold text</b>\n- <i>Italic text</i>\n- <a href='https://github.com/SM-26/JSTS-SaleBot'>Link to Repository</a>\n\n✅ If you see this in the correct moderation topic, the broadcast logic is verified!";
 
     try {
-        await bot.sendMessage(moderationGroupId, testMessage, {
-            parse_mode: "HTML",
-            message_thread_id: moderationTopicId
-        });
-        await bot.sendMessage(msg.chat.id, "✅ Broadcast test message sent to the moderation group.");
+        await api.sendMessage({ chat_id: moderationGroupId, text: testMessage, parse_mode: "HTML",
+            message_thread_id: moderationTopicId });
+        await api.sendMessage({ chat_id: msg.chat.id, text: "✅ Broadcast test message sent to the moderation group." });
     } catch (err) {
         console.error("[ERROR - testCase_Broadcast]", (err as Error).message);
-        await bot.sendMessage(msg.chat.id, "❌ Broadcast test failed: " + (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Broadcast test failed: " + (err as Error).message });
     }
 }
 
@@ -350,7 +347,7 @@ async function testCase_Broadcast(
  * Verifies that the auth level is correctly updated in the DB.
  */
 async function testCase_RBACPromotion(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -363,7 +360,7 @@ async function testCase_RBACPromotion(
     const originalUser = await userRepository.findByUserId(userId);
 
     if (!originalUser) {
-        await bot.sendMessage(msg.chat.id, "❌ Test failed: Admin user not found in DB.");
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Test failed: Admin user not found in DB." });
         return;
     }
 
@@ -373,19 +370,19 @@ async function testCase_RBACPromotion(
         // We can't easily promote a "dummy" user without a second account, 
         // so we verify that the current admin (level 2) cannot be promoted further.
         const text = `<b>RBAC Test</b>\nActor Level: ${originalLevel}\n\nRunning checks...`;
-        await bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
+        await api.sendMessage({ chat_id: msg.chat.id, text, parse_mode: "HTML" });
 
         if (originalLevel === AuthLevel.ADMIN) {
-            await bot.sendMessage(msg.chat.id, "✅ Self-check: Admin cannot be promoted further (limit check).");
+            await api.sendMessage({ chat_id: msg.chat.id, text: "✅ Self-check: Admin cannot be promoted further (limit check)." });
         }
 
         // Verify migration: Every user in DB should now have authLevel instead of isAdmin
         const allUsers = await userRepository.getAll();
         const legacyUsers = allUsers.filter(u => (u as User & { isAdmin?: boolean }).isAdmin !== undefined);
 
-        await bot.sendMessage(msg.chat.id, `✅ Migration check: Found ${legacyUsers.length} legacy isAdmin fields.`);
+        await api.sendMessage({ chat_id: msg.chat.id, text: `✅ Migration check: Found ${legacyUsers.length} legacy isAdmin fields.` });
     } catch (err) {
-        await bot.sendMessage(msg.chat.id, "❌ RBAC test failed: " + (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ RBAC test failed: " + (err as Error).message });
     }
 }
 
@@ -393,7 +390,7 @@ async function testCase_RBACPromotion(
  * TEST CASE: RBAC Auth command output.
  */
 async function testCase_RBACAuth(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -405,7 +402,7 @@ async function testCase_RBACAuth(
     const userId = String(msg.from!.id);
     const user = await userRepository.findByUserId(userId);
     if (!user) {
-        await bot.sendMessage(msg.chat.id, "❌ Test failed: User not found in DB.");
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Test failed: User not found in DB." });
         return;
     }
 
@@ -415,8 +412,8 @@ async function testCase_RBACAuth(
     const roleName = localeService.t(locale, roleKey);
 
     const output = localeService.t(locale, 'authCurrentLevel', { userId: user.userId, role: roleName, level: user.authLevel });
-    await bot.sendMessage(msg.chat.id, `<b>RBAC Auth Test</b>\n\n${output}`, { parse_mode: "HTML" });
-    await bot.sendMessage(msg.chat.id, "✅ Auth logic verified.");
+    await api.sendMessage({ chat_id: msg.chat.id, text: `<b>RBAC Auth Test</b>\n\n${output}`, parse_mode: "HTML" });
+    await api.sendMessage({ chat_id: msg.chat.id, text: "✅ Auth logic verified." });
 }
 
 /**
@@ -425,7 +422,7 @@ async function testCase_RBACAuth(
  * exercises resolveAudience/sendToMany like /broadcastUsers would.
  */
 async function testCase_BroadcastUsers(
-    bot: TelegramBot,
+    api: Api,
     config: BotConfig,
     localeService: LocaleService,
     postService: PostService,
@@ -455,19 +452,17 @@ async function testCase_BroadcastUsers(
         pendingPostId = String(pendingPost._id);
         approvedPostId = String(approvedPost._id);
 
-        const broadcastUsersService = new BroadcastUsersService(bot);
+        const broadcastUsersService = new BroadcastUsersService(api);
         const audience = await broadcastUsersService.resolveAudience([], adminId);
         const report = await broadcastUsersService.sendToMany(audience, "🧪 <b>broadcastUsers test</b> — you can ignore this message.");
 
-        await bot.sendMessage(msg.chat.id,
-            `✅ broadcastUsers test: audience=${audience.length}, sent=${report.sent}, failed=${report.failures.length}\n` +
+        await api.sendMessage({ chat_id: msg.chat.id, text: `✅ broadcastUsers test: audience=${audience.length}, sent=${report.sent}, failed=${report.failures.length}\n` +
             `pending author included: ${audience.includes(pendingAuthorId)}\n` +
             `approved author included: ${audience.includes(approvedAuthorId)}\n` +
-            `admin excluded: ${!audience.includes(adminId)}`
-        );
+            `admin excluded: ${!audience.includes(adminId)}` });
     } catch (err) {
         console.error("[ERROR - testCase_BroadcastUsers]", (err as Error).message);
-        await bot.sendMessage(msg.chat.id, "❌ broadcastUsers test failed: " + (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ broadcastUsers test failed: " + (err as Error).message });
     } finally {
         if (pendingPostId) await postRepository.deleteById(pendingPostId);
         if (approvedPostId) await postRepository.deleteById(approvedPostId);

@@ -1,13 +1,11 @@
 import assert from "assert";
+import { TelegramApiError } from "node-telegram-bot-api";
 import { mapSendError, truncateFailures, BroadcastFailure } from "../services/broadcastUsersService";
 
 console.log("[INFO] Checking broadcastUsers pure functions...");
 
 function fakeTelegramError(errorCode: number, description: string) {
-    return {
-        message: `${errorCode} ${description}`,
-        response: { body: { error_code: errorCode, description } },
-    };
+    return new TelegramApiError(errorCode, description);
 }
 
 // mapSendError

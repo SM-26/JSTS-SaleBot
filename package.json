@@ -14,8 +14,9 @@
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
     "check-platform": "ts-node src/tests/checkPlatform.ts",
     "check-store": "ts-node src/tests/checkSessionStore.ts",
+    "check-routes": "ts-node src/tests/checkRoutes.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",
@@ -31,8 +32,7 @@
   "dependencies": {
     "dotenv": "^18.0.9",
     "mongoose": "^9.11.4",
-    "node-telegram-bot-api": "^1.2.0",
-    "tgv2": "npm:node-telegram-bot-api@2.2.0"
+    "node-telegram-bot-api": "2.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

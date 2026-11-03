@@ -1,4 +1,5 @@
-import TelegramBot, { Message, InputRichMessage } from "node-telegram-bot-api";
+import type { Api, Bot, Context, Middleware } from "node-telegram-bot-api";
+import type { Message, CallbackQuery, InputRichMessage } from "node-telegram-bot-api/types";
 import * as fs from "fs";
 import * as path from "path";
 import postRepository from "../repositories/postRepository";
@@ -16,14 +17,18 @@ import { FaqService } from "../services/faqService";
 import { BroadcastUsersService, truncateFailures } from "../services/broadcastUsersService";
 import { localeService } from "../services/localeService";
 import { AuthLevel } from "../types";
-import { routeCallback } from "./callbackRoutes";
+import { routeCallback, CallbackAction } from "./callbackRoutes";
+import { TemporaryListeners } from "./temporaryListeners";
+import { command, ParsedCommand } from "./commands";
+import { ensureUserMiddleware, staleButtonCatchAll } from "./middleware";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
 const configPath = path.join(__dirname, "../../config.json");
 const config: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
 export class BotController {
-    private bot: TelegramBot;
+    private api: Api;
+    private temporaryListeners = new TemporaryListeners();
     private config: BotConfig;
     private sessions: Map<number, UserSession> = new Map();
 
@@ -38,20 +43,20 @@ export class BotController {
     private faqService: FaqService;
     private broadcastUsersService: BroadcastUsersService;
 
-    constructor(bot: TelegramBot) {
-        this.bot = bot;
+    constructor(api: Api) {
+        this.api = api;
         this.config = config;
 
-        this.inputService = new InputService(bot, this.config);
-        this.postService = new PostService(bot, this.config);
-        this.moderationService = new ModerationService(bot, this.config, this.postService);
+        this.inputService = new InputService(api, this.config, this.temporaryListeners);
+        this.postService = new PostService(api, this.config);
+        this.moderationService = new ModerationService(api, this.config, this.postService, this.temporaryListeners);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(bot, this.config, this.postService);
-        this.adminService = new AdminService(bot, this.config);
-        this.pendingService = new PendingService(bot, this.config, this.postService);
-        this.paymentService = new PaymentService(bot, this.config);
-        this.faqService = new FaqService(bot, this.config);
-        this.broadcastUsersService = new BroadcastUsersService(bot);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService);
+        this.adminService = new AdminService(api, this.config);
+        this.pendingService = new PendingService(api, this.config, this.postService);
+        this.paymentService = new PaymentService(api, this.config);
+        this.faqService = new FaqService(api, this.config);
+        this.broadcastUsersService = new BroadcastUsersService(api);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -92,10 +97,9 @@ export class BotController {
     }
 
     async HandleStart(msg: Message): Promise<void> {
-        await this.userService.ensureUser(msg.from!);
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
-        this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'greeting'));
+        this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
     }
 
     async HandleNewPost(msg: Message): Promise<void> {
@@ -105,8 +109,7 @@ export class BotController {
         try {
             session.isIdle = false;
 
-            await this.userService.ensureUser(msg.from!);
-            const user = await userRepository.findByUserId(String(msg.from!.id));
+                const user = await userRepository.findByUserId(String(msg.from!.id));
             console.debug(`[DEBUG - HandleNewPost] Resolving locale for user: ${msg.from!.id} (lang_code: ${msg.from!.language_code}, pref: ${user?.preferredLocale})`);
             const locale = localeService.resolveUserLocale(user);
 
@@ -119,7 +122,7 @@ export class BotController {
             const media = await this.inputService.promptMedia(msg, { locale, index: 5, total: totalSteps });
 
             if (media.length < (this.config.minimumPhotos ?? 0)) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notEnoughMedia'));
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notEnoughMedia') });
                 console.info('[INFO - HandleNewPost] session idle (insufficient media)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
@@ -142,7 +145,7 @@ export class BotController {
             });
             const confirmed = await this.inputService.confirmAction(msg, locale, richPreview);
             if (!confirmed) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCancelled'));
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'postCancelled') });
                 console.info('[INFO - HandleNewPost] session idle (user cancelled)', { userId: msg.from?.id });
                 session.isIdle = true;
                 return;
@@ -164,20 +167,19 @@ export class BotController {
                 await postRepository.setModerationMessageId(String(post._id), modMsgId);
             }
 
-            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'postCreated'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'postCreated') });
             console.info('[INFO - HandleNewPost] session idle (success)', { userId: msg.from?.id });
             session.isIdle = true;
 
         } catch (err) {
             console.error("[ERROR - HandleNewPost] ", (err as Error).message);
-            this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
             console.info('[INFO - HandleNewPost] session idle (error)', { userId: msg.from?.id });
             session.isIdle = true;
         }
     }
 
     async showHelp(msg: Message): Promise<void> {
-        await this.userService.ensureUser(msg.from!);
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         console.debug(`[DEBUG - showHelp] Resolving locale for user: ${msg.from!.id}`);
         const locale = localeService.resolveUserLocale(user);
@@ -221,9 +223,7 @@ export class BotController {
             );
         }
 
-        await this.bot.sendRichMessage(msg.chat.id, { blocks } as unknown as InputRichMessage, {
-            message_thread_id: msg.message_thread_id,
-        });
+        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: { blocks } as unknown as InputRichMessage, message_thread_id: msg.message_thread_id });
     }
 
     async handleActiveUsers(msg: Message): Promise<void> {
@@ -233,7 +233,7 @@ export class BotController {
             const authLevel = user?.authLevel ?? AuthLevel.USER;
             if (authLevel < AuthLevel.ADMIN) {
                 console.warn('[WARN - handleActiveUsers] Unauthorized access attempt detected', { userId: msg.from?.id });
-                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
                 return;
             }
 
@@ -255,16 +255,16 @@ export class BotController {
 
             if (activeUsers.length === 0) {
                 console.info('[INFO - handleActiveUsers] Command executed, but no active users found.');
-                await this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'adminActiveUsersEmpty'));
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'adminActiveUsersEmpty') });
                 return;
             }
 
             console.info(`[INFO - handleActiveUsers] Reporting ${activeUsers.length} active user(s) to admin ${msg.from?.id}`);
             const text = `${localeService.t(locale, 'adminActiveUsersTitle')}\n\n${activeUsers.join('\n')}`;
-            await this.bot.sendMessage(msg.chat.id, text, { parse_mode: "HTML" });
+            await this.api.sendMessage({ chat_id: msg.chat.id, text, parse_mode: "HTML" });
         } catch (err) {
             console.error('[CRITICAL - handleActiveUsers] System failed to generate active users list', (err as Error).message);
-            this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'generalError'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
         }
     }
 
@@ -276,14 +276,14 @@ export class BotController {
         const isAuthorized = await this.userService.hasAuthLevel(adminId, AuthLevel.ADMIN);
         if (!isAuthorized) {
             console.warn('[WARN - handleBroadcastUsers] Unauthorized access attempt detected', { userId: msg.from?.id });
-            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'notAdmin'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }
 
         let htmlMessage: string | undefined;
         if (msg.reply_to_message) {
             if (!msg.reply_to_message.text) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersTextOnly'));
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'broadcastUsersTextOnly') });
                 return;
             }
             htmlMessage = msg.reply_to_message.text;
@@ -292,7 +292,7 @@ export class BotController {
         }
 
         if (!htmlMessage) {
-            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersUsage'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'broadcastUsersUsage') });
             return;
         }
 
@@ -303,7 +303,7 @@ export class BotController {
         const audience = await this.broadcastUsersService.resolveAudience(activeIds, adminId);
         if (audience.length === 0) {
             console.info('[INFO - handleBroadcastUsers] No recipients found', { adminId });
-            this.bot.sendMessage(msg.chat.id, localeService.t(locale, 'broadcastUsersNoRecipients'));
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'broadcastUsersNoRecipients') });
             return;
         }
 
@@ -338,15 +338,12 @@ export class BotController {
             }
         }
 
-        await this.bot.sendRichMessage(msg.chat.id, { blocks } as unknown as InputRichMessage, {
-            message_thread_id: msg.message_thread_id,
-        });
+        await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: { blocks } as unknown as InputRichMessage, message_thread_id: msg.message_thread_id });
     }
 
     async handleLang(msg: Message): Promise<void> {
         const userIdentifier = msg.from?.username || msg.from?.id || 'unknown';
         console.info('[INFO - handleLang]', { user: userIdentifier });
-        await this.userService.ensureUser(msg.from!);
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         const currentLocale = localeService.resolveUserLocale(user);
         const availableLocales = localeService.availableLocales;
@@ -358,19 +355,16 @@ export class BotController {
 
         const text = localeService.t(currentLocale, 'langMenu', { lang: currentLocale.toUpperCase() });
 
-        await this.bot.sendMessage(msg.chat.id, text, {
-            message_thread_id: msg.message_thread_id,
-            reply_markup: { inline_keyboard: [buttons] }
-        });
+        await this.api.sendMessage({ chat_id: msg.chat.id, text, message_thread_id: msg.message_thread_id,
+            reply_markup: { inline_keyboard: [buttons] } });
     }
 
     async handleDonate(msg: Message): Promise<void> {
         if (this.config.donationsEnabled === false) {
-            await this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'donationDisabled'));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'donationDisabled') });
             return;
         }
 
-        await this.userService.ensureUser(msg.from!);
         const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         const text = `${localeService.t(locale, 'donateTitle')}\n${localeService.t(locale, 'donateChooseAmount')}`;
@@ -383,205 +377,131 @@ export class BotController {
             ]
         ];
 
-        await this.bot.sendMessage(msg.chat.id, text, {
-            parse_mode: "HTML",
+        await this.api.sendMessage({ chat_id: msg.chat.id, text, parse_mode: "HTML",
             message_thread_id: msg.message_thread_id,
-            reply_markup: { inline_keyboard: buttons }
-        });
+            reply_markup: { inline_keyboard: buttons } });
     }
 
-    registerRoutes(): void {
-        const isPrivate = (msg: Message) => msg.chat.type === "private";
+    private async dispatchCallback(query: CallbackQuery, route: { action: CallbackAction; arg: string }): Promise<void> {
+        try {
+            if (route.action === "test") {
+                const key = route.arg;
+                if (!query.message) return;
+                this.api.answerCallbackQuery({ callback_query_id: query.id });
+                this.api.editMessageReplyMarkup({
+                    chat_id: query.message.chat.id,
+                    message_id: query.message.message_id,
+                    reply_markup: { inline_keyboard: [] },
+                }).catch((err: Error) => console.warn("[WARN - botController.testMenu] editMessageReplyMarkup failed:", err.message));
+                const fakeMsg = { ...query.message, from: query.from } as Message;
 
-        this.bot.onText(/\/start/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.HandleStart(msg);
-        });
-        this.bot.onText(/\/newPost/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.HandleNewPost(msg);
-        });
-        this.bot.onText(/\/myposts/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.myPostsService.showPosts(msg);
-        });
-        this.bot.onText(/\/help/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.showHelp(msg);
-        });
-        this.bot.onText(/\/lang/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.handleLang(msg);
-        });
-        if (this.config.enableFaq !== false) {
-            this.bot.onText(/\/faq/i, (msg) => {
-                if (!isPrivate(msg)) return;
-                this.faqService.handleFaq(msg);
-            });
+                if (key === "all") {
+                    for (const tc of Object.values(TEST_CASES)) {
+                        await tc.run(this.api, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
+                    }
+                } else {
+                    const tc = TEST_CASES[key];
+                    if (!tc) return;
+                    await tc.run(this.api, this.config, localeService as LocaleService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
+                }
+                return;
+            }
+
+            if (route.action === "faq") {
+                await this.faqService.handleCallback(query);
+                return;
+            }
+
+            if (route.action === "approve" || route.action === "reject") {
+                await this.moderationService.handleCallback(query);
+                return;
+            }
+
+            if (route.action === "clearRejected") {
+                await this.myPostsService.handleClearStatus(query, "rejected");
+                return;
+            }
+
+            if (route.action === "clearSold") {
+                await this.myPostsService.handleClearStatus(query, "sold");
+                return;
+            }
+
+            if (route.action === "sold") {
+                await this.myPostsService.handleSoldCallback(query);
+                return;
+            }
+
+            if (route.action === "bump") {
+                await this.myPostsService.handleBumpCallback(query);
+                return;
+            }
+
+            if (route.action === "lang") {
+                const lang = route.arg;
+                await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
+                this.api.answerCallbackQuery({ callback_query_id: query.id });
+                // Confirm in the language the user just picked.
+                this.api.sendMessage({ chat_id: query.message!.chat.id, text: localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }) });
+                return;
+            }
+
+            // --- Donation Callbacks ---
+            if (route.action === "donate") {
+                const action = route.arg;
+                const chatId = query.message?.chat.id;
+                if (!chatId) return;
+
+                // Clear buttons
+                this.api.editMessageReplyMarkup({
+                    chat_id: chatId,
+                    message_id: query.message?.message_id,
+                    reply_markup: { inline_keyboard: [] },
+                }).catch((err: Error) => console.warn("[WARN - botController.donate] editMessageReplyMarkup failed:", err.message));
+                this.api.answerCallbackQuery({ callback_query_id: query.id });
+
+                if (action === "other") {
+                    const session = this.getSession(query.from.id);
+                    session.awaitingDonation = true;
+                    this.api.sendMessage({ chat_id: chatId, text: localeService.t(this.config.lang, 'donateEnterAmount') });
+                } else {
+                    const amount = parseInt(action, 10);
+                    if (!isNaN(amount)) {
+                        await this.paymentService.sendDonationInvoice(chatId, amount);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("[ERROR - callback_query]", (err as Error).message);
         }
-        this.bot.onText(/\/config(.*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.adminService.handleConfig(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/activeUsers/i, (msg) => {
-            if (!isPrivate(msg)) return;
-            this.handleActiveUsers(msg);
-        });
-        this.bot.onText(/\/pending/i, async (msg) => {
-            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
-            if (!isAuthorized) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
-                return;
-            }
-            this.pendingService.handlePending(msg);
-        });
-        this.bot.onText(/\/clearpending/i, async (msg) => {
-            if (!isPrivate(msg)) return;
-            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
-            if (!isAuthorized) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
-                return;
-            }
-            this.pendingService.handleClearPending(msg);
-        });
-        this.bot.onText(/\/broadcast(?!Users)([\s\S]*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.adminService.handleBroadcast(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/broadcastUsers([\s\S]*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.handleBroadcastUsers(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/promote(.*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.adminService.handlePromote(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/demote(.*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.adminService.handleDemote(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/auth(.*)/i, (msg, match) => {
-            if (!isPrivate(msg)) return;
-            this.adminService.handleAuth(msg, match?.[1] ?? "");
-        });
-        this.bot.onText(/\/test/i, async (msg) => {
-            if (!isPrivate(msg)) return;
-            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
-            const authLevel = user?.authLevel ?? AuthLevel.USER;
-            if (authLevel < AuthLevel.ADMIN) {
-                this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'notAdmin'));
-                return;
-            }
-            const buttons = Object.entries(TEST_CASES).map(([key, tc]) => ([
-                { text: tc.label, callback_data: `test_${key}` },
-            ]));
-            buttons.push([{ text: "🚀 Run All", callback_data: "test_all" }]);
-            this.bot.sendMessage(msg.chat.id, "Select a test case:", {
-                message_thread_id: msg.message_thread_id,
-                reply_markup: { inline_keyboard: buttons },
+    }
+
+    /**
+     * Handlers never wait for the flow they start: the polling loop handles one
+     * update at a time, and /newPost, the reject-reason prompt and the /test
+     * flows wait for the user's next message or button press (as in v1, where
+     * the emitter did not await listeners either).
+     */
+    private detach(name: string, task: Promise<unknown>): void {
+        task.catch((err) => console.error(`[ERROR - ${name}]`, err));
+    }
+
+    registerRoutes(bot: Bot, botUsername: string): void {
+        const isPrivate = (msg: Message) => msg.chat.type === "private";
+        const cmd = (names: string | string[], handler: (msg: Message, args: string) => unknown): Middleware<Context> =>
+            command(names, () => botUsername, (ctx) => {
+                const { name, args } = ctx.state.command as ParsedCommand;
+                this.detach(`/${name}`, Promise.resolve().then(() => handler(ctx.message!, args)));
             });
-        });
 
-        this.bot.on("callback_query", async (query) => {
-            if (!query.data) return;
-            const route = routeCallback(query.data);
-            if (!route) return;
+        bot.use(ensureUserMiddleware(from => this.userService.ensureUser(from)));
+        bot.use(this.temporaryListeners.middleware());
 
-            try {
-                if (route.action === "test") {
-                    const key = route.arg;
-                    if (!query.message) return;
-                    this.bot.answerCallbackQuery(query.id);
-                    this.bot.editMessageReplyMarkup(
-                        { inline_keyboard: [] },
-                        { chat_id: query.message.chat.id, message_id: query.message.message_id }
-                    ).catch((err: Error) => console.warn("[WARN - botController.testMenu] editMessageReplyMarkup failed:", err.message));
-                    const fakeMsg = { ...query.message, from: query.from } as Message;
+        // Global message handler for payments, group replies and the custom donation amount
+        bot.use(async (ctx, next) => {
+            const msg = ctx.message;
+            if (!msg) return next();
 
-                    if (key === "all") {
-                        for (const tc of Object.values(TEST_CASES)) {
-                            await tc.run(this.bot, this.config, localeService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
-                        }
-                    } else {
-                        const tc = TEST_CASES[key];
-                        if (!tc) return;
-                        await tc.run(this.bot, this.config, localeService as LocaleService, this.postService, this.userService, this.paymentService, this.inputService, fakeMsg);
-                    }
-                    return;
-                }
-
-                if (route.action === "faq") {
-                    await this.faqService.handleCallback(query);
-                    return;
-                }
-
-                if (route.action === "approve" || route.action === "reject") {
-                    await this.moderationService.handleCallback(query);
-                    return;
-                }
-
-                if (route.action === "clearRejected") {
-                    await this.myPostsService.handleClearStatus(query, "rejected");
-                    return;
-                }
-
-                if (route.action === "clearSold") {
-                    await this.myPostsService.handleClearStatus(query, "sold");
-                    return;
-                }
-
-                if (route.action === "sold") {
-                    await this.myPostsService.handleSoldCallback(query);
-                    return;
-                }
-
-                if (route.action === "bump") {
-                    await this.myPostsService.handleBumpCallback(query);
-                    return;
-                }
-
-                if (route.action === "lang") {
-                    const lang = route.arg;
-                    await userRepository.updateUser(String(query.from!.id), { preferredLocale: lang });
-                    this.bot.answerCallbackQuery(query.id);
-                    // Confirm in the language the user just picked.
-                    this.bot.sendMessage(query.message!.chat.id, localeService.t(lang, 'langUpdated', { lang: lang.toUpperCase() }));
-                    return;
-                }
-
-                // --- Donation Callbacks ---
-                if (route.action === "donate") {
-                    const action = route.arg;
-                    const chatId = query.message?.chat.id;
-                    if (!chatId) return;
-
-                    // Clear buttons
-                    this.bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message?.message_id }).catch((err: Error) => console.warn("[WARN - botController.donate] editMessageReplyMarkup failed:", err.message));
-                    this.bot.answerCallbackQuery(query.id);
-
-                    if (action === "other") {
-                        const session = this.getSession(query.from.id);
-                        session.awaitingDonation = true;
-                        this.bot.sendMessage(chatId, localeService.t(this.config.lang, 'donateEnterAmount'));
-                    } else {
-                        const amount = parseInt(action, 10);
-                        if (!isNaN(amount)) {
-                            await this.paymentService.sendDonationInvoice(chatId, amount);
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("[ERROR - callback_query]", (err as Error).message);
-            }
-        });
-
-        // --- Payment Events ---
-        this.bot.on("pre_checkout_query", async (query) => {
-            await this.paymentService.handlePreCheckout(query);
-        });
-
-        // Global message listener for payments and generic input
-        this.bot.on("message", async (msg) => {
             // 1. Handle Successful Payment
             if (msg.successful_payment) {
                 await this.paymentService.handleSuccessfulPayment(msg);
@@ -601,7 +521,7 @@ export class BotController {
                     // Ignore commands so we don't block /cancel or /start
                     if (msg.text.startsWith("/")) {
                         session.awaitingDonation = false;
-                        return;
+                        return next();
                     }
                     // Try to parse amount
                     const amount = parseInt(msg.text, 10);
@@ -609,16 +529,128 @@ export class BotController {
                         session.awaitingDonation = false; // Reset state
                         await this.paymentService.sendDonationInvoice(msg.chat.id, amount);
                     } else {
-                        await this.bot.sendMessage(msg.chat.id, localeService.t(this.config.lang, 'donateInvalidAmount'));
+                        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'donateInvalidAmount') });
                     }
                     return;
                 }
             }
+
+            return next();
         });
 
-        this.bot.onText(/\/donate/i, (msg) => {
+        bot.use(cmd("start", (msg) => {
             if (!isPrivate(msg)) return;
-            this.handleDonate(msg);
+            return this.HandleStart(msg);
+        }));
+        bot.use(cmd("newpost", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.HandleNewPost(msg);
+        }));
+        bot.use(cmd("myposts", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.myPostsService.showPosts(msg);
+        }));
+        bot.use(cmd("help", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.showHelp(msg);
+        }));
+        bot.use(cmd("lang", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.handleLang(msg);
+        }));
+        if (this.config.enableFaq !== false) {
+            bot.use(cmd("faq", (msg) => {
+                if (!isPrivate(msg)) return;
+                return this.faqService.handleFaq(msg);
+            }));
+        }
+        bot.use(cmd("config", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleConfig(msg, args);
+        }));
+        bot.use(cmd("activeusers", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.handleActiveUsers(msg);
+        }));
+        bot.use(cmd("pending", async (msg) => {
+            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.pendingService.handlePending(msg);
+        }));
+        bot.use(cmd("clearpending", async (msg) => {
+            if (!isPrivate(msg)) return;
+            const isAuthorized = await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD);
+            if (!isAuthorized) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.pendingService.handleClearPending(msg);
+        }));
+        bot.use(cmd("broadcast", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleBroadcast(msg, args);
+        }));
+        bot.use(cmd("broadcastusers", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.handleBroadcastUsers(msg, args);
+        }));
+        bot.use(cmd("promote", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handlePromote(msg, args);
+        }));
+        bot.use(cmd("demote", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleDemote(msg, args);
+        }));
+        bot.use(cmd("auth", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleAuth(msg, args);
+        }));
+        bot.use(cmd("test", async (msg) => {
+            if (!isPrivate(msg)) return;
+            const user: User | null = await userRepository.findByUserId(String(msg.from!.id));
+            const authLevel = user?.authLevel ?? AuthLevel.USER;
+            if (authLevel < AuthLevel.ADMIN) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            const buttons = Object.entries(TEST_CASES).map(([key, tc]) => ([
+                { text: tc.label, callback_data: `test_${key}` },
+            ]));
+            buttons.push([{ text: "🚀 Run All", callback_data: "test_all" }]);
+            this.api.sendMessage({
+                chat_id: msg.chat.id,
+                text: "Select a test case:",
+                message_thread_id: msg.message_thread_id,
+                reply_markup: { inline_keyboard: buttons },
+            });
+        }));
+        bot.use(cmd("donate", (msg) => {
+            if (!isPrivate(msg)) return;
+            return this.handleDonate(msg);
+        }));
+
+        // --- Payment Events ---
+        bot.on("pre_checkout_query", async (ctx) => {
+            if ("pre_checkout_query" in ctx.update) {
+                await this.paymentService.handlePreCheckout(ctx.update.pre_checkout_query);
+            }
         });
+
+        bot.on("callback_query", (ctx, next) => {
+            const query = ctx.callbackQuery!;
+            const route = query.data ? routeCallback(query.data) : null;
+            if (!route) return next();
+            this.detach("callback_query", this.dispatchCallback(query, route));
+        });
+
+        // Last: wizard/prompt buttons nobody handled belong to a flow that is gone.
+        bot.use(staleButtonCatchAll(async (ctx) => {
+            const user: User | null = ctx.from ? await userRepository.findByUserId(String(ctx.from.id)) : null;
+            return localeService.t(localeService.resolveUserLocale(user), "staleButton");
+        }));
     }
 }

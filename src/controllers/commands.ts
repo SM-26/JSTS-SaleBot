@@ -1,4 +1,4 @@
-import type { Context, Middleware } from "tgv2";
+import type { Context, Middleware } from "node-telegram-bot-api";
 
 export interface ParsedCommand {
     name: string;

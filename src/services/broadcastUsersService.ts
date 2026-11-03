@@ -1,4 +1,5 @@
-import TelegramBot from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import { TelegramApiError } from "node-telegram-bot-api";
 import postRepository from "../repositories/postRepository";
 
 export interface BroadcastFailure { userId: string; reason: string; }
@@ -7,14 +8,12 @@ export interface BroadcastReport { total: number; sent: number; failures: Broadc
 const SEND_THROTTLE_MS = 50;
 
 // Pure function: maps a failed sendMessage error to a short admin-facing
-// reason. node-telegram-bot-api's TelegramError carries `.response.body`
-// ({ error_code, description }); anything without that shape falls back to
-// `.message` (mirrors postService.markSoldInGroup's error handling).
+// reason. A TelegramApiError carries `.errorCode` and `.description`; anything
+// else falls back to `.message` (mirrors postService.markSoldInGroup's error handling).
 export function mapSendError(err: unknown): string {
-    const response = (err as { response?: { body?: { error_code?: number; description?: string } } })?.response;
-    const body = response?.body;
-    const code = body?.error_code;
-    const description = body?.description ?? (err as Error)?.message ?? "unknown error";
+    const apiError = err instanceof TelegramApiError ? err : undefined;
+    const code = apiError?.errorCode;
+    const description = apiError?.description ?? (err as Error)?.message ?? "unknown error";
 
     if (code === 403) return "blocked the bot";
     if (code === 400 && /chat not found/i.test(description)) return "hasn't started the bot";
@@ -29,7 +28,7 @@ export function truncateFailures(failures: BroadcastFailure[], limit = 30): { sh
 }
 
 export class BroadcastUsersService {
-    constructor(private bot: TelegramBot) { }
+    constructor(private api: Api) { }
 
     // Merge active-session ids with pending/approved post authors, de-dupe,
     // drop excludeId (the initiating admin).
@@ -52,7 +51,7 @@ export class BroadcastUsersService {
 
         for (const userId of userIds) {
             try {
-                await this.bot.sendMessage(Number(userId), htmlMessage, { parse_mode: "HTML" });
+                await this.api.sendMessage({ chat_id: Number(userId), text: htmlMessage, parse_mode: "HTML" });
                 sent++;
             } catch (err) {
                 failures.push({ userId, reason: mapSendError(err) });

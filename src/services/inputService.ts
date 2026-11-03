@@ -1,6 +1,8 @@
-import TelegramBot, { Message, CallbackQuery, InlineKeyboardMarkup, InputRichMessage } from "node-telegram-bot-api";
+import type { Api } from "node-telegram-bot-api";
+import type { Message, CallbackQuery, InlineKeyboardMarkup, InputRichMessage } from "node-telegram-bot-api/types";
 import { BotConfig, MediaItem } from "../types";
 import { localeService } from "./localeService";
+import type { TemporaryListeners } from "../controllers/temporaryListeners";
 
 // Position within the /newPost wizard, appended to the prompt as plain text.
 export interface WizardStep {
@@ -11,8 +13,9 @@ export interface WizardStep {
 
 export class InputService {
     constructor(
-        private bot: TelegramBot,
-        private config: BotConfig
+        private api: Api,
+        private config: BotConfig,
+        private listeners: TemporaryListeners
     ) { }
 
     private async sendPrompt(msg: Message, prompt: string, step?: WizardStep, replyMarkup?: InlineKeyboardMarkup): Promise<void> {
@@ -20,7 +23,9 @@ export class InputService {
             ? `${prompt}\n\n${localeService.t(step.locale, 'wizardStep', { step: step.index, total: step.total })}`
             : prompt;
 
-        await this.bot.sendMessage(msg.chat.id, text, {
+        await this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text,
             message_thread_id: msg.message_thread_id,
             ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         });
@@ -35,15 +40,19 @@ export class InputService {
                 // These are text prompts: a photo/video/sticker carries no .text and
                 // would otherwise resolve to "" and silently advance the wizard.
                 if (!reply.text?.trim()) {
-                    this.bot.sendMessage(msg.chat.id, localeService.t(locale ?? this.config.lang, 'expectedText'), { message_thread_id: msg.message_thread_id });
+                    this.api.sendMessage({
+                        chat_id: msg.chat.id,
+                        text: localeService.t(locale ?? this.config.lang, 'expectedText'),
+                        message_thread_id: msg.message_thread_id,
+                    });
                     return;
                 }
 
-                this.bot.removeListener("message", listener);
+                this.listeners.removeListener("message", listener);
                 resolve(reply.text);
             };
 
-            this.bot.on("message", listener);
+            this.listeners.on("message", listener);
         });
     }
 
@@ -64,7 +73,11 @@ export class InputService {
 
         while (true) {
             const priceInput = await this.input(msg, step.locale); if (this.validatePriceValue(priceInput)) return priceInput;
-            this.bot.sendMessage(msg.chat.id, localeService.t(step.locale, 'invalidPrice'), { message_thread_id: msg.message_thread_id });
+            this.api.sendMessage({
+                chat_id: msg.chat.id,
+                text: localeService.t(step.locale, 'invalidPrice'),
+                message_thread_id: msg.message_thread_id,
+            });
         }
     }
 
@@ -73,22 +86,24 @@ export class InputService {
         const doneCallbackData = `done_media_${msg.from!.id}`;
 
         return new Promise((resolve) => {
-            const cbListener = (query: CallbackQuery) => {
+            const cbListener = (query: CallbackQuery): boolean | void => {
                 if (query.data !== doneCallbackData) return;
                 if (query.from.id !== msg.from!.id) return;
 
-                this.bot.removeListener("message", msgListener);
-                this.bot.removeListener("callback_query", cbListener);
-                this.bot.answerCallbackQuery(query.id);
+                this.listeners.removeListener("message", msgListener);
+                this.listeners.removeListener("callback_query", cbListener);
+                this.api.answerCallbackQuery({ callback_query_id: query.id });
 
                 if (query.message) {
-                    this.bot.editMessageReplyMarkup(
-                        { inline_keyboard: [] },
-                        { chat_id: query.message.chat.id, message_id: query.message.message_id }
-                    ).catch((err: Error) => console.warn("[WARN - inputService.inputMedia] editMessageReplyMarkup failed:", err.message));
+                    this.api.editMessageReplyMarkup({
+                        chat_id: query.message.chat.id,
+                        message_id: query.message.message_id,
+                        reply_markup: { inline_keyboard: [] },
+                    }).catch((err: Error) => console.warn("[WARN - inputService.inputMedia] editMessageReplyMarkup failed:", err.message));
                 }
 
                 resolve(items);
+                return true;
             };
 
             const msgListener = (reply: Message) => {
@@ -102,8 +117,8 @@ export class InputService {
                 }
             };
 
-            this.bot.on("callback_query", cbListener);
-            this.bot.on("message", msgListener);
+            this.listeners.on("callback_query", cbListener);
+            this.listeners.on("message", msgListener);
         });
     }
 
@@ -134,31 +149,37 @@ export class InputService {
         };
 
         const sentMsg = richMessage
-            ? await this.bot.sendRichMessage(msg.chat.id, richMessage, {
+            ? await this.api.sendRichMessage({
+                chat_id: msg.chat.id,
+                rich_message: richMessage,
                 message_thread_id: msg.message_thread_id,
                 reply_markup: replyMarkup,
             })
-            : await this.bot.sendMessage(msg.chat.id, "👆", {
+            : await this.api.sendMessage({
+                chat_id: msg.chat.id,
+                text: "👆",
                 message_thread_id: msg.message_thread_id,
                 reply_markup: replyMarkup,
             });
 
         return new Promise((resolve) => {
-            const listener = (query: CallbackQuery) => {
+            const listener = (query: CallbackQuery): boolean | void => {
                 if (query.from.id !== msg.from!.id) return;
                 if (query.data !== callbackId && query.data !== cancelId) return;
 
-                this.bot.removeListener("callback_query", listener);
-                this.bot.answerCallbackQuery(query.id);
-                this.bot.editMessageReplyMarkup(
-                    { inline_keyboard: [] },
-                    { chat_id: msg.chat.id, message_id: sentMsg.message_id }
-                ).catch((err: Error) => console.warn("[WARN - inputService.confirm] editMessageReplyMarkup failed:", err.message));
+                this.listeners.removeListener("callback_query", listener);
+                this.api.answerCallbackQuery({ callback_query_id: query.id });
+                this.api.editMessageReplyMarkup({
+                    chat_id: msg.chat.id,
+                    message_id: sentMsg.message_id,
+                    reply_markup: { inline_keyboard: [] },
+                }).catch((err: Error) => console.warn("[WARN - inputService.confirm] editMessageReplyMarkup failed:", err.message));
 
                 resolve(query.data === callbackId);
+                return true;
             };
 
-            this.bot.on("callback_query", listener);
+            this.listeners.on("callback_query", listener);
         });
     }
 }
