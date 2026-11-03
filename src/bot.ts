@@ -35,14 +35,18 @@ async function main() {
 
     console.log(`Bot v${pkg.version} is running...`);
 
-    // Graceful shutdown
-    process.on("SIGINT", () => {
-        console.log("Shutting down bot...");
+    // Graceful shutdown. `docker stop` sends SIGTERM, and Node running as a
+    // container's PID 1 ignores it without a handler, so Docker would wait 10s
+    // and SIGKILL the bot mid-poll.
+    const shutdown = (signal: NodeJS.Signals) => {
+        console.log(`Shutting down bot (${signal})...`);
         bot.stopPolling()
             .then(() => mongoose.disconnect())
             .catch((err) => console.error("Shutdown error:", err))
             .finally(() => process.exit(0));
-    });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
 }
 
 main().catch((err) => {

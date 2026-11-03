@@ -1,0 +1,56 @@
+# Production stack for the deploy host. Pulls the image CI publishes to GHCR
+# (see .github/workflows/publish-image.yml); nothing is built here.
+# docker-compose.yaml stays the development setup.
+
+# Same project name as the dev file, so the existing jsts-salebot_mongodb_data
+# volume (and its posts and users) is reused.
+name: jsts-salebot
+
+services:
+  bot:
+    image: ghcr.io/sm-26/jsts-salebot:${BOT_TAG:-latest}
+    container_name: jsts-salebot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Must be writable by UID 1000 (`node`): /config saves back to this file.
+      - ./config.json:/app/config.json
+    depends_on:
+      mongoserver:
+        condition: service_healthy
+
+  mongoserver:
+    image: mongo:latest
+    restart: always
+    command: [ "mongod", "--quiet" ]
+    ports:
+      # Host-only. Mongo has no auth, so never publish it on all interfaces.
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # Starts only on request: --profile tools up -d mongo-express
+  mongo-express:
+    image: mongo-express:latest
+    profiles: [ "tools" ]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongoserver
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+      - ME_CONFIG_MONGODB_URL=mongodb://mongoserver:27017
+    depends_on:
+      mongoserver:
+        condition: service_healthy
+
+volumes:
+  mongodb_data:

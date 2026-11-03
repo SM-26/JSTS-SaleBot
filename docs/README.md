@@ -275,20 +275,33 @@ Monitor & manage:
 - Database UI: Mongo Express at `http://localhost:8081` — username `admin`, password `pass`
 - Debugger: attach to `localhost:9221`
 
-#### 2. Production — build & run
+#### 2. Production — `compose.prod.yaml`
 
-The production target is **not** part of `docker-compose.yaml`. Build it and run it against your real MongoDB:
+Pushing a `v*` tag runs `.github/workflows/publish-image.yml`, which builds the **production** stage for `linux/amd64` and `linux/arm64` and publishes it to `ghcr.io/sm-26/jsts-salebot`, tagged with the version (`1.2.0`, `1.2`) and `latest`. The deploy host only pulls; it never runs `pnpm install` or `tsc`.
+
+On the host, next to `compose.prod.yaml`, `.env` and `config.json`:
 
 ```bash
-docker build --target production -t jsts-salebot:1.1.0 .
-
-docker run -d --name jsts-salebot \
-  --env-file .env \
-  -v "$PWD/config.json:/app/config.json" \
-  jsts-salebot:1.1.0
+docker compose -f compose.prod.yaml pull
+docker compose -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml logs -f bot
 ```
 
-> **`config.json` is not baked into the image.** It is environment-specific (and gitignored), so it must be mounted at `/app/config.json` — the container exits on startup without it. Mount it **writable**: `/config` changes are persisted back to this file.
+- **Pin a version:** `BOT_TAG=1.1.0 docker compose -f compose.prod.yaml up -d`. Rolling back is the same command with the previous tag.
+- **Database UI on demand:** `docker compose -f compose.prod.yaml --profile tools up -d mongo-express`, then `docker compose -f compose.prod.yaml stop mongo-express` when done. It listens on `127.0.0.1:8081` only; from a laptop use an SSH tunnel: `ssh -L 8081:localhost:8081 <host>`.
+- **MongoDB** listens on `127.0.0.1:27017` only, because it has no auth. In `.env`, use the service name: `MONGO_URI=mongodb://mongoserver:27017/SalesBotDB`.
+
+> **`config.json` is not baked into the image.** It is environment-specific (and gitignored), so it is mounted at `/app/config.json` — the container exits on startup without it. It must be **writable by UID 1000** (the image's `node` user): `/config` changes are persisted back to this file. On the host: `sudo chown 1000:1000 config.json`.
+
+> **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
+
+**Switching an existing host from the dev compose file.** The project name is the same, so the `jsts-salebot_mongodb_data` volume with all posts and users is reused:
+
+```bash
+docker compose down                                # dev file; volumes are kept
+docker compose -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml logs -f bot
+```
 
 ## Dev build  
 ### Prerequisites
