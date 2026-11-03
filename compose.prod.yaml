@@ -21,7 +21,9 @@ services:
         condition: service_healthy
 
   mongoserver:
-    image: mongo:latest
+    # Pinned to the major.minor the data was written with. `latest` jumped to
+    # 9.0, and a major upgrade needs the featureCompatibilityVersion steps.
+    image: mongo:8.2
     restart: always
     # Docker's default 10s is too short for mongod's shutdown checkpoint on
     # this host; on 2026-10-15 it was SIGKILLed mid-checkpoint.

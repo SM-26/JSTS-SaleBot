@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased - Production deployment. CI publishes the production image to GHCR, and the host runs it from a new `compose.prod.yaml` (issue #82).
+1.1.1 - Production deployment. CI publishes the production image to GHCR, and the host runs it from a new `compose.prod.yaml` (issue #82).
   - New `publish-image.yml` workflow: on a `v*` tag (or manually), builds the `production` stage for `linux/amd64` and `linux/arm64` and pushes it to `ghcr.io/sm-26/jsts-salebot`, tagged with the version and `latest`.
-  - New `compose.prod.yaml` for the deploy host: pulls the image instead of building, runs it as `node` with no inspector port, binds MongoDB and mongo-express to `127.0.0.1`, and starts mongo-express only with `--profile tools`. It reuses the dev setup's `jsts-salebot_mongodb_data` volume.
+  - New `compose.prod.yaml` for the deploy host: pulls the image instead of building, runs it as `node` with no inspector port, binds MongoDB and mongo-express to `127.0.0.1`, and starts mongo-express only with `--profile tools`. It reuses the dev setup's `jsts-salebot_mongodb_data` volume, pins `mongo:8.2` (the version the production data was written with; `latest` is now 9.0), and gives `mongod` 60 seconds to shut down.
   - Fixed shutdown under Docker. Only `SIGINT` was handled, but `docker stop` sends `SIGTERM`, which Node ignores as a container's PID 1 without a handler; every stop waited 10 seconds and then force-killed the bot mid-poll. `SIGTERM` now stops polling and closes Mongo like `SIGINT`.
   - A deliberate shutdown now logs `MongoDB connection closed.` instead of the misleading `MongoDB disconnected. Attempting to reconnect...`.
   - Fixed `config.json.example`, which was not valid JSON (`"faqAllowInGroups": boolean`), so copying it as the setup steps say produced a config the bot could not read. It now holds `false`.
