@@ -1687,6 +1687,313 @@ async function run() {
             }
         }
 
+        // Slice 2, Task 5: the note send path. Labels (w1)..(w15).
+        await Capture.deleteMany({ chatId: APPROVED_GROUP });
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        await (async () => { // its own function: the huge run() above is at the compiler's flow-analysis depth limit
+            const { tick } = await import("../services/shadowService");
+            const { default: memberRepository } = await import("../repositories/memberRepository");
+            const { textHash, classify } = await import("../services/classifier");
+            const { default: ShadowLog } = await import("../models/ShadowLog");
+            const SALE1 = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const SALE2 = "וסט טקטי למכירה 250₪ צפון";
+            const SALE3 = "כוונת אדומה למכירה 300₪";
+            const SALE4 = "אוזניות תקשורת למכירה 400₪ דרום";
+            const BARE = "1300 מרכז";
+            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            const OLD_NOTE = 5100;
+            let msgSeq = 2_000_000 + (Date.now() % 1_000_000);
+            const nextMsg = () => msgSeq++;
+            const tp = (key: string, params?: Record<string, string>) => localeService.t(cfg.lang, key, params);
+            type Ctrl = ReturnType<typeof boot>["ctrl"];
+
+            const post = async (h: H, userId: number, caption: string, o: { photo?: boolean; thread?: number } = {}) => {
+                const opts = { ...GROUP, userId, ...(o.thread ? { messageThreadId: o.thread, isTopicMessage: true } : {}) };
+                if (o.photo === false) await h.sendText(caption, opts);
+                else await h.sendPhoto("f1", { ...opts, caption });
+                await settle();
+            };
+            const closeAndNote = async (ctrl: Ctrl, plusMs = 31_000) => {
+                await tick(cfg, new Date(Date.now() + plusMs), (e, n) => ctrl.captureNotes.onClassified(e, n));
+                await settle();
+            };
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const ephemerals = (h: H) => h.calls.filter((c) => c.method === "sendMessage" && c.params.ephemeral_message_parameters);
+            const rows = (c: RecordedCall) => (c.params.reply_markup as { inline_keyboard: { callback_data?: string; url?: string }[][] }).inline_keyboard;
+            const ephemeralId = (c: RecordedCall) => (c.result as { ephemeral_message_id?: number }).ephemeral_message_id;
+            const lastCapture = (u: number) => Capture.findOne({ senderId: String(u) }).sort({ _id: -1 }).exec();
+            const deletedNotes = (h: H) => h.calls.filter((c) => c.method === "deleteEphemeralMessage");
+            const addListing = async (ctrl: Ctrl, seller: number) => {
+                const capture = await seedCapture({
+                    senderId: String(seller), chatId: APPROVED_GROUP, messageIds: [nextMsg()], text: SALE1, state: "asked",
+                    note: { ephemeralMessageId: OLD_NOTE, sentAt: new Date(Date.now() - 3 * 24 * 3_600_000), kind: "ask" },
+                });
+                const result = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS, new Date(Date.now() - 3_600_000));
+                if (result.kind !== "added") throw new Error("addToMarket failed");
+                return String(result.listing._id);
+            };
+
+            // (w1) a strict post gets one private note
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                const sent = ephemerals(h);
+                assert.strictEqual(sent.length, 1);
+                const cap = (await lastCapture(u))!;
+                const p = sent[0].params;
+                assert.deepStrictEqual(
+                    [(p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(p.chat_id), "message_thread_id" in p],
+                    [u, APPROVED_GROUP, false]);
+                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
+                assert.strictEqual(cap.state, "asked");
+                assert.ok(ephemeralId(sent[0]) !== undefined && ephemeralId(sent[0])! >= 5000);
+                assert.strictEqual(cap.note?.ephemeralMessageId, ephemeralId(sent[0]));
+                assert.strictEqual(cap.note?.kind, "ask");
+                console.log("  [OK] (w1) a strict post gets one private note, without a thread id.");
+            }
+
+            // (w2) shadow mode records, sends nothing
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                cfg.captureMode = "shadow";
+                try {
+                    await post(h, u, SALE1);
+                    await closeAndNote(ctrl);
+                } finally {
+                    cfg.captureMode = "optin";
+                }
+                assert.strictEqual(callsTo(h, "sendMessage").length, 0);
+                assert.strictEqual((await lastCapture(u))!.state, "classified");
+                assert.strictEqual(await ShadowLog.countDocuments({ senderId: String(u) }), 1);
+                await ShadowLog.deleteMany({ senderId: String(u) });
+                console.log("  [OK] (w2) shadow mode sends nothing.");
+            }
+
+            // (w3) a note in a real topic is threaded
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                cfg.approvedTopicId = 73;
+                try {
+                    await post(h, u, SALE1, { thread: 73 });
+                    await closeAndNote(ctrl);
+                } finally {
+                    cfg.approvedTopicId = 1;
+                }
+                const sent = ephemerals(h);
+                assert.strictEqual(sent.length, 1);
+                assert.strictEqual(Number(sent[0].params.message_thread_id), 73);
+                console.log("  [OK] (w3) the note is threaded in topic 73.");
+            }
+
+            // (w4) an incomplete post gets the deep link
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, BARE);
+                await closeAndNote(ctrl);
+                const sent = ephemerals(h);
+                assert.strictEqual(sent.length, 1);
+                const cap = (await lastCapture(u))!;
+                const first = rows(sent[0])[0][0];
+                assert.strictEqual(first.url, `https://t.me/${BOT_USERNAME}?start=c_${cap._id}`);
+                assert.strictEqual(first.callback_data, undefined);
+                console.log("  [OK] (w4) an incomplete post gets the deep link.");
+            }
+
+            // (w5) a want-to-buy post gets no note
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, "מחפש גלוק 17 עד 800₪");
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                console.log("  [OK] (w5) a wanted post gets no note.");
+            }
+
+            // (w6) askMode never is silent
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await memberRepository.setAskMode(String(u), "never", new Date());
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.strictEqual((await lastCapture(u))!.state, "ignored");
+                console.log("  [OK] (w6) askMode never is silent.");
+            }
+
+            // (w7) three notes a day
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                for (const text of [SALE1, SALE2, SALE3, SALE4]) {
+                    await post(h, u, text);
+                    await closeAndNote(ctrl);
+                }
+                assert.strictEqual(ephemerals(h).length, 3);
+                assert.strictEqual((await lastCapture(u))!.state, "classified");
+                console.log("  [OK] (w7) at most 3 notes a day.");
+            }
+
+            // (w8) a text already asked about is not asked again (R1); another text is
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await memberRepository.rememberAsked(String(u), textHash(SALE1), new Date());
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.strictEqual((await lastCapture(u))!.state, "ignored");
+                await post(h, u, SALE2);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 1);
+                assert.strictEqual((await lastCapture(u))!.state, "asked");
+                console.log("  [OK] (w8) a text already asked about gets no second note.");
+            }
+
+            // (w8b) R1 end to end: an unanswered note, then the same text again, gets nothing
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, SALE3);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 1);
+                assert.strictEqual(await memberRepository.wasAskedRecently(String(u), textHash(SALE3), new Date()), true);
+                await post(h, u, SALE3);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 1, "no second note");
+                assert.strictEqual((await lastCapture(u))!.state, "ignored");
+                console.log("  [OK] (w8b) an unanswered note is not repeated for the same text.");
+            }
+
+            // (w9) a repost refreshes the listing and swaps the note, no question
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                const before = (await Listing.findById(id))!;
+                h.calls.length = 0;
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                const cap = (await lastCapture(u))!;
+                const l = (await Listing.findById(id))!;
+                assert.ok(l.refreshedAt.getTime() > before.refreshedAt.getTime());
+                assert.deepStrictEqual([...l.messageIds], [...cap.messageIds]);
+                const sent = ephemerals(h);
+                assert.strictEqual(sent.length, 1);
+                assert.deepStrictEqual(rows(sent[0])[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.strictEqual(String(sent[0].params.text), tp("listingRefreshedCard", { title: FIELDS.title, price: FIELDS.price }));
+                assert.deepStrictEqual(deletedNotes(h).map((c) => Number(c.params.ephemeral_message_id)), [OLD_NOTE]);
+                assert.strictEqual(l.note?.ephemeralMessageId, ephemeralId(sent[0]));
+                assert.deepStrictEqual([cap.state, cap.listingId, cap.note?.kind], ["ignored", id, "refresh"]);
+                console.log("  [OK] (w9) a repost refreshes the listing and swaps the note.");
+            }
+
+            // (w10) two reposts leave one card
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                h.calls.length = 0;
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                const sent = ephemerals(h);
+                assert.strictEqual(sent.length, 2);
+                assert.deepStrictEqual(deletedNotes(h).map((c) => Number(c.params.ephemeral_message_id)), [OLD_NOTE, ephemeralId(sent[0])]);
+                assert.strictEqual((await Listing.findById(id))!.note?.ephemeralMessageId, ephemeralId(sent[1]));
+                console.log("  [OK] (w10) two reposts leave one card.");
+            }
+
+            // (w11) a repost of a bot listing is silent
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const now = new Date();
+                await Listing.create({
+                    source: "bot", origin: "dm", postId: new mongoose.Types.ObjectId().toHexString(), messageIds: [], sellerId: String(u),
+                    title: "Glock", text: SALE1, textHash: textHash(SALE1), media: [], status: "live", hold: false, isBundle: false, createdAt: now, refreshedAt: now,
+                });
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.strictEqual((await lastCapture(u))!.state, "ignored");
+                console.log("  [OK] (w11) a repost of a bot listing is silent.");
+            }
+
+            // (w12) the refresh note respects askMode never
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                const before = (await Listing.findById(id))!;
+                await memberRepository.setAskMode(String(u), "never", new Date());
+                h.calls.length = 0;
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.ok((await Listing.findById(id))!.refreshedAt.getTime() > before.refreshedAt.getTime(), "still refreshed");
+                console.log("  [OK] (w12) a refresh is silent for askMode never.");
+            }
+
+            // (w13) a failed send leaves the capture classified, and nothing retries
+            {
+                const { h, ctrl } = boot({ responses: { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { ok: false, error_code: 403, description: "Forbidden" } : undefined } });
+                const u = user();
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                const cap = (await lastCapture(u))!;
+                assert.deepStrictEqual([cap.state, cap.note], ["classified", undefined]);
+                assert.strictEqual(ephemerals(h).length, 1);
+                await closeAndNote(ctrl, 62_000);
+                assert.strictEqual(ephemerals(h).length, 1, "no retry");
+                assert.strictEqual(await memberRepository.wasAskedRecently(String(u), textHash(SALE1), new Date()), false, "nothing was sent, nothing remembered");
+                console.log("  [OK] (w13) a failed send leaves the capture classified.");
+            }
+
+            // (w14) a response without the ephemeral id counts as a failure
+            {
+                const { h, ctrl } = boot({ responses: { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { message_id: 1, chat: { id: APPROVED_GROUP, type: "supergroup" }, date: 1 } : undefined } });
+                const u = user();
+                await post(h, u, SALE1);
+                await closeAndNote(ctrl);
+                const cap = (await lastCapture(u))!;
+                assert.deepStrictEqual([cap.state, cap.note], ["classified", undefined]);
+                assert.strictEqual(ephemerals(h).length, 1);
+                console.log("  [OK] (w14) a missing ephemeral id is a failed send.");
+            }
+
+            // (w15) a hidden blocked URL gets no note; another chat is never noted
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await h.message({
+                    photo: [{ file_id: "f1", file_unique_id: "f1", width: 10, height: 10 }],
+                    caption: "ראו כאן למכירה 300₪",
+                    caption_entities: [{ type: "text_link", offset: 0, length: 3, url: "https://cutt.ly/x" }],
+                }, { ...GROUP, userId: u });
+                await settle();
+                await closeAndNote(ctrl);
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.strictEqual((await lastCapture(u))!.state, "ignored");
+
+                const other = user();
+                const elsewhere = await seedCapture({ senderId: String(other), text: SALE1 });
+                await ctrl.captureNotes.onClassified({ capture: elsewhere, result: classify(SALE1, false) }, new Date());
+                assert.strictEqual(ephemerals(h).length, 0);
+                assert.strictEqual((await Capture.findById(elsewhere._id))!.state, "classified");
+                console.log("  [OK] (w15) a hidden blocked URL and another chat get no note.");
+            }
+            await ShadowLog.deleteMany({ senderId: { $in: userIds.map(String) } });
+        })();
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);

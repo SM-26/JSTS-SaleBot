@@ -1,21 +1,27 @@
+import type { ICapture } from "../models/Capture";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import type { BotConfig } from "../types";
-import { classify, textHash, tokenOverlap, tokens } from "./classifier";
+import { classify, textHash, tokenOverlap, tokens, type ClassifyResult } from "./classifier";
 import { rankMatches } from "./matchService";
 
 const REPOST_MS = 30 * 24 * 3600_000;
 const REPOST_OVERLAP = 0.8;
 
+// What the sweeper just decided about one capture (`capture` is the claimed document, as it was before the classification was saved).
+export interface ClassifiedEvent { capture: ICapture; result: ClassifyResult; mergeWith?: string }
+export type OnClassified = (event: ClassifiedEvent, now: Date) => Promise<void>;
+
 // Claims one closed capture, records what automatic capture would have done
 // (no member text: ids, tier and, for would-list rows, the price number) and marks it classified.
 // False when nothing was claimed.
-export async function processOneClosed(config: BotConfig, now: Date): Promise<boolean> {
+export async function processOneClosed(config: BotConfig, now: Date, onClassified?: OnClassified): Promise<boolean> {
     const cap = await captureRepository.claimClosed();
     if (!cap) return false;
 
-    const { tier, rules, parsed } = classify(cap.text, cap.media.length > 0);
+    const result = classify(cap.text, cap.media.length > 0);
+    const { tier, rules, parsed } = result;
 
     // only a sale post (strict or ask) can repeat the seller's listing
     let mergeWith: string | undefined;
@@ -45,6 +51,13 @@ export async function processOneClosed(config: BotConfig, now: Date): Promise<bo
         matches,
     });
     await captureRepository.saveClassification(String(cap._id), tier, rules, parsed);
+    if (onClassified) {
+        try {
+            await onClassified({ capture: cap, result, mergeWith }, now);
+        } catch (err) {
+            console.error("[ERROR - shadow:onClassified]", (err as Error).message);
+        }
+    }
     return true;
 }
 
@@ -54,7 +67,7 @@ export async function closeDueWindows(now: Date): Promise<number> {
     return n;
 }
 
-export async function tick(config: BotConfig, now: Date): Promise<void> {
+export async function tick(config: BotConfig, now: Date, onClassified?: OnClassified): Promise<void> {
     await closeDueWindows(now);
-    while (await processOneClosed(config, now)) { /* drain */ }
+    while (await processOneClosed(config, now, onClassified)) { /* drain */ }
 }

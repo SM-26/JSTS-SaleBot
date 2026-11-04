@@ -22,6 +22,7 @@ import { FaqService } from "../services/faqService";
 import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
+import { CaptureNoteService } from "../services/captureNoteService";
 import { GroupListingService } from "../services/groupListingService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
@@ -62,6 +63,7 @@ export class BotController {
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
     readonly groupListings: GroupListingService;
+    readonly captureNotes: CaptureNoteService;
 
     constructor(api: Api) {
         this.api = api;
@@ -72,6 +74,7 @@ export class BotController {
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
+        this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
