@@ -11,7 +11,7 @@ const DAY_MS = 24 * 3600 * 1000;
 const GATE_MIN_LABELED = 100;
 const GATE_MIN_PRECISION = 0.97;
 
-const pct = (num: number, den: number) => den > 0 ? `${Math.round(100 * num / den)}%` : "—";
+const pct = (num: number, den: number, digits = 0) => den > 0 ? `${(100 * num / den).toFixed(digits)}%` : "—";
 // Reposts merged out of the sale posts (strict + ask) that could have been one.
 export const mergedPct = (s: ShadowStats) => pct(s.merges, s.byTier.strict + s.byTier.ask);
 
@@ -41,7 +41,8 @@ export class ShadowAdminService {
     }
 
     private async linkTo(row: IShadowLog): Promise<string> {
-        const name = await this.groupName();
+        // the public @username belongs to the approved group only
+        const name = row.chatId === this.config.approvedGroupId ? await this.groupName() : "";
         const messageId = row.messageIds[0];
         return name
             ? `https://t.me/${name}/${messageId}`
@@ -49,8 +50,8 @@ export class ShadowAdminService {
     }
 
     // The next row to label as message text plus buttons, or the "nothing left" text.
-    private async nextRow(locale: string): Promise<{ text: string; reply_markup: { inline_keyboard: { text: string; callback_data: string }[][] } }> {
-        const row = await shadowLogRepository.sampleUnlabeled();
+    private async nextRow(locale: string, excludeId?: string): Promise<{ text: string; reply_markup: { inline_keyboard: { text: string; callback_data: string }[][] } }> {
+        const row = await shadowLogRepository.sampleUnlabeled(excludeId);
         if (!row) return { text: localeService.t(locale, "labelEmpty"), reply_markup: { inline_keyboard: [] } };
         const id = String(row._id);
         return {
@@ -87,14 +88,14 @@ export class ShadowAdminService {
                 await this.api.answerCallbackQuery({ callback_query_id: query.id });
                 return;
             }
-            // ponytail: a skipped row can be sampled again; add a skipped list if that gets annoying.
+            // ponytail: Skip only avoids the row just shown; it can come back later. Add a skipped list if that gets annoying.
             if (m[2] !== "k") await shadowLogRepository.setLabel(m[1], m[2] === "s" ? "sale" : "not_sale", String(query.from.id), new Date());
             await this.api.answerCallbackQuery({ callback_query_id: query.id });
             if (!query.message) return;
             await this.api.editMessageText({
                 chat_id: query.message.chat.id,
                 message_id: query.message.message_id,
-                ...await this.nextRow(locale),
+                ...await this.nextRow(locale, m[2] === "k" ? m[1] : undefined),
             });
         } catch (err) {
             console.error("[ERROR - shadowAdmin.handleLabelCallback]", (err as Error).message);
@@ -122,7 +123,7 @@ export class ShadowAdminService {
                 status7: statuses(l7), status30: statuses(l30),
                 held,
                 n7: s7.labeled, n30: s30.labeled,
-                prec7: pct(s7.sale, s7.sale + s7.notSale), prec30: pct(s30.sale, s30.sale + s30.notSale),
+                prec7: pct(s7.sale, s7.sale + s7.notSale, 1), prec30: pct(s30.sale, s30.sale + s30.notSale, 1),
                 gate7: gate(s7), gate30: gate(s30),
             });
             await this.api.sendMessage({ chat_id: msg.chat.id, text });

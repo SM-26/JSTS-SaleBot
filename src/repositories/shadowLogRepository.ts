@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ShadowLog, { IShadowLog, ShadowLogRow } from "../models/ShadowLog";
 import type { Tier } from "../services/classifier";
 
@@ -15,10 +16,10 @@ class ShadowLogRepository {
         return ShadowLog.create(row);
     }
 
-    // A random would-list row nobody has labeled yet, for /label.
-    async sampleUnlabeled(): Promise<IShadowLog | null> {
+    // A random would-list row nobody has labeled yet, for /label (not `excludeId`: the row just skipped).
+    async sampleUnlabeled(excludeId?: string): Promise<IShadowLog | null> {
         const [row] = await ShadowLog.aggregate([
-            { $match: { wouldList: true, label: { $exists: false } } },
+            { $match: { wouldList: true, label: { $exists: false }, ...(excludeId ? { _id: { $ne: new mongoose.Types.ObjectId(excludeId) } } : {}) } },
             { $sample: { size: 1 } },
         ]).exec();
         return row ? ShadowLog.hydrate(row) : null;

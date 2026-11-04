@@ -51,7 +51,7 @@ async function run() {
     const adminId = userId + 1;
     const configPath = path.join(__dirname, "../../config.json");
     const originalConfigFile = fs.readFileSync(configPath);
-    const h = createHarness();
+    const h = createHarness({ responses: { getChat: { id: 0, type: "supergroup", username: "pubgroup" } } });
     const controller = new BotController(h.bot.api);
     controller.registerRoutes(h.bot, BOT_USERNAME);
     const senderBase = userId + 100; // capture senders, cleaned up in finally
@@ -123,7 +123,7 @@ async function run() {
             await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true });
             await expectCalls("/label as ADMIN", () => h.sendText("/label", { userId: adminId }));
             const labelCall = h.calls.find((c) => c.method === "sendMessage")!;
-            assert.ok(String(labelCall.params.text).includes("t.me/"), "/label shows a link");
+            assert.ok(String(labelCall.params.text).includes("https://t.me/pubgroup/4242"), "/label links the approved group by its @username");
             assert.ok(String(labelCall.params.text).endsWith("\nstrict · 100"), "/label shows the tier and the price number, no text");
             assert.ok(!String(labelCall.params.text).includes("Bike"), "/label shows no title");
             const keyboard = (labelCall.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
@@ -135,7 +135,32 @@ async function run() {
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")), "the label message is edited to the next row");
             const labeled = await ShadowLog.findById(shadow._id);
             assert.deepStrictEqual([labeled?.label, labeled?.labeledBy], ["sale", String(adminId)]);
+
+            // Skip never re-shows the same row; the @username link is only for the approved group.
+            const mkRow = (chatId: number, messageId: number) => ShadowLog.create({ chatId, messageIds: [messageId], senderId: "skip-test", at: new Date(), tier: "strict", rules: [], wouldList: true });
+            const rowA = await mkRow(config.approvedGroupId, 5151);
+            const rowB = await mkRow(config.approvedGroupId - 1, 5252);
+            const skip = async (row: typeof rowA) => {
+                h.calls.length = 0;
+                await h.pressButton(`lb_${row._id}_k`, { userId: adminId, messageId: 62 });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")), "Skip edits the label message");
+                return h.calls.find((c) => c.method === "editMessageText")!.params;
+            };
+            const afterA = await skip(rowA);
+            assert.ok(String(afterA.text).includes(`t.me/c/${String(Math.abs(config.approvedGroupId - 1)).replace(/^100/, "")}/5252`), "Skip shows the other row, linked by id (its chat has no known @username)");
+            assert.ok(JSON.stringify(afterA.reply_markup).includes(`lb_${rowB._id}_s`), "Skip does not re-show the skipped row");
+            const afterB = await skip(rowB);
+            assert.ok(String(afterB.text).includes("t.me/pubgroup/5151"), "the approved group's row links by @username");
+            assert.ok(JSON.stringify(afterB.reply_markup).includes(`lb_${rowA._id}_s`));
+            await ShadowLog.deleteOne({ _id: rowB._id });
+            const last = await skip(rowA);
+            assert.strictEqual(last.text, localeService.t(config.lang, "labelEmpty"), "Skip with no other row shows labelEmpty");
+            h.calls.length = 0;
+            await h.sendText("/stats", { userId: modId });
+            assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
+            assert.ok(/\d+\.\d%/.test(lastText()), "/stats shows precision with one decimal");
         } finally {
+            await ShadowLog.deleteMany({ senderId: "skip-test" });
             await ShadowLog.deleteOne({ _id: shadow._id });
             await User.deleteOne({ userId: String(modId) });
         }
