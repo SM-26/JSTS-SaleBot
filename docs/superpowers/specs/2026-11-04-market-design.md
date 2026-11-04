@@ -424,7 +424,10 @@ Unknown or foreign payloads fall back to the greeting.
 
 ### 8.3 `/myposts`
 
-Lists both sources. Bot posts render exactly as today (with existing `sold_`/`bump_` buttons). Group listings render
+Lists both sources. Bot posts render as today (existing `sold_`/`bump_` buttons) plus a new 🗑 Remove button: it
+sets the post's listing `removed` and deletes the bot's group message. Today a seller has no way to remove an
+approved post (`/myposts` can only clear rejected and sold ones), so a duplicate or a mistaken post stays up: one
+seller asked for exactly that, and both copies of his post are still live. Group listings render
 as one line each with a link and `ls_` buttons. Ended listings are grouped under a collapsed "ended" line with
 Relist for `expired`. A settings row toggles `askMode`.
 
@@ -652,10 +655,13 @@ contain no member names, phone numbers or copied posts.
 
 ### Slice 3: listings that end + the 14 stale sellers
 
-- **Scope:** 11.1–11.4, Relist, the trust line on new cards, `/stalecheck` (dry run, then confirm).
+- **Scope:** 11.1–11.4, Relist, Remove for bot posts in `/myposts` (8.3), the trust line on new cards,
+  `/stalecheck` (dry run, then confirm).
 - **Checks:**
   - `check-market`, with a fake clock: nudge at day 7 exactly once, refresh clears it, expiry at day 30, held nudge
-    sent on the next group message; `bot` Sold also sets post `sold`; reconcile after a simulated 2.0.1 sell.
+    sent on the next group message; `bot` Sold also sets post `sold`; reconcile after a simulated 2.0.1 sell;
+    Remove on a bot post deletes its group message and ends the listing, and a foreign user's press is refused.
+  - `check-callbacks`: the Remove button's format pinned.
   - `check-rich`: the old golden is unchanged; a new golden with the trust line.
 - **/test:** "Age my test listing 7 days", "Age 30 days", "Stale-check dry run (to me only)".
 - **Synthetic:** the stale DM sent to the owner only, from a seeded test DB.
@@ -723,7 +729,8 @@ contain no member names, phone numbers or copied posts.
 - Day counts, window and limits are constants, not config. The only new config keys are the switches `captureMode`,
   `buyerMatches` and `nudges`, plus `rulesUrl`.
 - The rules link is a button on the author's reject notice, not on the moderator's reason prompt.
-- `/stalecheck` can send to a pilot list of user ids first (11.4).
+- `/stalecheck` can send to a pilot list of user ids first (11.4). The pilot's ids stay out of this public repo.
+- Bot posts get a Remove button in `/myposts` (8.3), in slice 3.
 - The 28 legacy listings stay on hold (no nudge, no expiry, not in matches) until `/stalecheck` sends.
 - A member deleting their own group post is invisible to the bot: Telegram sends no update. In 3.0 such a listing
   stays live until Sold, the day-7 nudge or the day-30 expiry. Buyer notes and alerts show the post date so an old
