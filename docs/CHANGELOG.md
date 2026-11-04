@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+3.0.0 - Trust-based moderation (slice 1 of "the market", #104).
+  - Added:
+    - **Trusted sellers publish at once.** A seller with an approved or sold bot post and no moderator take-down in the last 90 days is trusted: their new post goes straight to the sales group, and the moderation group gets a "Published (trusted seller)" card to review afterwards. Everyone else still goes through moderation. Captured group listings never grant trust.
+    - **Take down.** Every published card (trusted or moderator-approved) carries a Take down button (`td_<listingId>`). It is atomic (one press wins), removes the group message, marks the post and listing `taken_down`, and tells the author. A taken-down post can't be bumped or marked sold, and a take-down revokes trust for 90 days. The effects are independent and best-effort, so one failure doesn't block the rest.
+    - **Reject presets.** Rejecting shows four preset reasons as buttons (`rr_<postId>_<n>`), beside the existing reply-with-your-own and Skip. The reject message to the author has a "Fix and resend" button and, when `rulesUrl` is set, a "Group rules" button.
+    - **Blocked-word check at the preview.** A blocked word in the title, description, price or location stops the post before the preview, for everyone including trusted sellers: the bot names the word and asks for that field again, then returns to the preview.
+    - `/config rulesUrl` is now used (it was reserved in 2.1.0).
+    - Seller-post `/test` cases (trusted and new sellers, synthetic preset reject) and `src/tests/syntheticModeration.ts` (manual, test bot and group only). The `/test` cases refuse to run outside the test bot.
+  - Changed:
+    - The author is told about a rejection exactly once, whichever way the reason arrives (preset, reply, Skip, or a double press): the notice goes through a new atomic claim (`claimRejectionNotice`). The reject itself keeps its atomic claim.
+    - The rule "every post passes moderation before the sales group" now reads: new sellers pass moderation; trusted sellers publish at once and are reviewed after (`Agents.md`).
+    - `pnpm test` gained coverage of these flows in `check-flows`, `check-callbacks` (the `rr_` and `td_` formats are pinned and frozen), `check-claim`, `check-market` and `check-platform`. `check-locals` also fails if a `he` string contains a blocked word.
+  - Notes:
+    - Data: additive only. `posts` gains the optional `rejectionNotifiedAt` and `drafts` the optional `fixing`; no existing field changes.
+    - **Rollback caveat:** the 2.0.1 image runs against the same database, but it doesn't know about take-down, so it can Bump a post that a moderator took down (and show it in `/myposts`). If you roll back after take-downs, treat that as known.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
+    - Deploys need the owner's go-ahead.
+    - After deploy the owner sets `/config rulesUrl https://t.me/airsoft_yad2/54833/115880` (empty until then, so the rules button is hidden).
+
 2.1.0 - Dependency update, and the market core in shadow mode (slice 0 of "the market", #104).
   - **Market core, shadow mode only: nothing is sent to the group or to any member.** `captureMode: "shadow"` records messages in the sale topic (`approvedTopicId`) into per-sender windows (90 s; closed after 30 s of quiet), classifies each as `strict`, `ask`, `wtb` or `none` with a pure Hebrew-aware classifier, and logs what automatic capture would have done. `buyerMatches: "shadow"` also logs up to 5 live listings a "wanted" message would match. Both keys accept only `off` or `shadow` in this slice. New keys `nudges` and `rulesUrl` are accepted by `/config` but unused until a later slice.
   - New `/label` (admin, private chat) shows a random would-list row with its link, tier and parsed price (as a number; no member text is stored), to mark it sale / not sale / skip. New `/stats` (moderator, private chat) shows the numbers behind the go/no-go on automatic capture: rows per tier, would-list and merge counts, label precision.
