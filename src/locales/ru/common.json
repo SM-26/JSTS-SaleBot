@@ -167,6 +167,8 @@
     "captureNeverButton": "Больше не спрашивать",
     "captureNeverNote": "Хорошо, больше не спрошу. Чтобы изменить это, откройте /myposts в боте.",
     "captureOpenBotButton": "Открыть бота",
+    "captureAddedToast": "Добавлено на рынок",
+    "captureAlreadyAdded": "Уже добавлено",
     "listingCard": "✓ На рынке: {title} · {price}",
     "listingRefreshedCard": "✓ Обновлено: {title} · {price}",
     "listingSoldNote": "🤝 Продано: {title}",

@@ -1,4 +1,5 @@
 import type { Api } from "node-telegram-bot-api";
+import type { CallbackQuery } from "node-telegram-bot-api/types";
 import type { IListing } from "../models/Listing";
 import type { ICapture } from "../models/Capture";
 import captureRepository from "../repositories/captureRepository";
@@ -8,9 +9,9 @@ import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { textHash, type Parsed } from "./classifier";
-import { deleteNote, sendNote } from "./ephemeralNotes";
+import { deleteNote, editNote, sendNote } from "./ephemeralNotes";
 import type { GroupListingService } from "./groupListingService";
-import { buildAskNote, buildManagementCard, type Translate } from "./listingCards";
+import { buildAskNote, buildManagementCard, buildNeverNote, parseCaptureArg, type Translate } from "./listingCards";
 import { localeService } from "./localeService";
 import type { ClassifiedEvent } from "./shadowService";
 
@@ -112,6 +113,59 @@ export class CaptureNoteService {
         } catch (err) {
             console.error("[ERROR - CaptureNoteService.sendRefreshNote]", (err as Error).message);
             return false;
+        }
+    }
+
+    // mk_<captureId>_<a|n|x>: Add, Not now, Don't ask again. One answer per press; the note id
+    // and chat always come from the capture, never from query.message.
+    async handleCallback(query: CallbackQuery, arg: string, now = new Date()): Promise<void> {
+        let locale = this.config.lang;
+        let answered = false;
+        const answer = async (key?: string): Promise<void> => {
+            if (answered) return;
+            answered = true;
+            try {
+                await this.api.answerCallbackQuery({ callback_query_id: query.id, ...(key ? { text: localeService.t(locale, key) } : {}) });
+            } catch (err) {
+                console.error("[ERROR - CaptureNoteService.handleCallback]", "answerCallbackQuery failed:", (err as Error).message);
+            }
+        };
+
+        try {
+            const from = String(query.from.id);
+            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            const parsed = parseCaptureArg(arg);
+            if (!parsed) return await answer("staleButton");
+            const capture = await captureRepository.findById(parsed.captureId); // null: the capture row expired
+            if (!capture) return await answer("staleButton");
+            if (from !== capture.senderId) return await answer("notYourButton");
+
+            if (parsed.action === "a") {
+                const { title, price, location } = capture.parsed ?? {};
+                if (!title || !price) return await answer("staleButton"); // only a forged button gets here
+                const result = await this.groupListings.addToMarket(parsed.captureId, { title, price, location }, now);
+                if (result.kind === "gone") return await answer("staleButton");
+                if (result.listing) await this.groupListings.syncNote(result.listing); // the note becomes the management card
+                return await answer(result.kind === "added" ? "captureAddedToast" : "captureAlreadyAdded");
+            }
+
+            // Only an unanswered note can be declined: a stale press never overwrites a management card.
+            if (!(await captureRepository.transition(parsed.captureId, ["asked"], "declined"))) return await answer("staleButton");
+            const hash = textHash(capture.text);
+            // R1: the text was remembered when the note went out; this only covers a memory that lapsed since.
+            if (!(await memberRepository.wasAskedRecently(from, hash, now))) await memberRepository.rememberAsked(from, hash, now);
+            const noteId = capture.note?.ephemeralMessageId;
+            if (parsed.action === "n") {
+                if (noteId !== undefined) await deleteNote(this.api, capture.chatId, Number(from), noteId);
+            } else {
+                await memberRepository.setAskMode(from, "never", now);
+                const t: Translate = (key, params) => localeService.t(locale, key, params);
+                if (noteId !== undefined) await editNote(this.api, capture.chatId, Number(from), noteId, buildNeverNote(t, this.botUsername()));
+            }
+            await answer();
+        } catch (err) {
+            console.error("[ERROR - CaptureNoteService.handleCallback]", (err as Error).message);
+            await answer("staleButton");
         }
     }
 }

@@ -167,6 +167,8 @@
     "captureNeverButton": "לא לשאול שוב",
     "captureNeverNote": "בסדר, לא אשאל שוב. כדי לשנות את זה, פתחו את /myposts בבוט.",
     "captureOpenBotButton": "פתיחת הבוט",
+    "captureAddedToast": "נוסף לשוק",
+    "captureAlreadyAdded": "כבר נוסף",
     "listingCard": "✓ בשוק: {title} · {price}",
     "listingRefreshedCard": "✓ רועננה: {title} · {price}",
     "listingSoldNote": "🤝 נמכר: {title}",

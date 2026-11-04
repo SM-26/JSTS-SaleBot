@@ -348,6 +348,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "capture") {
+            await this.captureNotes.handleCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "listing") {
             await this.groupListings.handleListingCallback(query, route.arg);
             return;

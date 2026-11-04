@@ -1994,6 +1994,193 @@ async function run() {
             await ShadowLog.deleteMany({ senderId: { $in: userIds.map(String) } });
         })();
 
+        // Slice 2, Task 6: the note buttons. Labels (x1)..(x11).
+        await Capture.deleteMany({ chatId: APPROVED_GROUP });
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        await (async () => { // its own function: run() is at the compiler's flow-analysis depth limit
+            const { tick } = await import("../services/shadowService");
+            const { textHash } = await import("../services/classifier");
+            const SALE = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const SALE2 = "וסט טקטי למכירה 250₪ צפון";
+            const NOTE_ID = 5200;
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            let msgSeq = 3_000_000 + (Date.now() % 1_000_000);
+            const T6 = (key: string) => localeService.t(cfg.lang, key);
+            const seedAsked = (seller: number, text = SALE) => seedCapture({
+                senderId: String(seller), chatId: APPROVED_GROUP, messageIds: [msgSeq++], text, state: "asked",
+                note: { ephemeralMessageId: NOTE_ID, sentAt: new Date(), kind: "ask" },
+            });
+            const press = (h: H, data: string, userId: number, extra: { noMessage?: boolean } = {}) => h.pressButton(data, { userId, ...GROUP, ...extra });
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const toasts = (h: H) => callsTo(h, "answerCallbackQuery").map((c) => c.params.text);
+            const edits = (h: H) => callsTo(h, "editEphemeralMessageText");
+            const rows = (c: RecordedCall) => (c.params.reply_markup as { inline_keyboard: { callback_data?: string; url?: string }[][] }).inline_keyboard;
+
+            // (x1) Add creates a listing and turns the note into the management card
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_a`, a);
+                await settle();
+                const listings = await Listing.find({ sellerId: String(a) });
+                assert.deepStrictEqual([listings.length, listings[0].source], [1, "group"]);
+                const id = String(listings[0]._id);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "added");
+                const e = edits(h);
+                assert.strictEqual(e.length, 1);
+                assert.deepStrictEqual(
+                    [Number(e[0].params.chat_id), Number(e[0].params.receiver_user_id), Number(e[0].params.ephemeral_message_id)],
+                    [APPROVED_GROUP, a, NOTE_ID]);
+                assert.ok(String(e[0].params.text).includes("גלוק 17 למכירה"));
+                const r = rows(e[0]);
+                assert.deepStrictEqual(r[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.strictEqual(r[1][0].url, `https://t.me/${BOT_USERNAME}?start=l_${id}`);
+                assert.deepStrictEqual(toasts(h), [T6("captureAddedToast")]);
+                assert.strictEqual(listings[0].note?.ephemeralMessageId, NOTE_ID);
+
+                // (x2) nothing public
+                const toGroup = h.calls.filter((c) => ["sendMessage", "sendRichMessage"].includes(c.method) && Number(c.params.chat_id) === APPROVED_GROUP);
+                assert.strictEqual(toGroup.filter((c) => !c.params.ephemeral_message_parameters).length, 0);
+                console.log("  [OK] (x1) Add creates a listing and edits the note.");
+                console.log("  [OK] (x2) Add posts nothing public.");
+
+                // (x11) after Add, Not now and Don't ask again are stale
+                h.calls.length = 0;
+                await press(h, `mk_${cap._id}_n`, a);
+                await press(h, `mk_${cap._id}_x`, a);
+                await settle();
+                assert.deepStrictEqual(toasts(h), [T6("staleButton"), T6("staleButton")]);
+                assert.strictEqual(edits(h).length + callsTo(h, "deleteEphemeralMessage").length, 0);
+                assert.notStrictEqual((await Member.findOne({ userId: String(a) }))?.askMode, "never");
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "added");
+                console.log("  [OK] (x11) Not now and Don't ask again after Add are stale.");
+            }
+
+            // (x3) a double Add is one listing
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_a`, a);
+                await press(h, `mk_${cap._id}_a`, a);
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 1);
+                assert.deepStrictEqual(toasts(h), [T6("captureAddedToast"), T6("captureAlreadyAdded")]);
+                console.log("  [OK] (x3) a double Add is one listing.");
+            }
+
+            // (x4) Not now
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                const { default: members } = await import("../repositories/memberRepository");
+                await members.rememberAsked(String(a), textHash(SALE), new Date()); // what the send path did
+                await press(h, `mk_${cap._id}_n`, a);
+                await settle();
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "declined");
+                const del = callsTo(h, "deleteEphemeralMessage");
+                assert.deepStrictEqual(
+                    [del.length, Number(del[0].params.chat_id), Number(del[0].params.receiver_user_id), Number(del[0].params.ephemeral_message_id)],
+                    [1, APPROVED_GROUP, a, NOTE_ID]);
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 0);
+                const m = (await Member.findOne({ userId: String(a) }))!;
+                assert.deepStrictEqual((m.declined ?? []).map((d) => d.hash), [textHash(SALE)]); // once, even though the send path also remembers it
+                assert.notStrictEqual(m.askMode, "never");
+                console.log("  [OK] (x4) Not now declines, deletes the note, remembers the text once.");
+            }
+
+            // (x5) Don't ask again
+            {
+                const { h, ctrl } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_x`, a);
+                await settle();
+                assert.strictEqual((await Member.findOne({ userId: String(a) }))!.askMode, "never");
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "declined");
+                const e = edits(h);
+                assert.strictEqual(e.length, 1);
+                assert.strictEqual(String(e[0].params.text), T6("captureNeverNote"));
+                assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}`]);
+                h.calls.length = 0;
+                await h.sendPhoto("f1", { ...GROUP, userId: a, caption: SALE2 });
+                await settle();
+                await tick(cfg, new Date(Date.now() + 31_000), (ev, n) => ctrl.captureNotes.onClassified(ev, n));
+                await settle();
+                assert.strictEqual(h.calls.filter((c) => c.method === "sendMessage" && c.params.ephemeral_message_parameters).length, 0);
+                console.log("  [OK] (x5) Don't ask again edits the note and silences the next post.");
+            }
+
+            // (x6) a foreign user's press is refused
+            {
+                const { h } = boot();
+                const a = user();
+                const b = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_a`, b);
+                await settle();
+                assert.deepStrictEqual(toasts(h), [T6("notYourButton")]);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "asked");
+                assert.strictEqual(await Listing.countDocuments({ sellerId: { $in: [String(a), String(b)] } }), 0);
+                assert.strictEqual(edits(h).length, 0);
+                console.log("  [OK] (x6) a foreign user's press is refused.");
+            }
+
+            // (x7) a press after the capture row expired
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                await Capture.deleteOne({ _id: cap._id });
+                await press(h, `mk_${cap._id}_a`, a);
+                await settle();
+                assert.deepStrictEqual(toasts(h), [T6("staleButton")]);
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 0);
+                console.log("  [OK] (x7) a press after the capture TTL is stale.");
+            }
+
+            // (x8) a press without query.message still works
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_a`, a, { noMessage: true });
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 1);
+                assert.strictEqual(Number(edits(h)[0].params.ephemeral_message_id), NOTE_ID);
+                console.log("  [OK] (x8) Add works without query.message.");
+            }
+
+            // (x9) the note edit failing changes nothing
+            {
+                const { h } = boot({ responses: { editEphemeralMessageText: { ok: false, error_code: 400, description: "Bad Request: message to edit not found" } } });
+                const a = user();
+                const cap = await seedAsked(a);
+                await press(h, `mk_${cap._id}_a`, a);
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 1);
+                assert.deepStrictEqual(toasts(h), [T6("captureAddedToast")]);
+                console.log("  [OK] (x9) Add survives a failing note edit.");
+            }
+
+            // (x10) a forged Add on an incomplete capture
+            {
+                const { h } = boot();
+                const a = user();
+                const cap = await seedAsked(a, "1300 מרכז");
+                assert.ok(!cap.parsed?.title);
+                await press(h, `mk_${cap._id}_a`, a);
+                await settle();
+                assert.deepStrictEqual(toasts(h), [T6("staleButton")]);
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(a) }), 0);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "asked");
+                console.log("  [OK] (x10) a forged Add on an incomplete capture is stale.");
+            }
+        })();
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);

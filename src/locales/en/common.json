@@ -167,6 +167,8 @@
     "captureNeverButton": "Don't ask again",
     "captureNeverNote": "OK, I won't ask again. To change this, open /myposts in the bot.",
     "captureOpenBotButton": "Open the bot",
+    "captureAddedToast": "Added to the market",
+    "captureAlreadyAdded": "Already added",
     "listingCard": "✓ In the market: {title} · {price}",
     "listingRefreshedCard": "✓ Refreshed: {title} · {price}",
     "listingSoldNote": "🤝 Sold: {title}",
