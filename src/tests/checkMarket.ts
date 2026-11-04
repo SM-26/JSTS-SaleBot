@@ -10,7 +10,10 @@ import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
-import type { Post } from "../types";
+import { rankMatches } from "../services/matchService";
+import { tick } from "../services/shadowService";
+import { startSweeper } from "../services/sweeper";
+import type { BotConfig, Post } from "../types";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
 // are atomic updates and index behaviour (TTL, partial unique), which a mock
@@ -21,7 +24,53 @@ const RUN = `mkt-${Date.now()}`;
 const CHAT = -1000000000 - (Date.now() % 1000000);
 const SEC = 1000;
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// Pure checks (no Mongo): the scheduler and the WTB ranking.
+async function checkPure() {
+    // a failing job does not stop the scheduler; stop() halts it
+    let ran = 0;
+    let threw = false;
+    const realError = console.error;
+    console.error = () => {};
+    try {
+        const s = startSweeper([{ name: "flaky", everyMs: 50, run: async () => { if (!threw) { threw = true; throw new Error("boom"); } ran++; } }]);
+        await sleep(125);
+        s.stop();
+        const seen = ran;
+        assert.ok(seen >= 1, "the job ran again after throwing once");
+        await sleep(150);
+        assert.strictEqual(ran, seen, "stop() halts the job");
+    } finally {
+        console.error = realError;
+    }
+    let active = 0;
+    let maxActive = 0;
+    const slow = startSweeper([{ name: "slow", everyMs: 20, run: async () => { active++; maxActive = Math.max(maxActive, active); await sleep(90); active--; } }]);
+    await sleep(200);
+    slow.stop();
+    await sleep(100);
+    assert.strictEqual(maxActive, 1, "a job never overlaps itself");
+    console.log("[OK] sweeper survives a throwing job, stops, never overlaps.");
+
+    const L = (id: string, text: string, priceValue: number | undefined, ageSec: number) =>
+        ({ _id: id, title: undefined, text, priceValue, refreshedAt: new Date(1_000_000_000_000 - ageSec * SEC) }) as unknown as Parameters<typeof rankMatches>[1][number]; // string ids: only String(_id) is read
+    const glock = L("glock", "גלוק 17 במצב טוב", 700, 0);
+    assert.deepStrictEqual(rankMatches("מחפש glock", [glock, L("other", "תיק גב", 50, 0)]), ["glock"], "alias matches across scripts; no strong token, no match");
+    assert.deepStrictEqual(rankMatches("מחפש glock 17 עד 800", [glock, L("dear", "glock 17 מצוין", 900, 0), L("noprice", "glock 17", undefined, 0)]), ["glock"], "ceiling filters on priceValue");
+    assert.deepStrictEqual(rankMatches("מחפש glock 17 עד 1,000", [L("dear", "glock 17 מצוין", 900, 0)]), ["dear"], "ceiling with a thousands comma");
+    const many = Array.from({ length: 8 }, (_, i) => L(`m${i}`, "glock 17", 100, i));
+    assert.strictEqual(rankMatches("מחפש glock", many).length, 5, "at most 5");
+    assert.strictEqual(rankMatches("מחפש glock", many, 2).length, 2, "max is a parameter");
+    assert.deepStrictEqual(rankMatches("מחפש את זה", many), [], "stop words only: nothing");
+    assert.deepStrictEqual(rankMatches("מחפש תיק", [L("bag", "תיק גב", 50, 0)]), [], "no strong token: nothing");
+    assert.deepStrictEqual(rankMatches("מחפש glock 17", [L("old", "glock 17", 1, 100), L("fresh", "glock 17", 1, 0), L("older", "glock 17", 1, 200)]), ["fresh", "old", "older"], "equal overlap: newest refresh first");
+    assert.deepStrictEqual(rankMatches("מחפש glock 17 מצוין", [L("partial", "glock 17 תיק נרתיק", 1, 0), L("full", "glock 17 מצוין", 1, 500)]), ["full", "partial"], "higher overlap first, even if older");
+    console.log("[OK] rankMatches.");
+}
+
 async function run() {
+    await checkPure();
     if (!MONGO_URI) {
         console.log("[SKIP] checkMarket: set MONGO_URI to run this test.");
         return;
@@ -229,6 +278,76 @@ async function run() {
         assert.strictEqual(typeof stats.byTier.none, "number");
         assert.strictEqual((await shadowLogRepository.lastRows(1)).length, 1);
         console.log("[OK] shadow log.");
+
+        // shadow classification of closed windows (clean slate: tick drains every closed capture)
+        await Promise.all([Capture.deleteMany({}), Listing.deleteMany({}), ShadowLog.deleteMany({ chatId: CHAT })]);
+        const cfg = { captureMode: "shadow", buyerMatches: "shadow" } as BotConfig;
+        const sender = (n: string) => `${RUN}-sh-${n}`;
+        let mid = 1000;
+        const say = (n: string, text: string, media = true) => captureRepository.appendMessage(
+            { chatId: CHAT, senderId: sender(n), senderName: n, messageId: mid++, text, media: media ? [{ fileId: "f", type: "photo" }] : [] }, at(0));
+        const rowOf = (n: string) => ShadowLog.collection.findOne({ chatId: CHAT, senderId: sender(n) });
+        const mkPost = (n: string, title: string, description: string, price: string) =>
+            ({ _id: `${RUN}-sp-${n}`, userId: sender(n.split("-")[0]), title, description, price, location: "TLV", media: [], createdAt: t0, status: "approved" } as Post);
+        const SALE = ["Glock 17 למכירה", 'במצב מצוין 900 ש"ח'];
+        const saleText = SALE.join("\n");
+
+        // window closes after restart: nothing but Mongo state is used
+        await say("restart", saleText);
+        await tick(cfg, at(20));
+        assert.strictEqual(await ShadowLog.countDocuments({ chatId: CHAT }), 0, "window still open at +20 s");
+        await tick(cfg, at(31));
+        assert.strictEqual(await ShadowLog.countDocuments({ chatId: CHAT }), 1, "one shadow_log row after the window closed");
+        assert.strictEqual((await Capture.findOne({ senderId: sender("restart") }))!.state, "classified");
+        await tick(cfg, at(32));
+        assert.strictEqual(await ShadowLog.countDocuments({ chatId: CHAT }), 1, "a classified capture is not logged twice");
+        console.log("[OK] window closes after restart.");
+
+        // strict row, and no member text in it
+        const strict = await rowOf("restart");
+        assert.ok(strict && strict.tier === "strict" && strict.wouldList === true, "strict with media would list");
+        assert.strictEqual(strict.parsedPrice, '900 ש"ח');
+        const allowed = new Set(["_id", "__v", "chatId", "messageIds", "senderId", "at", "tier", "rules", "wouldList", "mergeWith", "matches", "parsedTitle", "parsedPrice"]);
+        for (const k of Object.keys(strict)) assert.ok(allowed.has(k), `shadow_log field "${k}" is not an allowed field`);
+        assert.ok(!("text" in strict), "no member text in shadow_log");
+        console.log("[OK] strict row, no member text.");
+
+        // repost merges (same text, and near-duplicate text); a >30-day-old or removed listing does not
+        const mine = await listingRepository.createForPost(mkPost("rp-1", SALE[0], SALE[1], "900"), "dm", false, at(0));
+        await say("rp", saleText);
+        const nearText = "Leupold scope 4x32 mount included brand new";
+        await listingRepository.createForPost(mkPost("ov-1", nearText, "", "300"), "dm", false, at(0));
+        await say("ov", `${nearText} boxed 300 ש"ח למכירה`);
+        for (const [name, patch] of [["old", { refreshedAt: new Date(t0.getTime() - 31 * 24 * 3600 * SEC) }], ["gone", { status: "removed" }]] as const) {
+            const l = await listingRepository.createForPost(mkPost(`${name}-1`, SALE[0], SALE[1], "900"), "dm", false, at(0));
+            await Listing.updateOne({ _id: l._id }, { $set: patch });
+            await say(name, saleText);
+        }
+        await tick(cfg, at(31));
+        const merged = await rowOf("rp");
+        assert.strictEqual(merged?.mergeWith, String(mine._id), "same text merges with the seller's listing");
+        assert.strictEqual(merged?.wouldList, false);
+        assert.ok((await rowOf("ov"))?.mergeWith, "near-duplicate text (overlap >= 0.8) merges");
+        for (const name of ["old", "gone"]) {
+            const r = await rowOf(name);
+            assert.ok(r && r.mergeWith === undefined && r.wouldList === true, `a ${name} listing is not a repost`);
+        }
+        console.log("[OK] repost merges.");
+
+        // wtb logs matches, never a held listing; only with buyerMatches=shadow
+        const gl = await listingRepository.createForPost(mkPost("gl-1", "גלוק 17", "במצב טוב", "800"), "dm", false, at(0));
+        const held = await listingRepository.createForPost(mkPost("gh-1", "גלוק 17 ישן", "מושבת", "800"), "legacy", true, at(0));
+        await say("wtb", "מחפש glock 17", false);
+        await tick(cfg, at(31));
+        const wtb = await rowOf("wtb");
+        assert.strictEqual(wtb?.tier, "wtb");
+        assert.strictEqual(wtb?.wouldList, false);
+        assert.ok(wtb?.matches?.includes(String(gl._id)), "the live listing matches");
+        assert.ok(!wtb?.matches?.includes(String(held._id)), "a held listing is never matched");
+        await say("wtboff", "מחפש glock 17", false);
+        await tick({ ...cfg, buyerMatches: "off" }, at(62));
+        assert.strictEqual((await rowOf("wtboff"))?.matches, undefined, "no matches unless buyerMatches is shadow");
+        console.log("[OK] wtb logs matches.");
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
