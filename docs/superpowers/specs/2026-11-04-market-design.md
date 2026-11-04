@@ -249,6 +249,19 @@ the meaning: `נשק` blocks anything that contains it, so it catches "לנשק"
   `taken_down`, so trust is untouched).
 - Buyer notes and alerts show only listing text that already passed one of these checks.
 
+### 5.6 New commands and who can use them (owner)
+
+| command | access | section |
+|---|---|---|
+| `/stats` | MOD and up | 12 |
+| `/label` | ADMIN | 6.4 |
+| `/stalecheck` | ADMIN | 11.4 |
+| `/catchup import`, `/catchup send` | ADMIN | 11.5 |
+| `/alerts` | all users (a buyer's own saved searches) | 7.3 |
+
+Guarded with the existing `requireAuthLevel`. Each one goes into `/help` for its level, the Commands table in
+AGENTS.md and `docs/README.md`.
+
 ## 6. Capture in the group
 
 ### 6.1 What is read
@@ -601,7 +614,7 @@ A seller who taps nothing gets nothing more. `catchup.json` and the export copy 
 
 ## 12. Metrics
 
-`/stats` (admin, DM) shows these over the last 7 and 30 days. The baseline row comes from #104.
+`/stats` (MOD and up, DM) shows these over the last 7 and 30 days. The baseline row comes from #104.
 
 | metric | baseline (#104) | 3.0 target (8 weeks after `optin`) | source |
 |---|---|---|---|
