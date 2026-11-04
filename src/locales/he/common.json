@@ -158,5 +158,22 @@
     "takeDownNotice": "מנהל הסיר את הפוסט \"{title}\" שלך.",
     "statusTakenDown": "🚫 הוסר",
     "postTakenDown": "מנהל הסיר את הפוסט הזה. אי אפשר להקפיץ אותו או לסמן אותו כנמכר.",
-    "trustedPublishedLabel": "פורסם (מוכר מהימן)"
+    "trustedPublishedLabel": "פורסם (מוכר מהימן)",
+    "captureNoteComplete": "להוסיף לשוק? {title} · {details}",
+    "captureNoteIncomplete": "להוסיף את זה לשוק? חסרים כמה פרטים, אפשר להשלים בבוט.",
+    "captureAddButton": "➕ הוספה",
+    "captureCompleteButton": "➕ להשלים בבוט",
+    "captureNotNowButton": "לא עכשיו",
+    "captureNeverButton": "לא לשאול שוב",
+    "captureNeverNote": "בסדר, לא אשאל שוב. כדי לשנות את זה, פתחו את /myposts בבוט.",
+    "captureOpenBotButton": "פתיחת הבוט",
+    "listingCard": "✓ בשוק: {title} · {price}",
+    "listingRefreshedCard": "✓ רועננה: {title} · {price}",
+    "listingSoldNote": "🤝 נמכר: {title}",
+    "listingRemovedNote": "הוסרה מהשוק.",
+    "listingEnded": "המודעה הזו הסתיימה.",
+    "listingSoldButton": "🤝 נמכר",
+    "listingRefreshButton": "🔄 רענון",
+    "listingRemoveButton": "🗑 הסרה",
+    "listingManageButton": "⚙️ ניהול בבוט"
 }

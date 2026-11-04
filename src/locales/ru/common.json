@@ -158,5 +158,22 @@
     "takeDownNotice": "Модератор снял ваш пост «{title}».",
     "statusTakenDown": "🚫 Снято",
     "postTakenDown": "Модератор снял этот пост. Его нельзя поднять или отметить проданным.",
-    "trustedPublishedLabel": "Опубликовано (проверенный продавец)"
+    "trustedPublishedLabel": "Опубликовано (проверенный продавец)",
+    "captureNoteComplete": "Добавить на рынок? {title} · {details}",
+    "captureNoteIncomplete": "Добавить это на рынок? Не хватает некоторых данных, дополните в боте.",
+    "captureAddButton": "➕ Добавить",
+    "captureCompleteButton": "➕ Дополнить в боте",
+    "captureNotNowButton": "Не сейчас",
+    "captureNeverButton": "Больше не спрашивать",
+    "captureNeverNote": "Хорошо, больше не спрошу. Чтобы изменить это, откройте /myposts в боте.",
+    "captureOpenBotButton": "Открыть бота",
+    "listingCard": "✓ На рынке: {title} · {price}",
+    "listingRefreshedCard": "✓ Обновлено: {title} · {price}",
+    "listingSoldNote": "🤝 Продано: {title}",
+    "listingRemovedNote": "Снято с рынка.",
+    "listingEnded": "Это объявление завершено.",
+    "listingSoldButton": "🤝 Продано",
+    "listingRefreshButton": "🔄 Обновить",
+    "listingRemoveButton": "🗑 Удалить",
+    "listingManageButton": "⚙️ Управлять в боте"
 }

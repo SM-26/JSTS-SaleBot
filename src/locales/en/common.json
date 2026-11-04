@@ -158,5 +158,22 @@
     "takeDownNotice": "A moderator took down your post \"{title}\".",
     "statusTakenDown": "🚫 Taken down",
     "postTakenDown": "A moderator took this post down. It can't be bumped or marked sold.",
-    "trustedPublishedLabel": "Published (trusted seller)"
+    "trustedPublishedLabel": "Published (trusted seller)",
+    "captureNoteComplete": "Add to the market? {title} · {details}",
+    "captureNoteIncomplete": "Add this to the market? Some details are missing, finish it in the bot.",
+    "captureAddButton": "➕ Add",
+    "captureCompleteButton": "➕ Finish in bot",
+    "captureNotNowButton": "Not now",
+    "captureNeverButton": "Don't ask again",
+    "captureNeverNote": "OK, I won't ask again. To change this, open /myposts in the bot.",
+    "captureOpenBotButton": "Open the bot",
+    "listingCard": "✓ In the market: {title} · {price}",
+    "listingRefreshedCard": "✓ Refreshed: {title} · {price}",
+    "listingSoldNote": "🤝 Sold: {title}",
+    "listingRemovedNote": "Removed from the market.",
+    "listingEnded": "This listing has ended.",
+    "listingSoldButton": "🤝 Sold",
+    "listingRefreshButton": "🔄 Refresh",
+    "listingRemoveButton": "🗑 Remove",
+    "listingManageButton": "⚙️ Manage in bot"
 }
