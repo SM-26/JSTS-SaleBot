@@ -25,6 +25,7 @@ const FINALS: Record<string, string> = { ך: "כ", ם: "מ", ן: "נ", ף: "פ",
 export function normalize(text: string): string {
     return text
         .toLowerCase()
+        .replace(/־/g, " ") // maqaf joins words; the niqqud range below would swallow it
         .replace(/[֑-ׇ]/g, "")
         .replace(/(?<!\p{L})ש["״'׳]?ח(?!\p{L})/gu, "שח")
         .replace(/[^\p{L}\p{N}]+/gu, " ")
@@ -57,7 +58,7 @@ const dropPhrases = [...data.wtbOpeners, ...data.saleWords, ...data.stopWords].m
 const aliasRules = data.aliases.flatMap(([head, ...rest]) => rest.map(alias => ({ re: phraseRe(normalize(alias), "gu"), head: normalize(head) })));
 
 export function tokens(text: string): string[] {
-    let s = normalize(text);
+    let s = normalize(text.replace(/(?<=\d),(?=\d{3}(?!\d))/g, ""));
     for (const { re, head } of aliasRules) s = s.replace(re, head);
     for (const re of dropPhrases) s = s.replace(re, " ");
     return s.split(/\s+/).filter(Boolean);
@@ -84,19 +85,31 @@ function findPrices(text: string, res: RegExp[], rule: (i: number) => string): P
             if (digits) out.push({ str: m[0], value: Number(digits[0].replace(/,/g, "")), index: m.index ?? 0, rule: rule(i) });
         }
     });
-    return out.sort((x, y) => x.index - y.index);
+    out.sort((x, y) => x.index - y.index);
+    // overlapping matches ("מחיר 900" + "900₪") are one price: keep the union span
+    const merged: PriceMatch[] = [];
+    for (const m of out) {
+        const last = merged[merged.length - 1];
+        if (last && m.index < last.index + last.str.length) {
+            const end = Math.max(last.index + last.str.length, m.index + m.str.length);
+            last.str = text.slice(last.index, end);
+        } else merged.push({ ...m });
+    }
+    return merged;
 }
 
+const phoneRe = /(?<![\d,.])(?:0\d{1,2}-?\d{7}|\d{9,10})(?!\d)/gu;
+
 function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed {
-    const prices = explicit.length ? explicit : bare;
-    const price = prices[0];
+    // ponytail: bare numbers are noisy ("glock 17 ... 900"), so the largest wins
+    const price = explicit.length ? explicit[0] : bare.reduce<PriceMatch | undefined>((best, m) => (!best || m.value > best.value ? m : best), undefined);
     const [first = "", ...rest] = text.split("\n");
 
     const norm = normalize(text);
     const found = cities.map(c => ({ city: c.city, at: norm.search(c.re) })).filter(c => c.at >= 0).sort((x, y) => x.at - y.at)[0];
     const location = found?.city;
 
-    let title = price ? first.replace(price.str, " ") : first;
+    let title = price && price.index < first.length ? first.slice(0, price.index) + " " + first.slice(price.index + price.str.length) : first;
     title = title.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
     if (!title || (location && normalize(title) === normalize(location))) title = "";
 
@@ -107,17 +120,19 @@ function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed
         priceValue: price?.value,
         location,
         description: description || undefined,
-        isBundle: new Set(prices.map(p => p.value)).size >= 2,
+        isBundle: new Set(explicit.map(p => p.value)).size >= 2,
     };
 }
 
 export function classify(text: string, hasMedia: boolean): ClassifyResult {
     const explicit = findPrices(text, explicitRes, i => (i === 3 ? "price-b-prefix" : "price-currency"));
-    const bare = explicit.length ? [] : findPrices(text, [bareRe], () => "price-bare");
+    const phones = [...text.matchAll(phoneRe)].map(m => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
+    const bare = explicit.length ? [] : findPrices(text, [bareRe], () => "price-bare").filter(b => !phones.some(([from, to]) => b.index >= from && b.index < to));
     const parsed = parse(text, explicit, bare);
 
     const norm = normalize(text);
-    const firstLine = normalize(text.split("\n")[0]);
+    // an opener counts only in the first 3 words of the first non-empty line (emoji and punctuation drop out in normalize)
+    const firstLine = normalize(text.split("\n").find(l => normalize(l)) ?? "").split(" ").slice(0, 3).join(" ");
     const sale = saleWords.some(re => re.test(norm));
     const wtb = wtbOpeners.some(re => re.test(firstLine));
 

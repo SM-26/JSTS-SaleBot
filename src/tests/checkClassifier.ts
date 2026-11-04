@@ -18,6 +18,14 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["chatter", "מישהו יודע מתי המשחק?", false, "none"],
     ["blocked", "מוכר נשק 500₪", true, "none"],
     ["blocked false positive", "מתנה לנשק 500₪ למכירה", true, "none"],
+    ["price span mechir", "M4 למכירה מחיר 900₪", true, "strict", { title: "M4 למכירה", priceValue: 900, isBundle: false, price: "מחיר 900₪" }],
+    ["price span b-prefix", "M4 למכירה ב-250 ₪", true, "strict", { title: "M4 למכירה", priceValue: 250, price: "ב-250 ₪" }],
+    ["wtb word later in a sale line", "למכירה M4 לא צריך תיקונים 900₪", true, "strict"],
+    ["wtb after greeting", "שלום, מחפש M4", false, "wtb"],
+    ["wtb after blank line", "\nמחפש M4", false, "wtb"],
+    ["wtb after emoji", "🔥 מחפש גלוק", false, "wtb"],
+    ["bare largest wins", "גלוק 17 למכירה 900", true, "ask", { priceValue: 900, isBundle: false }],
+    ["dashed phone is no price", "למכירה וסט 050-1234567", true, "none", { priceValue: undefined }],
     ["phone number is not a price", "למכירה 0501234567", true, "none"],
 ];
 
@@ -50,6 +58,8 @@ check("long caption", () => {
 });
 check("normalize ש״ח", () => assert.strictEqual(normalize("ש״ח"), normalize('ש"ח')));
 check("normalize finals and niqqud", () => assert.strictEqual(normalize("שָׁלוֹם  ך"), normalize("שלום כ")));
+check("normalize maqaf", () => assert.strictEqual(normalize("בן־אדם"), "בנ אדמ"));
+check("tokens thousands comma", () => assert.deepStrictEqual(tokens("גלוק 1,300"), tokens("גלוק 1300")));
 check("textHash ignores whitespace", () => assert.strictEqual(textHash("גלוק 17"), textHash("גלוק 17  ")));
 check("alias overlap", () => assert.ok(tokenOverlap(tokens("גלוק 17 למכירה"), tokens("glock 17")) >= 0.8));
 check("overlap empty", () => assert.strictEqual(tokenOverlap([], ["x"]), 0));
