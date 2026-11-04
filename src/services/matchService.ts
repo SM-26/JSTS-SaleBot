@@ -6,7 +6,7 @@ import { normalize, tokenOverlap, tokens } from "./classifier";
 const aliasHeads = new Set(data.aliases.map(([head]) => normalize(head)));
 const isStrong = (t: string) => aliasHeads.has(t) || (t.length >= 2 && /\d/.test(t));
 
-const CEILING_RE = /עד\s*(\d[\d,]*)/u;
+const CEILING_RE = /(?<!\p{L})עד\s*(\d[\d,]*)/u; // a word of its own, not the end of one ("מועד 2025")
 
 type MatchListing = Pick<IListing, "_id" | "text" | "title" | "priceValue" | "refreshedAt">;
 

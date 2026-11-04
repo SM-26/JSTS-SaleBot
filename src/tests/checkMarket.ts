@@ -59,7 +59,9 @@ async function checkPure() {
     assert.deepStrictEqual(rankMatches("מחפש glock", [glock, L("other", "תיק גב", 50, 0)]), ["glock"], "alias matches across scripts; no strong token, no match");
     assert.deepStrictEqual(rankMatches("מחפש glock 17 עד 800", [glock, L("dear", "glock 17 מצוין", 900, 0), L("noprice", "glock 17", undefined, 0)]), ["glock"], "ceiling filters on priceValue");
     assert.deepStrictEqual(rankMatches("מחפש glock 17 עד 1,000", [L("dear", "glock 17 מצוין", 900, 0)]), ["dear"], "ceiling with a thousands comma");
-    const many = Array.from({ length: 8 }, (_, i) => L(`m${i}`, "glock 17", 100, i));
+    assert.deepStrictEqual(rankMatches("מחפש glock 17 מועד 2025", [L("dear", "glock 17 מצוין", 3000, 0)]), ["dear"], "'עד' inside a word is not a ceiling");
+    assert.deepStrictEqual(rankMatches("מחפש glock 17, עד 800", [L("dear", "glock 17 מצוין", 900, 0), glock]), ["glock"], "a ceiling after punctuation still counts");
+    const many =Array.from({ length: 8 }, (_, i) => L(`m${i}`, "glock 17", 100, i));
     assert.strictEqual(rankMatches("מחפש glock", many).length, 5, "at most 5");
     assert.strictEqual(rankMatches("מחפש glock", many, 2).length, 2, "max is a parameter");
     assert.deepStrictEqual(rankMatches("מחפש את זה", many), [], "stop words only: nothing");
