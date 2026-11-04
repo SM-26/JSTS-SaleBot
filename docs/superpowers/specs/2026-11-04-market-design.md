@@ -51,19 +51,20 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - the bot posts anything publicly in the group that a member did not ask for;
 - a wanted-to-buy post is ever listed as a sale;
 - a member is nagged: more than one unanswered note per post, or any note after "Don't ask again";
-- any existing `posts`/`users` document changes shape, or the 2.0.1 image can't run against the 3.0 database;
+- existing `posts`/`users` data is reshaped, or rollback to the 2.0.1 image is lost, without the owner agreeing to
+  that specific case first (see Constraints);
 - any bot text calls airsoft replicas weapons (נשק);
 - the private note is the only place a seller can act from (notes may vanish or never arrive);
 - a test touches the production token or database.
 
 ## 3. Constraints
 
-- TypeScript, `node-telegram-bot-api` 2.2.0 (has the Bot API 10.3 types: `ephemeral_message_parameters`,
-  `editEphemeralMessage*`, `deleteEphemeralMessage`, `Message.ephemeral_message_id`), MongoDB via mongoose.
+- TypeScript, `node-telegram-bot-api` 2.3.0 (upgraded on its own PR before slice 0; has the Bot API 10.3 types:
+  `ephemeral_message_parameters`, `editEphemeralMessage*`, `deleteEphemeralMessage`, `Message.ephemeral_message_id`), MongoDB via mongoose.
   No new dependencies.
-- Additive data only: new collections and new optional fields. The 2.0.1 image must run against a 3.0 database.
-  Any reshape of existing data needs the owner's approval, a restore-verified dump and a rollback path. This design
-  needs none.
+- Additive data by default: new collections and new optional fields, so the 2.0.1 image can still run against a 3.0
+  database. Not absolute (owner): an edge case that is better served by reshaping existing data is brought to the
+  owner as its own question, with the reason, a restore-verified dump and a rollback path. This design needs none.
 - Private notes (ephemeral messages): an admin bot may send one to any non-bot member at any time
   (`ephemeral_message_parameters.receiver_user_id`). Delivery is not guaranteed, especially to offline users, and
   notes "may disappear after some time or on app restart". So every action in a note also exists in the DM and
