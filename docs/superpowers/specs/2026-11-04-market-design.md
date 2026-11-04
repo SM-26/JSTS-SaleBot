@@ -202,7 +202,8 @@ the expiry clock. Posts that become `approved` after 3.0 get normal (non-hold) `
 
 ### 5.4 New config keys
 
-Both go into `BotConfig`, `CONFIG_SCHEMA` and `/config` (AGENTS.md rule), and into `config.json.example`.
+All three go into `BotConfig`, `CONFIG_SCHEMA` and `/config` (AGENTS.md rule), and into `config.json.example`,
+like `validatePrice`.
 
 | key | values | default in example | meaning |
 |---|---|---|---|
@@ -431,7 +432,8 @@ Relist for `expired`. A settings row toggles `askMode`.
 ### 9.1 Bot posts (trust-based, D4)
 
 - **Trusted seller** = has at least one post that was ever approved (`approved` or `sold`) and no listing
-  `taken_down` in the last 90 days. A query, not a stored flag.
+  `taken_down` in the last 90 days. A query, not a stored flag. Only bot posts approved by a moderator count;
+  captured listings never do (owner, Q1b).
 - **New seller** → today's flow: moderation topic card with Approve / Reject.
 - **Trusted seller** → published at once (the existing `handleApproval` path minus the click). The moderation topic
   gets a card "Published (trusted seller)" with [🚫 הסר מהשוק] (take down).
@@ -442,9 +444,9 @@ After 3.0 they still pass through it, but for trusted sellers it is after publis
 ### 9.2 Captured listings
 
 The member's post is already public and policed by the group's own moderators. The bot only decides whether it
-enters the market (buyer notes, alerts). **Open: owner question Q1.** Recommended: live at once, and a new seller's
-first captured listing gets a moderation-topic card with Take down (post-moderation), so moderators see each new
-seller once.
+enters the market (buyer notes, alerts). **Decided (owner, Q1):** live at once, and a new seller's first captured
+listing gets a moderation-topic card with Take down (post-moderation), so moderators see each new seller once. No
+`pending` listing status.
 
 ### 9.3 Reject needs a reason
 
@@ -701,7 +703,7 @@ contain no member names, phone numbers or copied posts.
   offline member likely never arrives.
 - Bump on a captured listing is a market refresh, never a public post.
 - Expired listings are left alone in the group. Sold `bot` posts get today's strikethrough.
-- Trust = an approved post ever, revoked for 90 days by a take-down.
+- Trust = an approved bot post ever, revoked for 90 days by a take-down.
 - The trust line is hidden for brand-new sellers.
 - Removed and taken-down listings lose their text and media.
 - Hybrid is not built until the gate passes.
@@ -715,12 +717,11 @@ contain no member names, phone numbers or copied posts.
 
 ## 16. Open questions for the owner
 
-Q1. Captured listings from **new** sellers: live in the market at once with a moderator take-down card
-(recommended), or held for approval like bot posts? Held means a `pending` listing status and an approve/reject
-flow for `group` listings in slice 2, so it must be settled before slice 0 ships the schema.
-Q1b. Does a captured listing count toward trust for posting through the bot? Recommended: yes, once a captured
-listing has been live 7 days without a take-down. Otherwise most of the 342 group sellers still wait for a moderator
-on their first bot post.
+Answered:
+- Q1. Captured listings from new sellers go live at once, with a moderator take-down card (9.2).
+- Q1b. Captured listings don't count toward trust. Trust comes only from a moderator-approved bot post (9.1).
+
+Open:
 
 Q2. The exact text of the one-time message to the 14 stale sellers (11.4), and "no answer in 7 days → leaves the
 market".
