@@ -7,6 +7,7 @@ import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Capture from "../models/Capture";
 import Member from "../models/Member";
+import ShadowLog from "../models/ShadowLog";
 import { createHarness, BOT_USERNAME } from "./harness";
 import { AuthLevel, BotConfig } from "../types";
 import type { Message } from "node-telegram-bot-api/types";
@@ -71,7 +72,7 @@ async function run() {
         const commands = [
             "/start", "/myposts", "/help", "/lang", "/config", "/activeUsers", "/pending",
             "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
-            "/auth", "/test", "/donate", "/cancel",
+            "/auth", "/test", "/donate", "/cancel", "/stats", "/label",
             "/start@" + BOT_USERNAME, "/START",
         ];
         if (config.enableFaq !== false) commands.push("/faq");
@@ -100,6 +101,39 @@ async function run() {
                 }
             }
         }));
+
+        // /stats (MOD and up) and /label (ADMIN only), both DM.
+        const modId = adminId + 1;
+        await User.create({ userId: String(adminId), firstName: "Admin", authLevel: AuthLevel.ADMIN });
+        await User.create({ userId: String(modId), firstName: "Mod", authLevel: AuthLevel.MOD });
+        const notAdminText = localeService.t(config.lang, "notAdmin");
+        const lastText = () => String(h.calls.find((c) => c.method === "sendMessage")?.params.text);
+        await expectCalls("/stats as USER", () => h.sendText("/stats", { userId }));
+        assert.strictEqual(lastText(), notAdminText, "/stats denies a plain user");
+        await expectCalls("/label as MOD", () => h.sendText("/label", { userId: modId }));
+        assert.strictEqual(lastText(), notAdminText, "/label denies a moderator");
+        await expectCalls("/stats as MOD", () => h.sendText("/stats", { userId: modId }));
+        assert.strictEqual(h.calls.filter((c) => c.method === "sendMessage").length, 1, "/stats sends one message");
+        assert.ok(/^.*7.*\|.*30.*$/m.test(lastText()), "/stats shows the 7 and 30 day header");
+        const shadow = await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [4242], senderId: "s", at: new Date(), tier: "strict", rules: [], wouldList: true, parsedTitle: "Bike", parsedPrice: "100" });
+        try {
+            await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true }); // only our row is sampled
+            await expectCalls("/label as ADMIN", () => h.sendText("/label", { userId: adminId }));
+            const labelCall = h.calls.find((c) => c.method === "sendMessage")!;
+            assert.ok(String(labelCall.params.text).includes("t.me/"), "/label shows a link");
+            const keyboard = (labelCall.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
+            assert.deepStrictEqual(keyboard.map((b) => b.callback_data), [`lb_${shadow._id}_s`, `lb_${shadow._id}_n`, `lb_${shadow._id}_k`]);
+            h.calls.length = 0;
+            await h.pressButton(`lb_${shadow._id}_s`, { userId: modId, messageId: 61 });
+            assert.strictEqual((await ShadowLog.findById(shadow._id))?.label, undefined, "a moderator cannot label");
+            await h.pressButton(`lb_${shadow._id}_s`, { userId: adminId, messageId: 61 });
+            assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")), "the label message is edited to the next row");
+            const labeled = await ShadowLog.findById(shadow._id);
+            assert.deepStrictEqual([labeled?.label, labeled?.labeledBy], ["sale", String(adminId)]);
+        } finally {
+            await ShadowLog.deleteOne({ _id: shadow._id });
+            await User.deleteOne({ userId: String(modId) });
+        }
 
         // A confirm button with no flow behind it gets the stale toast.
         h.calls.length = 0;
@@ -215,7 +249,6 @@ async function run() {
         live.approvedTopicId = savedTopic;
 
         // /config can set a key an older config.json predates (captureMode), and lists it as unset.
-        await User.create({ userId: String(adminId), firstName: "Admin", authLevel: AuthLevel.ADMIN });
         const { AdminService } = await import("../services/adminService");
         const oldConfig: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
         delete oldConfig.captureMode;

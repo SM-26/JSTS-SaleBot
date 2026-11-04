@@ -63,6 +63,11 @@ class ListingRepository {
         return Listing.find({ sellerId, status: { $in: ["live", "expired"] }, refreshedAt: { $gte: since } }).exec();
     }
 
+    // Legacy listings waiting for the owner's release.
+    countHeld(): Promise<number> {
+        return Listing.countDocuments({ hold: true }).exec();
+    }
+
     // Listings created since `since` (all time when omitted), grouped by status.
     async countByStatus(since?: Date): Promise<Record<string, number>> {
         const rows = await Listing.aggregate<{ _id: string; n: number }>([

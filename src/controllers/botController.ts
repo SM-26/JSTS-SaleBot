@@ -19,6 +19,7 @@ import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
 import { CaptureService } from "../services/captureService";
+import { ShadowAdminService } from "../services/shadowAdminService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -53,6 +54,7 @@ export class BotController {
     private faqService: FaqService;
     private broadcastUsersService: BroadcastUsersService;
     private captureService: CaptureService;
+    private shadowAdminService: ShadowAdminService;
 
     constructor(api: Api) {
         this.api = api;
@@ -70,6 +72,7 @@ export class BotController {
         this.faqService = new FaqService(api, this.config);
         this.broadcastUsersService = new BroadcastUsersService(api);
         this.captureService = new CaptureService(this.config);
+        this.shadowAdminService = new ShadowAdminService(api, this.config);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -322,6 +325,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "label") {
+            await this.shadowAdminService.handleLabelCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "lang") {
             const lang = route.arg;
             await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
@@ -510,6 +518,22 @@ export class BotController {
                 return;
             }
             return this.pendingService.handleClearPending(msg);
+        }));
+        bot.use(cmd("label", async (msg) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.shadowAdminService.handleLabel(msg);
+        }));
+        bot.use(cmd("stats", async (msg) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.shadowAdminService.handleStats(msg);
         }));
         bot.use(cmd("broadcast", (msg, args) => {
             if (!isPrivate(msg)) return;
