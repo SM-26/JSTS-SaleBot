@@ -1,13 +1,12 @@
 import type { Message, MessageEntity } from "node-telegram-bot-api/types";
 import { BotConfig } from "../types";
+import { storedEntity } from "../models/Post";
 import type { IMediaItem, StoredEntity } from "../models/Post";
 import captureRepository from "../repositories/captureRepository";
 import memberRepository from "../repositories/memberRepository";
 
-// Only the fields we store, as plain objects (same shape as the wizard's).
 const storedEntities = (entities?: MessageEntity[]): StoredEntity[] | undefined =>
-    entities?.length ? entities.map(({ type, offset, length, url, user, language, custom_emoji_id }) =>
-        JSON.parse(JSON.stringify({ type, offset, length, url, user, language, custom_emoji_id }))) : undefined;
+    entities?.length ? entities.map(storedEntity) : undefined;
 
 // Records sale-topic messages into per-sender windows. Never sends anything.
 export class CaptureService {

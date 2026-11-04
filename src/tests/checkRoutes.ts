@@ -162,7 +162,8 @@ async function run() {
         ];
         for (const [label, offset, send] of ignored) {
             await expectSilence(`${label} ignored`, send);
-            assert.strictEqual((await rows(senderBase + offset)).length, 0, `${label} must not be captured`);
+            // no chat filter: a capture recorded under any chat would fail this
+            assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + offset) }), 0, `${label} must not be captured`);
         }
 
         // A named topic: its messages carry the thread id, and Telegram's root reply is not a real reply.
@@ -171,7 +172,23 @@ async function run() {
         assert.strictEqual((await rows(senderBase + 9)).length, 1, "a named topic accepts its thread id (root reply ignored)");
         await expectSilence("topic without thread id", () => h.sendText("bike", { ...group, userId: senderBase + 10 }));
         assert.strictEqual((await rows(senderBase + 10)).length, 0, "a named topic needs its thread id");
+
+        // Regression: a real reply to an approved post inside a named topic still reaches the author and is not captured.
+        const approvedMessageId = 900_000_000 + (Date.now() % 100_000_000);
+        await Post.create({ userId: String(userId), title: "Reply target", description: "d", price: "10", location: "l", media: [], status: "approved", approvedMessageId });
+        h.calls.length = 0;
+        await h.sendText("is it available?", { ...group, userId: senderBase + 13, messageThreadId: 11, replyToMessageId: approvedMessageId });
+        assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === userId)), "the post's author is notified of the reply");
+        assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + 13) }), 0, "a reply to a post is not captured");
+        await sleep(QUIET_MS);
         live.approvedTopicId = 1;
+
+        // A video keeps its file id; an album item keeps its media group id.
+        await h.message({ video: { file_id: "vid1", file_unique_id: "v", width: 10, height: 10, duration: 1 } }, { ...group, userId: senderBase + 14 });
+        const video = (await rows(senderBase + 14))[0];
+        assert.deepStrictEqual(video.media.map((m) => `${m.type}:${m.fileId}`), ["video:vid1"]);
+        await h.sendPhoto("album1", { ...group, userId: senderBase + 15, mediaGroupId: "mg-1" });
+        assert.deepStrictEqual([...(await rows(senderBase + 15))[0].mediaGroupIds], ["mg-1"]);
 
         // A captioned photo keeps the caption and the largest size.
         await h.message({ photo: [
@@ -189,6 +206,11 @@ async function run() {
         await expectSilence("edit of an unknown message", () => h.sendEdit(777_999, "other", { ...group, userId: editor }));
         const afterUnknown = await rows(editor);
         assert.deepStrictEqual([afterUnknown.length, afterUnknown[0].text], [1, "bike 150"]);
+        // An edit outside the sale topic changes nothing.
+        const outsider = senderBase + 16;
+        await h.sendText("bike 100", { ...group, userId: outsider, messageId: 777_002 });
+        await expectSilence("edit outside the sale topic", () => h.sendEdit(777_002, "changed", { ...group, userId: outsider, messageThreadId: 48138 }));
+        assert.strictEqual((await rows(outsider))[0].text, "bike 100", "an edit outside the sale topic is ignored");
         delete live.captureMode;
         live.approvedTopicId = savedTopic;
 
@@ -215,7 +237,7 @@ async function run() {
         await User.deleteOne({ userId: String(userId) });
         await Post.deleteMany({ userId: String(userId) });
         await Draft.deleteMany({ userId: String(userId) });
-        const captureSenders = Array.from({ length: 13 }, (_, i) => String(senderBase + i));
+        const captureSenders = Array.from({ length: 17 }, (_, i) => String(senderBase + i));
         await Capture.deleteMany({ senderId: { $in: captureSenders } });
         await Member.deleteMany({ userId: { $in: captureSenders } });
         await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:${userId}$` } });

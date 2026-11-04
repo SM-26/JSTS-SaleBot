@@ -1,6 +1,6 @@
 import type { Api } from "node-telegram-bot-api";
-import type { CallbackQuery, Message, MessageEntity, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
-import type { StoredEntity } from "../models/Post";
+import type { CallbackQuery, Message, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
+import { storedEntity } from "../models/Post";
 import type { IDraft, DraftStep } from "../models/Draft";
 import draftRepository, { DraftFields, isDraftExpired } from "../repositories/draftRepository";
 import postRepository from "../repositories/postRepository";
@@ -9,12 +9,6 @@ import { BotConfig, MediaItem, Post } from "../types";
 import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
-
-// Only the fields we store/render, as a plain object (also detaches Mongoose subdocuments).
-function storedEntity(e: MessageEntity): StoredEntity {
-    const { type, offset, length, url, user, language, custom_emoji_id } = e;
-    return JSON.parse(JSON.stringify({ type, offset, length, url, user, language, custom_emoji_id }));
-}
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";

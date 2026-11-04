@@ -372,6 +372,11 @@ export class BotController {
         task.catch((err) => console.error(`[ERROR - ${name}]`, err));
     }
 
+    private captureOn(): boolean {
+        const mode = this.config.captureMode;
+        return mode === "shadow" || mode === "optin";
+    }
+
     registerRoutes(bot: Bot, botUsername: string): void {
         const isPrivate = (msg: Message) => msg.chat.type === "private";
         const cmd = (
@@ -430,7 +435,7 @@ export class BotController {
             }
 
             // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
-            if ((this.config.captureMode ?? "off") !== "off" && this.captureService.isSaleTopicMessage(msg)) {
+            if (this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
                 await this.captureService.handleGroupMessage(msg);
             }
 
@@ -439,7 +444,7 @@ export class BotController {
 
         bot.on("edited_message", async (ctx, next) => {
             const msg = ctx.editedMessage;
-            if (msg && (this.config.captureMode ?? "off") !== "off" && this.captureService.isSaleTopicMessage(msg)) {
+            if (msg && this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
                 await this.captureService.handleEdit(msg);
             }
             return next();
