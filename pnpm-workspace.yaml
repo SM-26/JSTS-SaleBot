@@ -1,0 +1,4 @@
+# One-off exemption from minimumReleaseAge for node-telegram-bot-api 2.3.0
+# (published 2026-11-04). Remove after 2026-11-05, once it is over 24h old.
+minimumReleaseAgeExclude:
+  - node-telegram-bot-api@2.3.0

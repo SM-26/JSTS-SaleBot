@@ -446,7 +446,7 @@ Sent to moderation group with ✅ Approve / ❌ Reject buttons
 |--------------|-----------------------------|
 | Runtime      | Node.js + TypeScript        |
 | Package manager | pnpm (pinned via `packageManager`) |
-| Telegram API | [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) **v2.2.0** (Bot API 10.2, Rich Messages) |
+| Telegram API | [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) **v2.3.0** (Bot API 10.2, Rich Messages) |
 | Database     | MongoDB + Mongoose (collections `posts`, `users`, plus `drafts` and `bot_sessions` for persistent flows) |
 | Config       | JSON (`config.json`), validated by `src/services/configSchema.ts` |
 | i18n         | Structured JSON (`src/locales/<lang>/common.json` + `src/locales/<lang>/faq.json`)  |

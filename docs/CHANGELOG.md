@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Dependency update.
+  - Upgraded `node-telegram-bot-api` 2.2.0 → 2.3.0 (pinned exactly). No code changes were needed and nothing the user sees changes. Notable library changes: a graceful stop (`SIGINT`/`SIGTERM`) now confirms the update being handled, so a deploy no longer redelivers it; `bot.init()` calls `getMe()` once at startup. The bot's own command matcher is unchanged.
+  - `pnpm-workspace.yaml` exempts `node-telegram-bot-api@2.3.0` from pnpm's `minimumReleaseAge` (the release was under 24 hours old). It can be removed after 2026-11-05.
+
 2.0.1 - UX fixes found while testing 2.0.0.
   - `/lang`: picking a language removes the menu's buttons, so it can't keep switching (#97).
   - Sellers' formatting in the description (spoiler, bold, italic, links, ...) is kept and shown in the post. It is stored in a new optional `descriptionEntities` field (additive; posts without formatting are unchanged) (#98).
