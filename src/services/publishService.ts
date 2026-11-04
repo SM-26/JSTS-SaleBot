@@ -32,6 +32,7 @@ export class PublishService {
 
         const blocked = findBlockedWord([data.title, data.description, data.price, data.location].join("\n")) !== null;
         const author = blocked ? null : await userRepository.findByUserId(post.userId);
+        if (!blocked && !author) console.warn("[WARN - PublishService.submitPost] no user record, sending to moderation", { userId: post.userId, postId });
         if (blocked || !author || !(trusted ?? await isTrustedSeller(post.userId, new Date()))) return toModeration();
 
         const claimed = await postRepository.claimPending(postId, "approved");
@@ -44,9 +45,16 @@ export class PublishService {
         try {
             listing = await this.publishApproved(claimed, author);
         } catch (err) {
-            console.error("[ERROR - PublishService.submitPost] publishing failed, sending to moderation:", (err as Error).message);
-            await postRepository.updateStatus(postId, "pending");
-            return toModeration();
+            // publishApproved only throws before the group message exists.
+            console.error(`[ERROR - PublishService.submitPost] post ${postId}: publishing failed, sending to moderation:`, (err as Error).message);
+            try {
+                await postRepository.updateStatus(postId, "pending");
+                return await toModeration();
+            } catch (fallbackErr) {
+                // The wizard's catch tells the author; a stuck post is for a human to repair.
+                console.error(`[ERROR - PublishService.submitPost] post ${postId}: moderation fallback failed:`, (fallbackErr as Error).message);
+                throw fallbackErr;
+            }
         }
 
         try {
@@ -58,8 +66,8 @@ export class PublishService {
         return "published";
     }
 
-    // A sendToApproved error propagates: the caller releases the claim. The
-    // listing and the author's DM are best-effort: the post is already public.
+    // A sendToApproved error propagates (nothing is public yet): the caller
+    // releases the claim. Everything after the send is best-effort and logged.
     async publishApproved(post: Post, author: User): Promise<IListing | null> {
         const postId = String(post._id);
         const richMessage = this.postService.formatPostRichMessage({
@@ -74,9 +82,16 @@ export class PublishService {
             firstName: author.firstName || "User",
         }, { showCta: true });
 
+        // Only this send may throw. Once the message exists the post is public:
+        // nothing below rejects, or a caller would release the claim / fall back
+        // to moderation and publish it twice.
         const messageId = await this.postService.sendToApproved(richMessage);
         if (messageId) {
-            await postRepository.setApprovedMessageId(postId, messageId);
+            try {
+                await postRepository.setApprovedMessageId(postId, messageId);
+            } catch (err) {
+                console.error(`[ERROR - PublishService.publishApproved] post ${postId} message ${messageId}: storing approvedMessageId failed, repair by hand:`, (err as Error).message);
+            }
         }
 
         let listing: IListing | null = null;
@@ -89,14 +104,18 @@ export class PublishService {
                 listing = await listingRepository.findByPostId(postId); // lost a race with the reconcile
             }
         } catch (err) {
-            console.error("[ERROR - PublishService.publishApproved]", (err as Error).message);
+            console.error(`[ERROR - PublishService.publishApproved] post ${postId} message ${messageId}: creating the listing failed:`, (err as Error).message);
         }
 
         // The post is public whatever happened to the listing, so the author is told.
         // Detached: the moderator's callback never waits on this DM.
-        const authorLocale = localeService.resolveUserLocale(author);
-        this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, "postApproved") })
-            .catch((err: Error) => console.error("[ERROR - PublishService.publishApproved] notifying the author failed:", err.message));
+        try {
+            const authorLocale = localeService.resolveUserLocale(author);
+            this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, "postApproved") })
+                .catch((err: Error) => console.error(`[ERROR - PublishService.publishApproved] post ${postId} message ${messageId}: notifying the author failed:`, err.message));
+        } catch (err) {
+            console.error(`[ERROR - PublishService.publishApproved] post ${postId} message ${messageId}: notifying the author failed:`, (err as Error).message);
+        }
         return listing;
     }
 }

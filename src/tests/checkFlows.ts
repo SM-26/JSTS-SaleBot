@@ -611,12 +611,13 @@ async function run() {
 
         // Task 4: submitPost. (p) new seller / (q) trusted / (q2) publish failure / (q3) pending+rejected / (q4) blocked word.
         // Labels differ from the brief's (n)/(o): (n) already exists above.
-        const confirmWizard = async (h: H, u: number, title = "Bike") => {
+        const confirmWizard = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
             await h.sendText("/newpost", { userId: u });
             await h.sendText(title, { userId: u });
-            await h.sendText("Blue mountain bike", { userId: u });
-            await h.sendText("1,500", { userId: u });
-            await h.sendText("Tel Aviv", { userId: u });
+            await h.sendText(description, { userId: u });
+            await h.sendText(price, { userId: u });
+            await h.sendText(location, { userId: u });
             await settle();
             const d = (await draftOf(u))!;
             for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
@@ -627,7 +628,7 @@ async function run() {
             h.calls.length = 0;
             await h.pressButton(keyboard(preview)[0].callback_data, { userId: u, messageId: messageId(preview) });
             await settle();
-            const post = (await Post.findOne({ userId: String(u), title }))!;
+            const post = (await Post.findOne({ userId: String(u), title: { $ne: "Old" } }))!;
             postIds.push(String(post._id));
             return post;
         };
@@ -714,19 +715,52 @@ async function run() {
             console.log("  [OK] (q3) pending and rejected posts don't make a seller trusted.");
         }
 
-        // (q4) Decision 7: a blocked word keeps even a trusted seller in moderation.
+        // (q4) Decision 7: a blocked word in any saved field keeps even a trusted seller in moderation.
         {
             const { findBlockedWord } = await import("../services/blockedWords");
-            const title = "Bike https://t.me/vipemployment_bot";
-            assert.ok(findBlockedWord(title), "the probe title must be on the blocklist");
-            const { h } = boot();
-            const u = user();
-            await seedPostFor(u, "approved");
-            const post = await confirmWizard(h, u, title);
-            assert.strictEqual(post.status, "pending");
-            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
-            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
-            console.log("  [OK] (q4) a blocked word keeps a trusted seller in moderation.");
+            const bad = "https://t.me/vipemployment_bot";
+            assert.ok(findBlockedWord(bad), "the probe must be on the blocklist");
+            const wasValidate = cfg.validatePrice;
+            cfg.validatePrice = false; // so the price field can carry the probe
+            try {
+                for (const field of ["title", "description", "price", "location"] as const) {
+                    const { h } = boot();
+                    const u = user();
+                    await seedPostFor(u, "approved");
+                    const post = await confirmWizard(h, u, { [field]: `x ${bad}` });
+                    assert.strictEqual(post.status, "pending", field);
+                    assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0, field);
+                    assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)), field);
+                }
+            } finally {
+                cfg.validatePrice = wasValidate;
+            }
+            console.log("  [OK] (q4) a blocked word in any field keeps a trusted seller in moderation.");
+        }
+
+        // (q5) setApprovedMessageId rejects after the group message exists: the post stays approved, never a second card.
+        {
+            const { default: postRepository } = await import("../repositories/postRepository");
+            const real = postRepository.setApprovedMessageId;
+            let failed = 0;
+            postRepository.setApprovedMessageId = ((...args: Parameters<typeof real>) => {
+                if (failed++ === 0) return Promise.reject(new Error("db blip"));
+                return real.apply(postRepository, args);
+            }) as typeof real;
+            try {
+                const { h } = boot();
+                const u = user();
+                await seedPostFor(u, "approved");
+                const post = await confirmWizard(h, u);
+                assert.strictEqual(post.status, "approved");
+                assert.strictEqual(richTo(h, APPROVED_GROUP).length, 1, "exactly one public message");
+                assert.ok(!richTo(h, MOD_GROUP).some((c) => keyboard(c).some((b) => /^(approve|reject)_/.test(b.callback_data))), "no approve/reject card");
+                assert.ok(toAuthor(h, u).includes(T("postApproved")));
+                assert.ok(!toAuthor(h, u).includes(T("postCreated")));
+            } finally {
+                postRepository.setApprovedMessageId = real;
+            }
+            console.log("  [OK] (q5) a failure after the group message keeps the post approved.");
         }
 
         console.log("[OK] persistent flows.");
