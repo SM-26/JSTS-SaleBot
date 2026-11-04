@@ -634,12 +634,12 @@ async function run() {
             return post;
         };
         // A draft saved at "confirm" (as before the blocked-word preview gate existed), then its Confirm button.
-        const confirmSavedDraft = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
-            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
+        const confirmSavedDraft = async (h: H, u: number, fields: { title?: string; description?: string; descriptionEntities?: { type: string; offset: number; length: number; url?: string }[]; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", descriptionEntities, price = "1,500", location = "Tel Aviv" } = fields;
             const now = new Date();
             const promptMessageId = 9000 + (u % 1000);
             await Draft.create({
-                userId: String(u), chatId: u, locale: cfg.lang, step: "confirm", title, description, price, location,
+                userId: String(u), chatId: u, locale: cfg.lang, step: "confirm", title, description, ...(descriptionEntities ? { descriptionEntities } : {}), price, location,
                 media: [{ fileId: "f0", type: "photo" }, { fileId: "f1", type: "photo" }], promptMessageId, startedAt: now, updatedAt: now,
             });
             h.calls.length = 0;
@@ -1372,6 +1372,40 @@ async function run() {
             assert.strictEqual(toAuthorDMs(h).length, 0);
             assert.ok(!h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP), "no nudge, no handled message");
             console.log("  [OK] (u3) the prompter's own preset clears its marker.");
+        }
+
+        // (u4) a blocked word hidden in a text_link URL stops at the preview
+        const hidden = [{ type: "text_link", offset: 0, length: 3, url: "https://cutt.ly/x" }];
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("/newpost", { userId: u });
+            await h.sendText("Bike", { userId: u });
+            await h.sendText("ראו כאן", { userId: u, entities: hidden });
+            await h.sendText("1,500", { userId: u });
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            assert.strictEqual(richTo(h, u).length, 0, "no preview");
+            assert.strictEqual(dmTo(h, u)[0], noticeFor("fieldDescription", "https://cutt.ly/*"));
+            assert.strictEqual((await draftOf(u))!.step, "description");
+            console.log("  [OK] (u4) a blocked word in a text_link URL stops at the preview as a description problem.");
+        }
+
+        // (u5) the same on a saved draft: a trusted seller goes to moderation
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmSavedDraft(h, u, { description: "ראו כאן", descriptionEntities: hidden });
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (u5) a hidden blocked URL sends a trusted seller's post to moderation.");
         }
 
         console.log("[OK] persistent flows.");

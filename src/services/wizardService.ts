@@ -10,7 +10,7 @@ import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
 import type { PublishService } from "./publishService";
-import { findBlockedField, BlockedFieldName } from "./blockedWords";
+import { findBlockedField, withLinkUrls, BlockedFieldName } from "./blockedWords";
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
@@ -119,7 +119,7 @@ export class WizardService {
     // The gate before the preview: a field with a blocked word is asked for again (the notice names the
     // word), and the answer comes straight back here. Trusted sellers are no exception.
     private async previewOrFix(draft: IDraft, from: TelegramUser): Promise<void> {
-        const hit = findBlockedField(draft);
+        const hit = findBlockedField({ title: draft.title, description: withLinkUrls(draft.description, draft.descriptionEntities), price: draft.price, location: draft.location });
         if (hit) {
             await this.api.sendMessage({
                 chat_id: draft.chatId,

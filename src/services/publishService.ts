@@ -6,7 +6,7 @@ import listingRepository from "../repositories/listingRepository";
 import userRepository from "../repositories/userRepository";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
-import { findBlockedWord } from "./blockedWords";
+import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { isTrustedSeller } from "./trustService";
 
 // Publishes an approved post (moderator approval today, trusted sellers later)
@@ -30,7 +30,7 @@ export class PublishService {
             return "moderation";
         };
 
-        const blocked = findBlockedWord([data.title, data.description, data.price, data.location].join("\n")) !== null;
+        const blocked = findBlockedWord([data.title, withLinkUrls(data.description, data.descriptionEntities), data.price, data.location].join("\n")) !== null;
         const author = blocked ? null : await userRepository.findByUserId(post.userId);
         if (!blocked && !author) console.warn("[WARN - PublishService.submitPost] no user record, sending to moderation", { userId: post.userId, postId });
         if (blocked || !author || !(trusted ?? await isTrustedSeller(post.userId, new Date()))) return toModeration();

@@ -98,6 +98,11 @@ export function findBlockedWord(text: string | undefined | null): string | null 
     return matchers.find(m => m.regex.test(text))?.entry ?? null;
 }
 
+/** A description plus the hidden URLs of its text_link entities, so a blocked word cannot hide behind a link. */
+export function withLinkUrls(text: string | undefined, entities?: { url?: string }[]): string {
+    return [text ?? "", ...(entities ?? []).flatMap(e => e.url ? [e.url] : [])].join("\n");
+}
+
 export type BlockedFieldName = "title" | "description" | "price" | "location";
 
 /** First blocked word in the wizard's fields, checked in title, description, price, location order. */
