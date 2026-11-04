@@ -37,6 +37,20 @@ class PostRepository {
         return Post.findByIdAndUpdate(postId, { rejectionReason }, { returnDocument: 'after' });
     }
 
+    // Atomic: the author is told once. Presets and Skip race; the first wins.
+    // A null reason (Skip) leaves rejectionReason as it was.
+    claimRejectionNotice(postId: string, reason: string | null): Promise<IPost | null> {
+        return Post.findOneAndUpdate(
+            { _id: postId, status: "rejected", rejectionNotifiedAt: null },
+            { $set: { rejectionNotifiedAt: new Date(), ...(reason !== null ? { rejectionReason: reason } : {}) } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    async hasApprovedOrSold(userId: string): Promise<boolean> {
+        return (await Post.exists({ userId, status: { $in: ["approved", "sold"] } })) !== null;
+    }
+
     setApprovedMessageId(postId: string, approvedMessageId: number | null) {
         return Post.findByIdAndUpdate(postId, { approvedMessageId }, { returnDocument: 'after' });
     }

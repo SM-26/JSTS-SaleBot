@@ -31,6 +31,7 @@ export interface IPost extends Document {
     approvedMessageId: number | null;
     moderationMessageId: number | null;
     rejectionReason?: string;
+    rejectionNotifiedAt?: Date | null;
 }
 
 const mediaItemSchema = new Schema<IMediaItem>({
@@ -66,6 +67,8 @@ const postSchema = new Schema<IPost>({
     approvedMessageId: { type: Number, default: null },
     moderationMessageId: { type: Number, default: null },
     rejectionReason: { type: String, default: null },
+    // default undefined: absent on new posts; the claim filter `: null` matches absent too.
+    rejectionNotifiedAt: { type: Date, default: undefined },
 });
 
 export default mongoose.model<IPost>("Post", postSchema);

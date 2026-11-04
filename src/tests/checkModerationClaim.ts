@@ -24,6 +24,7 @@ async function run() {
         price: "1",
     });
     const postId = String(post._id);
+    const extraIds: string[] = [];
 
     try {
         assert.strictEqual(post.status, "pending", "new post should start pending");
@@ -52,8 +53,50 @@ async function run() {
         assert.strictEqual(withReason!.rejectionReason, "no price listed", "rejection reason must be persisted");
 
         console.log("[OK] rejection reason is stored on the post.");
+
+        // The reject notice is claimed once: presets and Skip race, one wins.
+        const mk = async (userId = "claim-test-user") => {
+            const p = await postRepository.createPost({ userId, title: "notice test", price: "1" });
+            extraIds.push(String(p._id));
+            return String(p._id);
+        };
+        const pendingId = await mk();
+        assert.strictEqual(await postRepository.claimRejectionNotice(pendingId, "x"), null, "claim notice needs rejected");
+
+        const presetId = await mk();
+        await postRepository.claimPending(presetId, "rejected");
+        const claims = await Promise.all([1, 2, 3, 4].map(n => postRepository.claimRejectionNotice(presetId, `reason ${n}`)));
+        const won = claims.filter(Boolean);
+        assert.strictEqual(won.length, 1, `exactly one notice claim should win, got ${won.length}`);
+        const afterPreset = await postRepository.findById(presetId);
+        assert.strictEqual(afterPreset!.rejectionReason, won[0]!.rejectionReason, "stored reason is the winner's");
+        assert.ok(afterPreset!.rejectionNotifiedAt instanceof Date, "rejectionNotifiedAt is set");
+        assert.strictEqual(await postRepository.claimRejectionNotice(presetId, null), null, "skip after preset loses");
+        assert.strictEqual((await postRepository.findById(presetId))!.rejectionReason, won[0]!.rejectionReason, "skip leaves the reason unchanged");
+
+        const skipId = await mk();
+        await postRepository.claimPending(skipId, "rejected");
+        const skipped = await postRepository.claimRejectionNotice(skipId, null);
+        assert.ok(skipped, "skip alone claims");
+        assert.strictEqual(skipped!.rejectionReason ?? null, null, "skip stores no reason");
+        assert.strictEqual(await postRepository.claimRejectionNotice(skipId, null), null, "second skip loses");
+        console.log("[OK] reject notice is claimed exactly once.");
+
+        // hasApprovedOrSold: trust needs a published post, not a pending/rejected one.
+        const u = `claim-trust-${Date.now()}`;
+        const t1 = await mk(u);
+        const t2 = await mk(u);
+        await postRepository.claimPending(t2, "rejected");
+        assert.strictEqual(await postRepository.hasApprovedOrSold(u), false, "pending and rejected only");
+        await postRepository.claimPending(t1, "approved");
+        assert.strictEqual(await postRepository.hasApprovedOrSold(u), true, "approved counts");
+        const u2 = `claim-trust2-${Date.now()}`;
+        const s1 = await mk(u2);
+        await postRepository.updateStatus(s1, "sold");
+        assert.strictEqual(await postRepository.hasApprovedOrSold(u2), true, "sold alone counts");
+        console.log("[OK] hasApprovedOrSold.");
     } finally {
-        await Post.deleteOne({ _id: postId });
+        await Post.deleteMany({ _id: { $in: [postId, ...extraIds] } });
         await mongoose.disconnect();
     }
 }

@@ -182,6 +182,7 @@ export interface Post {
     dailyBumpCount?: number | null;
     lastBumpAt?: Date | null;
     rejectionReason?: string | null;
+    rejectionNotifiedAt?: Date | null;
 }
 
 export interface User {
