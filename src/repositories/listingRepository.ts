@@ -60,6 +60,26 @@ class ListingRepository {
         ).exec();
     }
 
+    findById(id: string): Promise<IListing | null> {
+        return Listing.findById(id).exec();
+    }
+
+    // Moderator take-down: live|expired -> taken_down, and the content goes
+    // (spec 5.3). Returns the document as it was before the update, so the
+    // caller still has source, postId and sellerId; null for any other status.
+    // ponytail: findOneAndUpdate runs no validators, so unsetting required-ish fields is fine.
+    takeDown(id: string, now: Date): Promise<IListing | null> {
+        return Listing.findOneAndUpdate(
+            { _id: id, status: { $in: ["live", "expired"] } },
+            { $set: { status: "taken_down", endedAt: now, endedBy: "moderator" }, $unset: { text: "", media: "", title: "" } },
+            { returnDocument: "before" }
+        ).exec();
+    }
+
+    async hasModeratorTakedownSince(sellerId: string, since: Date): Promise<boolean> {
+        return (await Listing.exists({ sellerId, status: "taken_down", endedBy: "moderator", endedAt: { $gt: since } })) !== null;
+    }
+
     findLiveForMatching(): Promise<IListing[]> {
         return Listing.find({ status: "live", hold: false }).exec();
     }
