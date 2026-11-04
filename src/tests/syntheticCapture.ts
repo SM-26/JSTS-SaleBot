@@ -129,4 +129,10 @@ async function main(): Promise<number> {
     return bad || violations.length ? 1 : 0;
 }
 
-main().then(code => process.exit(code), err => { console.error("[FAIL]", err); process.exit(1); });
+main().then(code => process.exit(code), err => {
+    // a Telegram error can carry the request URL, which contains the token
+    const token = process.env.BOT_TOKEN;
+    const text = String(err);
+    console.error("[FAIL]", token ? text.replaceAll(token, "<token>") : text);
+    process.exit(1);
+});
