@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Dev-dependency security fix.
+  - Security: Dependabot alert #21 (GHSA-g3hv-75wg-m249, minimatch globparts DoS). Dev-only (nodemon, eslint, typescript-eslint); production installs with `--prod` and was not affected. No newer nodemon, eslint or typescript-eslint depends on a patched minimatch, so `pnpm-workspace.yaml` now overrides `minimatch` to `^11.0.4`. Lint, build and tests are unchanged.
+
 2.1.0 - Dependency update, and the market core in shadow mode (slice 0 of "the market", #104).
   - **Market core, shadow mode only: nothing is sent to the group or to any member.** `captureMode: "shadow"` records messages in the sale topic (`approvedTopicId`) into per-sender windows (90 s; closed after 30 s of quiet), classifies each as `strict`, `ask`, `wtb` or `none` with a pure Hebrew-aware classifier, and logs what automatic capture would have done. `buyerMatches: "shadow"` also logs up to 5 live listings a "wanted" message would match. Both keys accept only `off` or `shadow` in this slice. New keys `nudges` and `rulesUrl` are accepted by `/config` but unused until a later slice.
   - New `/label` (admin, private chat) shows a random would-list row with its link, tier and parsed price (as a number; no member text is stored), to mark it sale / not sale / skip. New `/stats` (moderator, private chat) shows the numbers behind the go/no-go on automatic capture: rows per tier, would-list and merge counts, label precision.
