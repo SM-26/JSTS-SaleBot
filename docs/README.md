@@ -22,7 +22,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Live Preview** — Users see a formatted preview, with Confirm/Cancel on the same message
 - **Admin Moderation** — Posts sent to a moderation group with approve/reject buttons
 - **Pending Management** — Admins can list (`/pending`) and bulk-expire (`/clearpending`) posts
-- **Rejection Reasons** — Moderators pick one of four preset reasons (buttons), reply to the bot's prompt with their own, or press **Skip**. The author is told exactly once, and the message carries **Fix and resend** and, when `rulesUrl` is set, a **Group rules** button
+- **Rejection Reasons** — Moderators pick one of four preset reasons (buttons), reply to the bot's prompt with their own. The author is told exactly once, and the message carries **Fix and resend** and, when `rulesUrl` is set, a **Group rules** button
 - **Trusted-Seller Publishing** — A seller with an approved or sold post and no moderator take-down in the last 90 days publishes at once. The moderation group gets a "Published (trusted seller)" card to review after the fact
 - **Take Down** — Moderators can take down any published post from its card. The group message is removed, the author is told, the post can no longer be bumped or marked sold, and the seller loses trusted status for 90 days
 - **Blocked-Word Check** — A blocked word in the title, description, price or location is caught at the preview (for everyone, trusted sellers too): the bot names the word and asks for that field again
@@ -89,9 +89,9 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 
 ### 📝 For moderators
 
-When you press **Reject**, the bot posts a prompt in the group with four preset reasons. Press one, or **reply to that prompt message** with your own text, or press **Skip** to reject without one. A message that is not a reply to the prompt is ignored (the bot reminds you to reply), so the reason can't be attached to the wrong post. The author is notified exactly once, with a **Fix and resend** button and the group rules link (if `rulesUrl` is set). The prompt is stored in the database, so it survives a bot restart.
+When you press **Reject**, the bot posts a prompt in the group with four preset reasons. Press one, or **reply to that prompt message** with your own text. A message that is not a reply to the prompt is ignored (the bot reminds you to reply), so the reason can't be attached to the wrong post. The author is notified exactly once, with a **Fix and resend** button and the group rules link (if `rulesUrl` is set). The prompt is stored in the database, so it survives a bot restart.
 
-Every published post card carries **🚫 Take down**. Trusted sellers' posts appear in the group at once with a "Published (trusted seller)" card, so check those after the fact. Taking a post down removes it from the sales group, tells the author, and ends their trusted status for 90 days.
+Every published post card carries **🚫 Take down** (when its listing exists). Trusted sellers' posts appear in the group at once with a "Published (trusted seller)" card, so check those after the fact. Taking a post down removes it from the sales group, tells the author, and ends their trusted status for 90 days.
 
 ### ⚙️ Admin Commands
 | Command | Description |
@@ -253,7 +253,7 @@ src/
 │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
 │   ├── postService.ts        # Post Rich Message formatting, publish to groups, bump/sold edits
 │   ├── myPostsService.ts     # User post management (list, bump, mark sold)
-│   ├── moderationService.ts  # Approve/reject logic; reject-reason prompt (reply or Skip)
+│   ├── moderationService.ts  # Approve/reject logic; reject-reason prompt (presets or reply)
 │   ├── pendingService.ts     # /pending listing & /clearpending bulk expire
 │   ├── adminService.ts       # /config, /broadcast, promote/demote/auth
 │   ├── configSchema.ts       # Per-key type rules validating /config values
@@ -473,7 +473,7 @@ Post saved to MongoDB (status: pending)
 Sent to moderation group with ✅ Approve / ❌ Reject buttons
     ↓
 ┌─ Approved → Published to sales group + user notified
-└─ Rejected → Moderator picks a preset, replies, or presses Skip → user notified once
+└─ Rejected → Moderator picks a preset or replies → user notified once
 (Trusted sellers skip the wait: published at once, reviewed afterwards; a moderator can Take down)
 ```
 

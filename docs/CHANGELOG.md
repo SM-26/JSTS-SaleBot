@@ -7,18 +7,24 @@ All notable changes to this project will be documented in this file.
 3.0.0 - Trust-based moderation (slice 1 of "the market", #104).
   - Added:
     - **Trusted sellers publish at once.** A seller with an approved or sold bot post and no moderator take-down in the last 90 days is trusted: their new post goes straight to the sales group, and the moderation group gets a "Published (trusted seller)" card to review afterwards. Everyone else still goes through moderation. Captured group listings never grant trust.
-    - **Take down.** Every published card (trusted or moderator-approved) carries a Take down button (`td_<listingId>`). It is atomic (one press wins), removes the group message, marks the post and listing `taken_down`, and tells the author. A taken-down post can't be bumped or marked sold, and a take-down revokes trust for 90 days. The effects are independent and best-effort, so one failure doesn't block the rest.
-    - **Reject presets.** Rejecting shows four preset reasons as buttons (`rr_<postId>_<n>`), beside the existing reply-with-your-own and Skip. The reject message to the author has a "Fix and resend" button and, when `rulesUrl` is set, a "Group rules" button.
-    - **Blocked-word check at the preview.** A blocked word in the title, description, price or location stops the post before the preview, for everyone including trusted sellers: the bot names the word and asks for that field again, then returns to the preview.
+    - **Take down.** Every published card (trusted or moderator-approved) carries a Take down button (`td_<listingId>`) when its listing exists. It is atomic (one press wins), removes the group message, marks the listing `taken_down` (the post stays `approved`), and tells the author. A taken-down post can't be bumped or marked sold, and a take-down revokes trust for 90 days. The effects are independent and best-effort, so one failure doesn't block the rest.
+    - **Reject presets.** Rejecting shows four preset reasons as buttons (`rr_<postId>_<n>`); the moderator can instead reply to the prompt with their own reason. New prompts have no Skip button; Skip buttons on prompts sent before the upgrade keep working. The reject message to the author has a "Fix and resend" button and, when `rulesUrl` is set, a "Group rules" button.
+    - **Blocked-word check at the preview.** A blocked word in the title, description, price or location stops the post before the preview, for everyone including trusted sellers (the hidden URL of a text link in the description counts too): the bot names the word and asks for that field again, then returns to the preview.
     - `/config rulesUrl` is now used (it was reserved in 2.1.0).
     - Seller-post `/test` cases (trusted and new sellers, synthetic preset reject) and `src/tests/syntheticModeration.ts` (manual, test bot and group only). The `/test` cases refuse to run outside the test bot.
   - Changed:
     - The author is told about a rejection exactly once, whichever way the reason arrives (preset, reply, Skip, or a double press): the notice goes through a new atomic claim (`claimRejectionNotice`). The reject itself keeps its atomic claim.
+    - Marking a post sold now also ends its listing, so a moderator's Take down finds nothing to remove on a sold post.
     - The rule "every post passes moderation before the sales group" now reads: new sellers pass moderation; trusted sellers publish at once and are reviewed after (`Agents.md`).
     - `pnpm test` gained coverage of these flows in `check-flows`, `check-callbacks` (the `rr_` and `td_` formats are pinned and frozen), `check-claim`, `check-market` and `check-platform`. `check-locals` also fails if a `he` string contains a blocked word.
   - Notes:
     - Data: additive only. `posts` gains the optional `rejectionNotifiedAt` and `drafts` the optional `fixing`; no existing field changes.
-    - **Rollback caveat:** the 2.0.1 image runs against the same database, but it doesn't know about take-down, so it can Bump a post that a moderator took down (and show it in `/myposts`). If you roll back after take-downs, treat that as known.
+    - **Rollback caveat:** the realistic rollback target is 2.1.0, and the 2.0.1 image also runs against the same database. Neither knows about take-down or the new buttons, so after a rollback:
+      - Bump and Sold still work on a post a moderator took down (and it shows in `/myposts`).
+      - `rr_` and `td_` buttons answer "expired"; a new reject prompt can only be resolved by a typed reply.
+      - A typed reply after another moderator's preset can DM the author twice (2.1.0 has no once-only notice claim).
+      - Trust revocation survives: the 2.1.0 reconcile leaves `taken_down` listings alone.
+      If you roll back after take-downs, treat these as known.
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
     - Deploys need the owner's go-ahead.
     - After deploy the owner sets `/config rulesUrl https://t.me/airsoft_yad2/54833/115880` (empty until then, so the rules button is hidden).

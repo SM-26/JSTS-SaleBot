@@ -6,7 +6,7 @@
 
 ## Project Overview
 
-**JSTS-SaleBot** is a Telegram-based marketplace bot built with **TypeScript** (Node.js). It allows users to create sale posts directly inside Telegram, which are then routed through a moderation group before being published to an approved sales channel/group. It supports post lifecycle management (pending → approved/rejected → sold/bumped) and admin runtime configuration.
+**JSTS-SaleBot** is a Telegram-based marketplace bot built with **TypeScript** (Node.js). It allows users to create sale posts directly inside Telegram, which are routed through a moderation group (new sellers) or published at once and reviewed afterwards (trusted sellers) in the approved sales channel/group. It supports post lifecycle management (pending → approved/rejected → sold/bumped) and admin runtime configuration.
 
 **Stack:**
 - Runtime: Node.js + TypeScript
@@ -36,7 +36,7 @@
 │   │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
 │   │   ├── wizardService.ts      # /newPost wizard as a step machine over drafts; /cancel; wizard buttons
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
-│   │   ├── moderationService.ts  # Approve/reject callbacks; reject presets (rr_), reply or Skip; once-only author notice
+│   │   ├── moderationService.ts  # Approve/reject callbacks; reject presets (rr_) or reply (legacy Skip still works); once-only author notice
 │   │   ├── publishService.ts     # submitPost(): trusted sellers publish at once with a review card, others go to moderation
 │   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days
 │   │   ├── takeDownService.ts    # Moderator take-down (td_): listing taken_down, group message removed, author told
@@ -136,18 +136,17 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 User sends /newPost
   → WizardService walks the user's draft (collection `drafts`): title, description, price, location, media
   → PostService shows preview
+      (blocked words, including those in hidden link URLs, are stopped here, for everyone, trusted sellers included)
   → User confirms
   → Post saved to DB (status: "pending")
-  → PostService forwards to moderation group
-      (blocked words are stopped at the preview, for everyone, trusted sellers included)
   → PublishService.submitPost:
       → trusted seller (approved or sold post, no moderator take-down in 90 days)
           → status: "approved", posted to approved group at once; the moderation group gets a
             "Published (trusted seller)" card with Take down, reviewed after publishing
-      → everyone else → forwards to moderation group
-      → ModerationService: admin approves → status: "approved", posted to approved group (card has Take down)
+      → new seller → PostService forwards to moderation group
+      → ModerationService: admin approves → status: "approved", posted to approved group (card has Take down when its listing exists)
       → ModerationService: admin rejects  → status: "rejected"; the moderator picks a preset reason (rr_),
-                                            or REPLIES to the prompt, or presses Skip; the user is notified
+                                            or REPLIES to the prompt (old Skip buttons still work); the user is notified
                                             exactly once (claimRejectionNotice), with "Fix and resend" and the rules link
       → TakeDownService: moderator takes down a published post (td_) → listing "taken_down", group message
                          removed, author told, trust revoked for 90 days; the post can no longer be bumped or sold
@@ -299,7 +298,10 @@ Never run the bot, or a check, against the production token or database.
 | `src/services/inputService.ts` | Wizard prompts and price validation |
 | `src/services/postService.ts` | Post formatting & Telegram message management |
 | `src/services/moderationService.ts` | Approve/reject logic, reject-reason prompt |
-| `src/services/myPostsService.ts` | User post management (bump, sold) |
+| `src/services/myPostsService.ts` | User post management (bump, sold; Sold also ends the listing) |
+| `src/services/publishService.ts` | submitPost(): trusted sellers publish at once, others go to moderation |
+| `src/services/trustService.ts` | isTrustedSeller(): approved or sold post, no moderator take-down in 90 days |
+| `src/services/takeDownService.ts` | Moderator take-down (td_) |
 | `src/services/adminService.ts` | Runtime config command |
 | `src/services/paymentService.ts` | Handles Telegram Stars donations |
 | `src/models/Post.ts` | Post Mongoose schema |
