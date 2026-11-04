@@ -11,6 +11,8 @@ import { BroadcastUsersService } from "../services/broadcastUsersService";
 import draftRepository from "../repositories/draftRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { classify } from "../services/classifier";
+import { PublishService } from "../services/publishService";
+import listingRepository from "../repositories/listingRepository";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -39,6 +41,8 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
     classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
     shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
+    trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
+    new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
 };
 
 /**
@@ -539,4 +543,67 @@ async function testCase_ShadowLast5(
         console.error("[ERROR - testCase_ShadowLast5]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Shadow rows failed: " + (err as Error).message });
     }
+}
+
+// Real-looking radio post (owner fixture) with one photo file_id of the TEST bot.
+// The seller is the tester, never the real seller.
+const RADIO_POST = {
+    title: "מכשיר קשר",
+    description: "באופנג UV-5R\nחדש באריזה",
+    price: "270",
+    location: "בית דגן",
+    media: [{ fileId: "AgACAgQAAyEGAASRyiESAAIBaWrrdLCnO5_7O2IBhJgi88eq-bjkAAJUD2sbuaNZU5XHhK251RGCAQADAgADeQADPQQ", type: "photo" }] as MediaItem[],
+};
+
+/**
+ * Shared by the two seller cases: saves the radio post for the tester and runs it
+ * through PublishService with the seller trust forced either way. Test groups only.
+ */
+async function radioPostAs(trusted: boolean, api: Api, config: BotConfig, postService: PostService, userService: UserService, msg: Message): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    const user: TgUser = msg.from;
+    try {
+        await userService.ensureUser(user);
+        const post = await postRepository.createPost({
+            userId: user.id.toString(),
+            ...RADIO_POST,
+            createdAt: new Date(),
+        });
+        const data = { ...RADIO_POST, userId: user.id, username: user.username, firstName: user.first_name };
+        const outcome = await new PublishService(api, config, postService).submitPost(post, data, trusted);
+        const listing = await listingRepository.findByPostId(String(post._id));
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: `✅ ${trusted ? "Trusted" : "New"} seller post: ${outcome} (test groups only)\nPost ID: ${post._id}\nListing ID: ${listing ? listing._id : "none"}`,
+        });
+    } catch (err) {
+        console.error("[ERROR - radioPostAs]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Seller post failed: " + (err as Error).message });
+    }
+}
+
+async function testCase_TrustedSellerPost(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    await radioPostAs(true, api, config, postService, userService, msg);
+}
+
+async function testCase_NewSellerPost(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    await radioPostAs(false, api, config, postService, userService, msg);
 }
