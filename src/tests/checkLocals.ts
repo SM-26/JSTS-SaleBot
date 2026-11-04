@@ -183,7 +183,12 @@ function runCheck() {
     // 7. Blocked words: the Hebrew locale must never say them (replicas are not weapons)
     console.log("[INFO] Checking he strings for blocked words...");
     assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק");
-    assert.strictEqual(findBlockedWord("לנשק"), "נשק", "accepted false positive: substring on purpose");
+    assert.strictEqual(findBlockedWord("מתנה לנשק"), "לנשק", "accepted false positive: listed separately in Rose");
+    assert.strictEqual(findBlockedWord("ליד תחנה קרובה"), null, "whole word only");
+    assert.strictEqual(findBlockedWord("גרסה חדשה"), null);
+    assert.strictEqual(findBlockedWord("נשקים למכירה"), "נשקים");
+    assert.strictEqual(findBlockedWord("ראו https://cutt.ly/abc123"), "https://cutt.ly/*");
+    assert.strictEqual(findBlockedWord("WATCH PORN now"), "watch porn");
     assert.strictEqual(findBlockedWord("M4 למכירה"), null);
     assert.strictEqual(findBlockedWord(undefined), null);
     const heStrings: [string, string][] = [];

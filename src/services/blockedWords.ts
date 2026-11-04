@@ -1,8 +1,18 @@
 import blockedWords from "../config/blockedWords.json";
 
-/** First blocked word contained in `text`, or null. */
+// ponytail: matches Rose's blocklist semantics on purpose (owner): whole word or phrase, case-insensitive, `*` = run of non-space
+const matchers = blockedWords.map(entry => ({
+    entry,
+    regex: new RegExp(
+        "(?<![\\p{L}\\p{N}])" +
+            entry.split("*").map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\S*") +
+            "(?![\\p{L}\\p{N}])",
+        "iu"
+    ),
+}));
+
+/** First blocked entry contained in `text`, or null. */
 export function findBlockedWord(text: string | undefined | null): string | null {
     if (!text) return null;
-    // ponytail: substring match on purpose (owner): letters, not meaning
-    return blockedWords.find(word => text.includes(word)) ?? null;
+    return matchers.find(m => m.regex.test(text))?.entry ?? null;
 }
