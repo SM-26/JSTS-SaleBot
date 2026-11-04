@@ -332,6 +332,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "rejectReason") {
+            await this.moderationService.handleReasonCallback(ctx, query, route.arg);
+            return;
+        }
+
         if (route.action === "takeDown") {
             await this.takeDownService.handleCallback(query, route.arg);
             return;
@@ -472,8 +477,10 @@ export class BotController {
             return next();
         });
 
-        bot.use(cmd("start", (msg) => {
+        bot.use(cmd("start", (msg, args) => {
             if (!isPrivate(msg)) return;
+            // The "Fix and resend" button on a reject notice deep-links here.
+            if (args === "sell") return this.wizardService.handleNewPost(msg);
             return this.HandleStart(msg);
         }));
         bot.use(cmd("newpost", (msg) => {

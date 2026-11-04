@@ -73,6 +73,13 @@ export interface LocaleStrings {
     statusApproved: string;
     statusRejected: string;
     rejectReasonPrompt: string;
+    rejectPreset1: string;
+    rejectPreset2: string;
+    rejectPreset3: string;
+    rejectPreset4: string;
+    rejectFixButton: string;
+    rejectRulesButton: string;
+    authorNotNotified: string;
     skipReasonButton: string;
     postRejectedWithReason: string;
     notAdmin: string;

@@ -35,6 +35,8 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`lb_${ID}_n`, { action: "label", arg: `${ID}_n` }],
     [`lb_${ID}_k`, { action: "label", arg: `${ID}_k` }],
     ["td_65f1c2a9e4b0c3d2a1f09876", { action: "takeDown", arg: "65f1c2a9e4b0c3d2a1f09876" }],
+    [`rr_${ID}_1`, { action: "rejectReason", arg: `${ID}_1` }],
+    [`rr_${ID}_4`, { action: "rejectReason", arg: `${ID}_4` }],
     // Unknown or ephemeral (handled by temporary listeners): must not route.
     ["confirm_123", null],
     ["done_media_123", null],
@@ -65,7 +67,7 @@ for (const dir of localeDirs) {
         generated.push(`faq_${nodeId}`);
     }
 }
-for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876"]) generated.push(s);
+for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `rr_${ID}_1`, `rr_${ID}_4`]) generated.push(s);
 
 for (const s of generated) {
     assert.ok(Buffer.byteLength(s) <= 64, `callback_data over 64 bytes: "${s}"`);
