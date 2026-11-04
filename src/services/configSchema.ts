@@ -11,11 +11,16 @@ import { localeService } from "./localeService";
 export type ConfigFieldSpec =
     | { kind: "boolean" }
     | { kind: "number"; nullable?: boolean; min?: number }
-    | { kind: "enum"; values: () => readonly string[] };
+    | { kind: "enum"; values: () => readonly string[] }
+    | { kind: "string"; pattern?: RegExp; allowEmpty?: boolean };
 
 export const CONFIG_SCHEMA: Record<string, ConfigFieldSpec> = {
     lang: { kind: "enum", values: () => localeService.availableLocales },
     mediaLayout: { kind: "enum", values: () => ["slideshow", "collage"] },
+    // ponytail: later slices extend these arrays (optin / on)
+    captureMode: { kind: "enum", values: () => ["off", "shadow"] },
+    buyerMatches: { kind: "enum", values: () => ["off", "shadow"] },
+    rulesUrl: { kind: "string", pattern: /^https:\/\/t\.me\//, allowEmpty: true },
 
     moderationGroupId: { kind: "number" },
     approvedGroupId: { kind: "number" },
@@ -30,6 +35,7 @@ export const CONFIG_SCHEMA: Record<string, ConfigFieldSpec> = {
     validatePrice: { kind: "boolean" },
     donationsEnabled: { kind: "boolean" },
     enableFaq: { kind: "boolean" },
+    nudges: { kind: "boolean" },
 
     // ponytail: these three live in config.json but nothing reads them yet;
     // typed here so /config still validates rather than accepting anything.
@@ -65,6 +71,16 @@ export function parseConfigValue(key: string, raw: string): ParseResult {
             return { ok: false, expected: `a number >= ${spec.min}` };
         }
         return { ok: true, value: num };
+    }
+
+    if (spec.kind === "string") {
+        if (value === "") {
+            return spec.allowEmpty ? { ok: true, value } : { ok: false, expected: "a non-empty value" };
+        }
+        if (spec.pattern && !spec.pattern.test(value)) {
+            return { ok: false, expected: `a value matching ${spec.pattern}` };
+        }
+        return { ok: true, value };
     }
 
     const allowed = spec.values();

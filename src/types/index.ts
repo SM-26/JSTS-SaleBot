@@ -31,6 +31,11 @@ export interface BotConfig {
     donationsEnabled?: boolean;
     enableFaq?: boolean;
     mediaLayout?: "slideshow" | "collage";
+    // Market switches; a missing key means off / off / false / "".
+    captureMode?: "off" | "shadow" | "optin";
+    buyerMatches?: "off" | "shadow" | "on";
+    nudges?: boolean;
+    rulesUrl?: string;
 }
 
 export interface LocaleStrings {

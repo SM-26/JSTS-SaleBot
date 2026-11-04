@@ -46,6 +46,18 @@ assert.deepStrictEqual(parseConfigValue("broadcastTopicId", "73"), { ok: true, v
 assert.strictEqual(parseConfigValue("broadcastTopicId", "abc").ok, false);
 console.log("  [SUCCESS] nullable numbers coerce \"null\" to real null.");
 
+// --- market switches and string kind --------------------------------------
+assert.deepStrictEqual(parseConfigValue("captureMode", "shadow"), { ok: true, value: "shadow" });
+assert.strictEqual(parseConfigValue("captureMode", "optin").ok, false, "optin is not allowed yet");
+assert.deepStrictEqual(parseConfigValue("buyerMatches", "off"), { ok: true, value: "off" });
+assert.strictEqual(parseConfigValue("buyerMatches", "on").ok, false, "on is not allowed yet");
+assert.deepStrictEqual(parseConfigValue("nudges", "true"), { ok: true, value: true });
+const rules = "https://t.me/airsoft_yad2/54833/115880";
+assert.deepStrictEqual(parseConfigValue("rulesUrl", rules), { ok: true, value: rules });
+assert.deepStrictEqual(parseConfigValue("rulesUrl", ""), { ok: true, value: "" });
+assert.strictEqual(parseConfigValue("rulesUrl", "http://evil.example").ok, false);
+console.log("  [SUCCESS] market switches and the string kind validate.");
+
 // --- unknown key -----------------------------------------------------------
 assert.strictEqual(parseConfigValue("notARealKey", "x").ok, false);
 console.log("  [SUCCESS] unknown keys are rejected.");

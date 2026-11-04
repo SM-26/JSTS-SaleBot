@@ -9,6 +9,7 @@
     "start": "node dist/bot.js",
     "dev": "ts-node src/bot.ts",
     "check-locals": "ts-node src/tests/checkLocals.ts",
+    "check-config": "ts-node src/tests/configSchema.check.ts",
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
     "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
@@ -19,7 +20,7 @@
     "check-dump": "ts-node src/tests/checkProdDump.ts",
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-rich && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",
