@@ -187,6 +187,37 @@ async function run() {
         assert.strictEqual(await Listing.countDocuments({ source: "bot" }), 3, "one listing per post");
         console.log("[OK] reconcile.");
 
+        // fail closed: an undated post is legacy and held, never a fresh dm listing
+        const undated = await mk("undated", new Date("2026-09-09T00:00:00Z"), "approved");
+        await PostModel.collection.updateOne({ _id: undated._id }, { $unset: { createdAt: "" } });
+        // an expired listing whose post is sold ends sold
+        const expPost = await mk("expired", new Date("2026-09-09T00:00:00Z"), "approved");
+        await reconcileBotListings(at(3));
+        const undatedL = await listingRepository.findByPostId(String(undated._id));
+        assert.ok(undatedL && undatedL.origin === "legacy" && undatedL.hold === true, "undated post reconciles to legacy hold");
+        const expL = (await listingRepository.findByPostId(String(expPost._id)))!;
+        await Listing.updateOne({ _id: expL._id }, { $set: { status: "expired" } });
+        await PostModel.updateOne({ _id: expPost._id }, { $set: { status: "sold" } });
+        assert.deepStrictEqual(await reconcileBotListings(at(4)), { created: 0, sold: 1 });
+        assert.strictEqual((await listingRepository.findByPostId(String(expPost._id)))!.status, "sold", "expired listing of a sold post becomes sold");
+
+        // one bad post (media: null makes createForPost throw) does not abort the run
+        const bad = await mk("bad", new Date("2026-09-09T00:00:00Z"), "sold");
+        await PostModel.collection.updateOne({ _id: bad._id }, { $set: { media: null } });
+        const good = await mk("good", new Date("2026-09-09T00:00:00Z"), "approved");
+        const realError = console.error;
+        const logged: string[] = [];
+        console.error = (...a: unknown[]) => { logged.push(a.join(" ")); };
+        try {
+            assert.deepStrictEqual(await reconcileBotListings(at(5)), { created: 1, sold: 0 });
+        } finally {
+            console.error = realError;
+        }
+        assert.ok(await listingRepository.findByPostId(String(good._id)), "a later post still gets its listing");
+        assert.strictEqual(await listingRepository.findByPostId(String(bad._id)), null);
+        assert.ok(logged.some(l => l.includes("[ERROR - reconcileBotListings]") && l.includes(String(bad._id))), "the bad post is logged");
+        console.log("[OK] reconcile fail-closed and per-post isolation.");
+
         // shadow log
         const row = await shadowLogRepository.insert({ chatId: CHAT, messageIds: [1], senderId: `${RUN}-x`, at: t0, tier: "strict", rules: ["r"], wouldList: true, parsedTitle: "t", parsedPrice: "5" });
         assert.ok(await shadowLogRepository.sampleUnlabeled(), "an unlabeled would-list row exists");
