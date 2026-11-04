@@ -248,6 +248,9 @@ false positive is accepted.
   an entry is a wildcard (e.g. `https://cutt.ly/*`). `forward:` entries are dropped, because they block forwards and
   capture ignores forwards already.
 - `findBlockedWord(text)` returns the first entry that matches, or null.
+- **Editable on the go (owner):** the list is read from disk, not compiled in. In prod it lives in a host folder
+  `./blocklist/blockedWords.json`, mounted read-only (`BLOCKED_WORDS_PATH`). Edits apply within about 60 s, with no
+  restart. If the file is missing or invalid, the built-in list is used and an error is logged once. (Built in slice 0.)
 - **Bot text:** `check-locals` fails if any `he` string contains a blocked word.
 - **What the bot publishes for a user** (wizard and one-message DM listing, 8.1): a title, description, price or
   location containing a blocked word stops at the preview. The bot names the word and asks for that field again
@@ -803,8 +806,7 @@ slot in, and the owner's open choices are in the inbox (`C:\Users\or_ga\Document
 
 ### 17.1 Seller badges
 
-Both marks are built (my reading of the owner's answer, which gave the numbers but didn't pick one). Each shows as its
-emoji only, with no word (owner). Both extend the trust line in 11.3:
+Both marks are built (owner confirmed). Each shows as its emoji only, with no word (owner). Both extend the trust line in 11.3:
 
 - **Top seller 🏅 (automatic).** It is earned when sold ÷ ended listings is at least X%, with at least N ended listings,
   where ended = `sold` + `expired` + `removed` (live listings don't count against a seller who is still selling).
@@ -824,9 +826,10 @@ at the meeting point", and buyers can filter on it:
 
 - An optional `meetup: boolean` on listings, drafts and posts. These are new optional fields, so 2.0.1 ignores them,
   and rollback is safe.
-- **Listing:** the wizard's location step and the DM preview get a toggle button [📍 בית דגן] (owner's text). Wherever the meeting point shows, a "where is it?" button opens
-the FAQ entry for it (`faq.json` node `1`): in DM with the existing `faq_1` callback, and on group posts with a URL
-deep link `start=faq_1`, a new payload that opens that FAQ node in DM (owner: yes). In captured text,
+- **Listing:** the wizard's location step and the DM preview get a toggle button [📍 בית דגן] (owner's text). For buyers, wherever the meeting point shows, the [📍 בית דגן] button itself opens the
+FAQ entry for it (`faq.json` node `1`); there is no separate "where is it?" button (owner). It works in DM with the
+existing `faq_1` callback, and on group posts as a URL deep link `start=faq_1`, a new payload that opens that FAQ
+node in DM. In captured text,
   "בית דגן" parses as the location, and a listing whose location is בית דגן counts as `meetup`.
 - **Shown** as "📍 {location} · בית דגן" on the post and the cards.
 - **Buyers:** a wanted-to-buy post or saved search that names "בית דגן" only matches `meetup` listings, or listings
