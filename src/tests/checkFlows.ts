@@ -896,6 +896,103 @@ async function run() {
             console.log("  [OK] (r8) td_ on a sold listing says already and changes nothing.");
         }
 
+        // (r9) the toast fails: the delete, the post update, the DM and the card edit still happen
+        {
+            let failAnswers = false;
+            const { h } = boot({ responses: {
+                answerCallbackQuery: () => failAnswers ? { ok: false, error_code: 400, description: "Bad Request: query is too old" } : true,
+            } });
+            const { u, post, cardId, listingId } = await publishTrusted(h);
+            failAnswers = true;
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            const del = deletes(h);
+            assert.strictEqual(del.length, 1);
+            assert.strictEqual(Number(del[0].params.message_id), post.approvedMessageId);
+            assert.strictEqual(((await Post.findById(post._id))!).approvedMessageId ?? null, null);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            assert.ok(h.calls.some((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId && text(c) === T("statusTakenDown")));
+            console.log("  [OK] (r9) a failing toast does not skip the delete, the DM or the card edit.");
+        }
+
+        // (r10) the post lookup throws: the listing is not stranded silently, the DM and card edit still happen
+        {
+            const { default: postRepository } = await import("../repositories/postRepository");
+            const { h } = boot();
+            const { u, cardId, listingId, post } = await publishTrusted(h);
+            const real = postRepository.findById;
+            postRepository.findById = (() => Promise.reject(new Error("db blip"))) as unknown as typeof real;
+            const logged: string[] = [];
+            const realErr = console.error;
+            console.error = (...args: unknown[]) => { logged.push(args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")); };
+            try {
+                h.calls.length = 0;
+                await tdPress(h, mod, listingId, cardId);
+                await settle();
+            } finally {
+                postRepository.findById = real;
+                console.error = realErr;
+            }
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            assert.ok(h.calls.some((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId));
+            assert.ok(logged.some((l) => l.includes("load post failed") && l.includes(listingId) && l.includes(String(post._id))), "the log carries the ids");
+            console.log("  [OK] (r10) a failing post lookup is logged with the ids and the other effects still run.");
+        }
+
+        // (r11) a group listing: the member's message is never touched
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Member", authLevel: 0 });
+            const now = new Date();
+            const listing = await Listing.create({
+                source: "group", origin: "capture", chatId: APPROVED_GROUP, messageIds: [555], sellerId: String(seller),
+                title: "Radio", media: [], status: "live", hold: false, isBundle: false, createdAt: now, refreshedAt: now,
+            });
+            h.calls.length = 0;
+            await tdPress(h, mod, String(listing._id), 321);
+            await settle();
+            assert.strictEqual((await Listing.findById(listing._id))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.ok(!h.calls.some((c) => Number(c.params.chat_id) === APPROVED_GROUP), "nothing sent to the member's chat");
+            assert.strictEqual(toAuthor(h, seller).length, 1);
+            console.log("  [OK] (r11) a group listing is taken down without touching the member's message.");
+        }
+
+        // (r12) a malformed id answers "already" without throwing
+        {
+            const { h } = boot();
+            for (const data of ["td_nothex", "td_"]) {
+                h.calls.length = 0;
+                await h.pressButton(data, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 322 });
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("takeDownAlready")], data);
+            }
+            console.log("  [OK] (r12) a malformed td_ id answers already.");
+        }
+
+        // (r13) an expired listing can be taken down
+        {
+            const { h } = boot();
+            const { post, cardId, listingId } = await publishTrusted(h);
+            await Listing.updateOne({ _id: listingId }, { $set: { status: "expired" } });
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            const after = (await Listing.findById(listingId))!;
+            assert.strictEqual(after.status, "taken_down");
+            assert.strictEqual(after.endedBy, "moderator");
+            assert.strictEqual(deletes(h).length, 1);
+            assert.strictEqual(((await Post.findById(post._id))!).approvedMessageId ?? null, null);
+            console.log("  [OK] (r13) an expired listing can be taken down.");
+        }
+
         // Task 6: reject presets. Labels (s)..(s7) stand for the brief's (q)..(q7): (q)..(q5) are taken above.
         const TEN = (key: string) => localeService.t("en", key);
         const rrPress = (h: H, who: number, data: string, messageId = 400) =>

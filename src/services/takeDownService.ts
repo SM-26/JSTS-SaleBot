@@ -1,6 +1,7 @@
 import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery } from "node-telegram-bot-api/types";
 import { AuthLevel, BotConfig } from "../types";
+import type { IListing } from "../models/Listing";
 import listingRepository from "../repositories/listingRepository";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
@@ -20,55 +21,75 @@ export class TakeDownService {
         const answer = (key: string, alert = false) =>
             this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, key), ...(alert ? { show_alert: true } : {}) });
 
+        // The only step that can stop the rest: the atomic take-down itself.
+        let before: IListing | null;
         try {
             if (!(await userService.hasAuthLevel(String(query.from.id), AuthLevel.MOD))) {
                 await answer("notAdmin", true);
                 return;
             }
-
             // Atomic: only one press wins, a sold/removed/malformed id gets "already".
-            const before = /^[0-9a-f]{24}$/i.test(listingId) ? await listingRepository.takeDown(listingId, new Date()) : null;
+            before = /^[0-9a-f]{24}$/i.test(listingId) ? await listingRepository.takeDown(listingId, new Date()) : null;
             if (!before) {
                 await answer("takeDownAlready");
                 return;
             }
-            await answer("takeDownDone");
-
-            let title = before.title ?? "";
-            if (before.source === "bot" && before.postId) {
-                const post = await postRepository.findById(before.postId);
-                title = post?.title ?? title;
-                if (post?.approvedMessageId) await this.deletePublicMessage(post.approvedMessageId);
-                await postRepository.setApprovedMessageId(before.postId, null);
-            }
-
-            await this.notifySeller(before.sellerId, title);
-
-            // Best-effort: closes the card (drops the button).
-            if (query.message) {
-                await this.api.editMessageText({
-                    chat_id: query.message.chat.id,
-                    message_id: query.message.message_id,
-                    text: localeService.t(locale, "statusTakenDown"),
-                }).catch((err: Error) => console.warn("[WARN - TakeDownService.handleCallback] editMessageText failed:", err.message));
-            }
         } catch (err) {
-            console.error("[ERROR - TakeDownService.handleCallback]", (err as Error).message);
+            console.error("[ERROR - TakeDownService.handleCallback]", { listingId }, (err as Error).message);
+            return;
+        }
+        const taken: IListing = before;
+
+        // From here the listing is taken_down and a second press only says "already",
+        // so nothing retries: every effect is independent and best-effort, and a
+        // failure logs the ids a moderator needs to finish by hand.
+        const ids: { listingId: string; postId?: string; approvedMessageId?: number | null } = { listingId, postId: taken.postId };
+        const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+            try {
+                return await fn();
+            } catch (err) {
+                console.error("[ERROR - TakeDownService.handleCallback]", `${name} failed:`, (err as Error).message, ids);
+                return null;
+            }
+        };
+
+        await step("answerCallbackQuery", () => answer("takeDownDone"));
+
+        let title = taken.title ?? "";
+        if (taken.source === "bot" && taken.postId) {
+            const postId = taken.postId;
+            const post = await step("load post", () => postRepository.findById(postId));
+            if (post) {
+                title = post.title ?? title;
+                ids.approvedMessageId = post.approvedMessageId;
+                if (post.approvedMessageId) await step("deleteMessage", () => this.deletePublicMessage(post.approvedMessageId!));
+                await step("setApprovedMessageId", () => postRepository.setApprovedMessageId(postId, null));
+            }
+        }
+
+        await step("notify seller", () => this.notifySeller(taken.sellerId, title));
+
+        // Closes the card (drops the button).
+        const msg = query.message;
+        if (msg) {
+            await step("editMessageText", () => this.api.editMessageText({
+                chat_id: msg.chat.id,
+                message_id: msg.message_id,
+                text: localeService.t(locale, "statusTakenDown"),
+            }));
         }
     }
 
-    // A message that is already gone counts as deleted; any other failure is
-    // logged and the take-down stands.
+    // A message that is already gone counts as deleted; any other failure is thrown to the step.
     private async deletePublicMessage(messageId: number): Promise<void> {
         try {
             await this.api.deleteMessage({ chat_id: this.config.approvedGroupId, message_id: messageId });
         } catch (err) {
-            if (!isApiError(err, 400, "message to delete not found")) {
-                console.error("[ERROR - TakeDownService.handleCallback]", "deleteMessage failed:", (err as Error).message);
-            }
+            if (!isApiError(err, 400, "message to delete not found")) throw err;
         }
     }
 
+    // No users doc: nobody to tell. A send error (403 blocked) is only a warning.
     private async notifySeller(sellerId: string, title: string): Promise<void> {
         const seller = await userRepository.findByUserId(sellerId);
         if (!seller) return;
