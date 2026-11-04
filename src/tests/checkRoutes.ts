@@ -21,6 +21,9 @@ const MONGO_URI = process.env.MONGO_URI;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The t.me link in a /label message, compared exactly (not as a substring).
+const linkIn = (text: unknown): string | undefined => String(text).match(/https:\/\/t\.me\/\S+/)?.[0];
+
 async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<boolean> {
     const end = Date.now() + timeoutMs;
     while (!condition() && Date.now() < end) await sleep(20);
@@ -123,7 +126,7 @@ async function run() {
             await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true });
             await expectCalls("/label as ADMIN", () => h.sendText("/label", { userId: adminId }));
             const labelCall = h.calls.find((c) => c.method === "sendMessage")!;
-            assert.ok(String(labelCall.params.text).includes("https://t.me/pubgroup/4242"), "/label links the approved group by its @username");
+            assert.strictEqual(linkIn(labelCall.params.text), "https://t.me/pubgroup/4242", "/label links the approved group by its @username");
             assert.ok(String(labelCall.params.text).endsWith("\nstrict · 100"), "/label shows the tier and the price number, no text");
             assert.ok(!String(labelCall.params.text).includes("Bike"), "/label shows no title");
             const keyboard = (labelCall.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
@@ -147,10 +150,10 @@ async function run() {
                 return h.calls.find((c) => c.method === "editMessageText")!.params;
             };
             const afterA = await skip(rowA);
-            assert.ok(String(afterA.text).includes(`t.me/c/${String(Math.abs(config.approvedGroupId - 1)).replace(/^100/, "")}/5252`), "Skip shows the other row, linked by id (its chat has no known @username)");
+            assert.strictEqual(linkIn(afterA.text), `https://t.me/c/${String(Math.abs(config.approvedGroupId - 1)).replace(/^100/, "")}/5252`,"Skip shows the other row, linked by id (its chat has no known @username)");
             assert.ok(JSON.stringify(afterA.reply_markup).includes(`lb_${rowB._id}_s`), "Skip does not re-show the skipped row");
             const afterB = await skip(rowB);
-            assert.ok(String(afterB.text).includes("t.me/pubgroup/5151"), "the approved group's row links by @username");
+            assert.strictEqual(linkIn(afterB.text), "https://t.me/pubgroup/5151","the approved group's row links by @username");
             assert.ok(JSON.stringify(afterB.reply_markup).includes(`lb_${rowA._id}_s`));
             await ShadowLog.deleteOne({ _id: rowB._id });
             const last = await skip(rowA);
