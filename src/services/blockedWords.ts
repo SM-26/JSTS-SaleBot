@@ -45,19 +45,34 @@ export function reloadBlockedWords(): number {
         source = DEFAULT_PATH;
     }
     try {
-        const list: unknown = JSON.parse(fs.readFileSync(source, "utf8"));
-        if (!Array.isArray(list)) throw new Error("expected an array of strings");
-        for (const e of list) {
-            // An empty or `*`-only entry would match every message.
-            if (typeof e !== "string" || e.replace(/[*\s]/g, "") === "") {
-                throw new Error(`bad entry ${JSON.stringify(e)}: expected a string with some text besides * and spaces`);
-            }
-        }
-        matchers = (list as string[]).map(compile);
+        matchers = loadList(source);
     } catch (error) {
-        console.error(`[ERROR - blockedWords] keeping ${matchers.length} entries, cannot load ${source}: ${error instanceof Error ? error.message : String(error)}`);
+        const why = error instanceof Error ? error.message : String(error);
+        if (matchers.length === 0 && source !== DEFAULT_PATH) {
+            // boot with a broken override: the built-in list beats an empty one
+            console.error(`[ERROR - blockedWords] cannot load ${source}: ${why}; using the built-in list ${DEFAULT_PATH}`);
+            try {
+                matchers = loadList(DEFAULT_PATH);
+            } catch (fallbackError) {
+                console.error(`[ERROR - blockedWords] cannot load ${DEFAULT_PATH}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+            }
+        } else {
+            console.error(`[ERROR - blockedWords] keeping ${matchers.length} entries, cannot load ${source}: ${why}`);
+        }
     }
     return matchers.length;
+}
+
+function loadList(source: string): Matcher[] {
+    const list: unknown = JSON.parse(fs.readFileSync(source, "utf8"));
+    if (!Array.isArray(list)) throw new Error("expected an array of strings");
+    for (const e of list) {
+        // An empty or `*`-only entry would match every message.
+        if (typeof e !== "string" || e.replace(/[*\s]/g, "") === "") {
+            throw new Error(`bad entry ${JSON.stringify(e)}: expected a string with some text besides * and spaces`);
+        }
+    }
+    return (list as string[]).map(compile);
 }
 
 /** Test hook: point at another file (undefined = the real one) and reload. */

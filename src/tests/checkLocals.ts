@@ -204,6 +204,21 @@ function runCheck() {
             assert.strictEqual(reloadBlockedWords(), 1, `invalid list ${bad} keeps the last good one`);
             assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
         }
+        // boot with an existing but invalid override (nothing good loaded yet): the built-in list, not an empty one
+        for (const bad of ["{ not json", '[""]']) {
+            fs.writeFileSync(tmpList, bad);
+            setBlockedWordsPathForTest(tmpList);
+            const realError = console.error;
+            const logged: string[] = [];
+            console.error = (...a: unknown[]) => { logged.push(a.join(" ")); };
+            try {
+                assert.ok(reloadBlockedWords() > 60, `invalid override ${bad} at boot loads the built-in list`);
+            } finally {
+                console.error = realError;
+            }
+            assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק", "blocked words still work after an invalid boot override");
+            assert.strictEqual(logged.length, 1, "logged once");
+        }
     } finally {
         setBlockedWordsPathForTest(undefined);
         fs.rmSync(tmpList, { force: true });
