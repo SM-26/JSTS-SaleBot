@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Bot } from "node-telegram-bot-api";
 import type { Update } from "node-telegram-bot-api/types";
 import { AuthLevel } from "../types";
+import { isTestBotToken, isTestDbUri, TEST_BOT_ID_PREFIX } from "./testBot";
 
 // Manual end-to-end run of the preset reject flow (card -> reject_ -> prompt with four
 // preset buttons -> rr_<id>_1 -> edited prompt + DM to the author) against the TEST bot
@@ -15,7 +16,6 @@ import { AuthLevel } from "../types";
 // The real token is used, but the fetch wrapper lets only the methods below reach
 // Telegram; answerCallbackQuery is faked (callback ids are not real); anything else
 // is recorded as a violation, never sent, and fails the run.
-const TEST_BOT_PREFIX = "9299714864:";
 const MOD_GROUP = -1002474192098;
 const MOD_TOPIC = 15;
 const APPROVED_GROUP = -1002445943058;
@@ -28,20 +28,16 @@ interface Sent { method: string; chat: number | undefined; topic: number | undef
 
 async function main(): Promise<number> {
     const token = process.env.BOT_TOKEN ?? "";
-    if (!token.startsWith(TEST_BOT_PREFIX)) {
-        console.error(`[FAIL] BOT_TOKEN must belong to the test bot (prefix ${TEST_BOT_PREFIX}); refusing to run.`);
+    if (!isTestBotToken(token)) {
+        console.error(`[FAIL] BOT_TOKEN must belong to the test bot (prefix ${TEST_BOT_ID_PREFIX}); refusing to run.`);
         return 1;
     }
     const uri = process.env.MONGO_URI;
-    if (!uri) {
-        console.error("[FAIL] set MONGO_URI to a throwaway database.");
+    if (!isTestDbUri(uri)) {
+        console.error('[FAIL] MONGO_URI must name a throwaway database (the db path must contain "test"); refusing to connect.');
         return 1;
     }
-    await mongoose.connect(uri);
-    if (!/test/i.test(mongoose.connection.name)) {
-        console.error(`[FAIL] refusing to run on database "${mongoose.connection.name}" (name must contain "test").`);
-        return 1;
-    }
+    await mongoose.connect(uri!);
 
     // config.json is read at import time, so load the controller after the checks above.
     const { BotController } = await import("../controllers/botController");
@@ -67,9 +63,10 @@ async function main(): Promise<number> {
         const isSend = method === "sendRichMessage" || method === "sendMessage";
         const chat = body.has("chat_id") ? Number(body.get("chat_id")) : undefined;
         const topic = body.has("message_thread_id") ? Number(body.get("message_thread_id")) : undefined;
-        if (isSend && (chat === undefined || chat === APPROVED_GROUP)) {
-            violations.push(`${method} to ${chat === undefined ? "an unreadable chat" : "the approved group"}`);
-            throw new Error("blocked: the approved group must stay untouched");
+        // Allow-list: only the moderation group and the owner's DM may be written to (sends and edits).
+        if (method !== "getMe" && chat !== MOD_GROUP && chat !== OWNER) {
+            violations.push(`${method} to ${chat === undefined ? "an unreadable chat" : chat === APPROVED_GROUP ? "the approved group" : "chat " + chat}`);
+            throw new Error("blocked: chat is not on the allow-list");
         }
         const res = await fetch(input, init);
         if (isSend) {

@@ -11,6 +11,7 @@ import { BroadcastUsersService } from "../services/broadcastUsersService";
 import draftRepository from "../repositories/draftRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { classify } from "../services/classifier";
+import { isTestBotToken } from "./testBot";
 import { PublishService } from "../services/publishService";
 import listingRepository from "../repositories/listingRepository";
 
@@ -561,6 +562,11 @@ const RADIO_POST = {
  */
 async function radioPostAs(trusted: boolean, api: Api, config: BotConfig, postService: PostService, userService: UserService, msg: Message): Promise<void> {
     if (!msg.from) throw new Error("Test requires a valid user in message context");
+    // Trusted publishing is real: on any other bot it would post to the production group.
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Seller-post tests run only on the test bot." });
+        return;
+    }
     const user: TgUser = msg.from;
     try {
         await userService.ensureUser(user);

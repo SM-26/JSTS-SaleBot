@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Bot } from "node-telegram-bot-api";
 import type { Update } from "node-telegram-bot-api/types";
 import type { Tier } from "../services/classifier";
+import { isTestBotToken, TEST_BOT_ID_PREFIX } from "./testBot";
 
 // Manual end-to-end run of capture -> window -> classify -> shadow_log against
 // the TEST bot and TEST group, with nothing sent anywhere. Not part of `pnpm test`.
@@ -14,7 +15,6 @@ import type { Tier } from "../services/classifier";
 // topic 73): the controller reads it at import time. The real token is used so
 // `getMe` works, but the fetch wrapper lets only getMe/getChat reach Telegram;
 // any other method is recorded as a violation, never sent, and fails the run.
-const TEST_BOT_PREFIX = "9299714864:";
 const GROUP = -1002445943058;
 const TOPIC = 73;
 const SENDER = 278683632;
@@ -46,8 +46,8 @@ const FIXTURES: Array<[string, number, Tier]> = [
 
 async function main(): Promise<number> {
     const token = process.env.BOT_TOKEN ?? "";
-    if (!token.startsWith(TEST_BOT_PREFIX)) {
-        console.error(`[FAIL] BOT_TOKEN must belong to the test bot (prefix ${TEST_BOT_PREFIX}); refusing to run.`);
+    if (!isTestBotToken(token)) {
+        console.error(`[FAIL] BOT_TOKEN must belong to the test bot (prefix ${TEST_BOT_ID_PREFIX}); refusing to run.`);
         return 1;
     }
     const uri = process.env.MONGO_URI;
