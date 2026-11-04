@@ -53,7 +53,7 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - a member is nagged: more than one unanswered note per post, or any note after "Don't ask again";
 - existing `posts`/`users` data is reshaped, or rollback to the 2.0.1 image is lost, without the owner agreeing to
   that specific case first (see Constraints);
-- any bot text calls airsoft replicas weapons (נשק);
+- any Hebrew bot text, or anything the bot publishes, contains a blocked word (5.5);
 - the private note is the only place a seller can act from (notes may vanish or never arrive);
 - a test touches the production token or database.
 
@@ -72,7 +72,8 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - Bots can't DM a user who never started the bot. Durable contact with a group-only member starts when they tap a
   deep link.
 - Bots can't read chat history. The catch-up scan uses the owner's Telegram Desktop export, offline.
-- No bot text may use the word נשק (or "weapon"/"оружие" in other locales). Enforced by `check-locals`.
+- Blocked words (5.5): a plain Hebrew substring blacklist, starting with `נשק`. No Hebrew bot text and nothing the
+  bot publishes may contain one. Enforced by `check-locals` and at publish time.
 - Prod token and prod DB are never used in tests: test bot `@JSTS_testing_bot`, user-facing test group
   `-1002445943058` topic 73 plays the sale topic, moderation test group `-1002474192098` topic 15.
 - Prod deploys, and the bot's first unprompted message to real users, each need the owner's go-ahead.
@@ -219,13 +220,34 @@ like `validatePrice`.
 | `nudges` | boolean | `false` | Day-7 "still for sale?" messages. Off until the owner's go-ahead, because they are unprompted messages to real users. Expiry runs regardless (it sends nothing). |
 | `rulesUrl` | string | `""` | Link to the group rules, shown as a button on reject notices (9.3). Prod: `https://t.me/airsoft_yad2/54833/115880`. Config, not code, because it is community-specific like the group ids. |
 
-They are live kill switches for the rollout, and each one that sends to real users is flipped only on the owner's
+`CONFIG_SCHEMA` has no string kind yet (only boolean, number, enum), so `rulesUrl` adds a `string` kind that
+accepts an `https://t.me/` link or empty.
+
+The three switches are live kill switches for the rollout, and each one that sends to real users is flipped only on the owner's
 go-ahead. The day counts (7, 30), the window (90 s) and the limits in this
 document are constants in code, not config (nobody has asked to tune them).
 
 Capture listens in `approvedGroupId`, sale topic `approvedTopicId`. When `approvedTopicId` is 1 (prod), sale-topic
 messages arrive without `message_thread_id` (or with 1); the existing `Number(topicId) !== 1` convention in
 `postService` already encodes this. Messages in other topics are ignored.
+
+### 5.5 Blocked words (owner)
+
+A plain substring blacklist on Hebrew text, the same kind the group's Rose bot enforces. It matches the letters, not
+the meaning: `נשק` blocks anything that contains it, so it catches "לנשק" as "for a gun" and also blocks "לנשק" as
+"to kiss". That false positive is accepted on purpose, for simplicity. Other languages are not checked.
+
+- **The list:** one repo file, `src/config/blockedWords.json`, starting as `["נשק"]`. The owner will add Rose's list
+  later. Matching is `text.includes(word)` on the text as written. (My call: a file rather than a config key,
+  because it changes rarely and `/config` has no list type.)
+- **Bot text:** `check-locals` fails if any `he` string contains a blocked word.
+- **What the bot publishes for a user** (wizard and one-message DM listing, 8.1): a title, description, price or
+  location containing a blocked word stops at the preview. The bot names the word and asks for that field again
+  (the existing field-edit step). This applies to trusted sellers too, because nobody reviews their post first.
+- **Capture:** a group post containing a blocked word is tier `none`: no capture, no note, no listing (Rose deletes it
+  anyway). An edit that adds one drops the open capture, or ends a live listing as `removed` by the system (never
+  `taken_down`, so trust is untouched).
+- Buyer notes and alerts show only listing text that already passed one of these checks.
 
 ## 6. Capture in the group
 
@@ -628,7 +650,8 @@ contain no member names, phone numbers or copied posts.
   - new `check-market` (Mongo): window grouping incl. album + separate text within 90 s, close timing with a fake
     clock, repost merge, reconcile idempotence, atomic claims under two concurrent sweeps, TTL indexes exist.
   - `check-routes`: group messages outside the sale topic and from bots are ignored.
-  - `check-locals`: no נשק / weapon / оружие in any locale.
+  - `check-locals`: no `he` string contains a blocked word (5.5).
+  - `check-classifier`: a post containing a blocked word is tier `none`, including the "לנשק" false positive.
 - **/test:** "Classify text" (reply with tier and parse), "Shadow: last 5 rows".
 - **Synthetic:** 20 fixture posts into topic 73 → `shadow_log` rows match expected tiers; nothing sent to the group.
 - **Exit:** deployed with `captureMode: shadow`; a week of `/stats` gives the live baseline.
@@ -707,7 +730,7 @@ contain no member names, phone numbers or copied posts.
 ## 14. What is left to the builder
 
 - Exact word lists, alias table and city list (start from the export's vocabulary; keep them in the data file).
-- Locale wording for en/ru and all Hebrew strings not quoted here (owner reviews them in the PR). Never נשק.
+- Locale wording for en/ru and all Hebrew strings not quoted here (owner reviews them in the PR). No blocked word in `he` (5.5).
 - Index details, field names beyond the ones listed, the module split inside `src/services/` (e.g. `classifier`,
   `captureService`, `marketService`, `lifecycleService`, `matchService`), as long as Mongoose stays in repositories.
 - Callback prefixes and payload spellings (the ones here are proposals), pinned in `check-callbacks` once shipped.
