@@ -31,6 +31,9 @@ COPY --from=build /app/dist ./dist
 # emits .js, so the JSON has to be copied in explicitly or every string falls
 # back to its raw key. config.json is NOT baked in — mount it at /app/config.json.
 COPY --from=build /app/src/locales ./src/locales
+# The blocked-word list is read from disk too (process.cwd()/src/config/blockedWords.json).
+# compose.prod.yaml bind-mounts a host copy over it so the owner can edit it without a rebuild.
+COPY --from=build /app/src/config/blockedWords.json ./src/config/blockedWords.json
 
 # Install only production dependencies (same pinned pnpm as the base stage)
 RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")" \

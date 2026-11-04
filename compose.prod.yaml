@@ -16,6 +16,9 @@ services:
     volumes:
       # Must be writable by UID 1000 (`node`): /config saves back to this file.
       - ./config.json:/app/config.json
+      # Blocked-word list, re-read within ~60 s of an edit. Copy the file next
+      # to config.json first: a bind mount of a missing file creates a directory.
+      - ./blockedWords.json:/app/src/config/blockedWords.json:ro
     depends_on:
       mongoserver:
         condition: service_healthy

@@ -321,6 +321,8 @@ docker compose -f compose.prod.yaml logs -f bot
 
 > **`config.json` is not baked into the image.** It is environment-specific (and gitignored), so it is mounted at `/app/config.json` — the container exits on startup without it. It must be **writable by UID 1000** (the image's `node` user): `/config` changes are persisted back to this file. On the host: `sudo chown 1000:1000 config.json`.
 
+> **The blocked-word list is editable on the host.** `compose.prod.yaml` bind-mounts `./blockedWords.json` over `/app/src/config/blockedWords.json` (read-only). **Before the first deploy**, copy `src/config/blockedWords.json` from the repo to `./blockedWords.json` next to `config.json`: a bind mount of a missing file makes Docker create a *directory*. Edit the host file to change the list; the bot re-reads it within about 60 s, no restart. A broken edit (invalid JSON, not an array of strings) is logged as `[ERROR - blockedWords]` and the last good list stays active.
+
 > **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
 
 **Switching an existing host from the dev compose file.** The project name is the same, so the `jsts-salebot_mongodb_data` volume with all posts and users is reused:

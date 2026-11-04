@@ -50,6 +50,7 @@ export type ParseResult =
 
 /** Pure: validate/coerce a raw /config value against the key's spec. */
 export function parseConfigValue(key: string, raw: string): ParseResult {
+    if (!Object.hasOwn(CONFIG_SCHEMA, key)) return { ok: false, expected: "a known config key" };
     const spec = CONFIG_SCHEMA[key];
     if (!spec) return { ok: false, expected: "a known config key" };
 

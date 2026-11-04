@@ -1,7 +1,8 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import assert from "assert";
-import { findBlockedWord } from "../services/blockedWords";
+import { findBlockedWord, reloadBlockedWords, setBlockedWordsPathForTest } from "../services/blockedWords";
 
 // Paths relative to src/tests/
 const LOCALES_DIR = path.join(__dirname, "../locales");
@@ -179,6 +180,32 @@ function runCheck() {
     } else {
         console.log("  [SUCCESS] All keys appear to be used.");
     }
+
+    // 6b. The blocked-word list reloads from disk (the owner edits it on the server)
+    console.log("[INFO] Checking blocked-word reload...");
+    const tmpList = path.join(os.tmpdir(), `blockedWords-${process.pid}.json`);
+    try {
+        setBlockedWordsPathForTest(tmpList);
+        assert.strictEqual(reloadBlockedWords(), 0, "missing file: empty list, no crash");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהאחת"]));
+        assert.strictEqual(reloadBlockedWords(), 1);
+        assert.strictEqual(findBlockedWord("זו בדיקהאחת"), "בדיקהאחת");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהשתיים"]));
+        fs.utimesSync(tmpList, new Date(), new Date(Date.now() + 5000));
+        assert.strictEqual(reloadBlockedWords(), 1);
+        assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
+        assert.strictEqual(findBlockedWord("זו בדיקהאחת"), null, "old entry is gone");
+        for (const bad of ["{ not json", '{"a":1}', '["ok", 5]', '[""]']) {
+            fs.writeFileSync(tmpList, bad);
+            assert.strictEqual(reloadBlockedWords(), 1, `invalid list ${bad} keeps the last good one`);
+            assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
+        }
+    } finally {
+        setBlockedWordsPathForTest(undefined);
+        fs.rmSync(tmpList, { force: true });
+    }
+    assert.ok(reloadBlockedWords() > 60, "default list loads from the real file");
+    console.log("  [SUCCESS] Blocked-word list reloads and survives bad edits.");
 
     // 7. Blocked words: the Hebrew locale must never say them (replicas are not weapons)
     console.log("[INFO] Checking he strings for blocked words...");

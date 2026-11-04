@@ -75,7 +75,7 @@ export class AdminService {
     }
 
     private async updateConfig(chatId: number, key: string, rawValue: string, locale: string): Promise<void> {
-        if (!(key in CONFIG_SCHEMA)) {
+        if (!Object.hasOwn(CONFIG_SCHEMA, key)) {
             await this.api.sendMessage({ chat_id: chatId, text: localeService.t(locale, 'configKeyNotFound') });
             return;
         }

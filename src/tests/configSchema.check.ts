@@ -23,6 +23,10 @@ assert.strictEqual(badLang.ok, false);
 assert.deepStrictEqual(parseConfigValue("lang", "en"), { ok: true, value: "en" });
 console.log("  [SUCCESS] lang accepts only known locales.");
 
+// Object.prototype names are unknown keys, not a crash.
+assert.strictEqual(parseConfigValue("constructor", "x").ok, false);
+assert.strictEqual(parseConfigValue("toString", "x").ok, false);
+
 // --- booleans --------------------------------------------------------------
 assert.deepStrictEqual(parseConfigValue("validatePrice", "true"), { ok: true, value: true });
 assert.deepStrictEqual(parseConfigValue("validatePrice", "false"), { ok: true, value: false });

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 Unreleased - Dependency update.
+  - The blocked-word list (`src/config/blockedWords.json`) is read from disk and re-read within about 60 s of a change, so the owner can edit it on the server with no rebuild or restart. `compose.prod.yaml` mounts a host copy (`./blockedWords.json`); see the deploy note in `docs/README.md`. A bad edit keeps the last good list. `/config` now treats `constructor`, `toString` and other `Object.prototype` names as unknown keys.
   - Upgraded `node-telegram-bot-api` 2.2.0 → 2.3.0 (pinned exactly). No code changes were needed and nothing the user sees changes. Notable library changes: a graceful stop (`SIGINT`/`SIGTERM`) now confirms the update being handled, so a deploy no longer redelivers it; `bot.init()` calls `getMe()` once at startup. The bot's own command matcher is unchanged.
   - `pnpm-workspace.yaml` exempts `node-telegram-bot-api@2.3.0` from pnpm's `minimumReleaseAge` (the release was under 24 hours old). It can be removed after 2026-11-05.
 
