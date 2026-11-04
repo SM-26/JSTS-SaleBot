@@ -47,6 +47,13 @@ class PostRepository {
         ).exec();
     }
 
+    // Which of these posts already had their author told (a preset, reply or Skip won).
+    async findNotifiedIds(postIds: string[]): Promise<string[]> {
+        if (postIds.length === 0) return [];
+        const rows = await Post.find({ _id: { $in: postIds }, rejectionNotifiedAt: { $ne: null } }).select("_id").lean().exec();
+        return rows.map((r) => String(r._id));
+    }
+
     async hasApprovedOrSold(userId: string): Promise<boolean> {
         return (await Post.exists({ userId, status: { $in: ["approved", "sold"] } })) !== null;
     }

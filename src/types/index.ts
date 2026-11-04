@@ -169,8 +169,9 @@ export interface LocaleService {
 export interface UserSession {
     awaitingDonation?: boolean;
     // Mirror of the moderator's pending reject-reason prompts in this chat; the
-    // reply-tracking table itself has no read-only peek.
-    pendingRejects?: { promptId: number; skipMsgId: number }[];
+    // reply-tracking table itself has no read-only peek. postId is absent on
+    // entries written before 3.0.
+    pendingRejects?: { promptId: number; skipMsgId: number; postId?: string }[];
 }
 
 export interface Post {

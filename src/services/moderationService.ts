@@ -154,7 +154,7 @@ export class ModerationService {
         expectCallback(ctx, id, { postId, promptId: id } satisfies RejectSkipMarker);
         // The reply-tracking table has no read-only peek, so keep a mirror of what is pending.
         const data = ctx.getSession<UserSession>().data;
-        data.pendingRejects = [...(data.pendingRejects ?? []), { promptId: id, skipMsgId: id }];
+        data.pendingRejects = [...(data.pendingRejects ?? []), { promptId: id, skipMsgId: id, postId }];
     }
 
     private async removeKeyboard(chatId: number, messageId: number): Promise<void> {
@@ -270,6 +270,16 @@ export class ModerationService {
 
         const hit = msg.text ? matchReply<RejectReplyMarker>(ctx) : undefined;
         if (!hit) {
+            // A prompt whose post another moderator already finished is not pending: forget
+            // it, so it neither nudges nor lingers. Entries without a postId (pre-3.0) stay.
+            const pending = ctx.getSession<UserSession>().data.pendingRejects ?? [];
+            const done = new Set(await postRepository.findNotifiedIds(pending.flatMap(p => p.postId ? [p.postId] : [])));
+            for (const p of pending.filter(p => p.postId && done.has(p.postId))) {
+                forgetReply(ctx, p.promptId);
+                forgetCallback(ctx, p.skipMsgId);
+                this.dropPending(ctx, p.promptId);
+            }
+            if (!ctx.getSession<UserSession>().data.pendingRejects?.length) return false;
             // Group language, like the prompt itself (owner's decision for the moderation group).
             const topicId = msg.message_thread_id;
             await this.api.sendMessage({

@@ -1314,6 +1314,66 @@ async function run() {
             console.log("  [OK] (t6) a pre-release draft with a blocked title still goes to moderation.");
         }
 
+        // Final fix wave. Labels (u)..(u3) are fresh.
+        // (u) Sold ends the listing: a moderator's later td_ finds nothing to take down
+        {
+            const { h } = boot();
+            const { u, post, listing, cardId, listingId } = await publishTrusted(h);
+            assert.strictEqual(listing.status, "live");
+            await h.pressButton(`sold_${post._id}`, { userId: u, messageId: 901 });
+            await settle();
+            assert.strictEqual((await Post.findById(post._id))!.status, "sold");
+            const sold = (await Listing.findById(listingId))!;
+            assert.strictEqual(sold.status, "sold");
+            assert.strictEqual(sold.endedBy, "seller");
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.deepStrictEqual(toAuthor(h, u), []);
+            assert.strictEqual((await Listing.findById(listingId))!.status, "sold");
+            h.calls.length = 0;
+            const next = await confirmWizard(h, u, { title: "Bike2" });
+            assert.strictEqual(next.status, "approved", "the seller is still trusted");
+            console.log("  [OK] (u) Sold ends the listing: a later td_ says already, no delete, no DM, seller still trusted.");
+        }
+
+        // (u2) another moderator's preset leaves no nudge for the prompter, and the stale marker is gone
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Cross mod");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, otherMod, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            h.calls.length = 0;
+            await h.sendText("anything else", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup" });
+            await settle();
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && text(c) === T("replyToPromptHint")), "no nudge");
+            h.calls.length = 0;
+            await h.sendText("late reason", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", replyToMessageId: messageId(prompt) });
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 0, "no second DM");
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP), "the marker is forgotten");
+            console.log("  [OK] (u2) after another moderator's preset the prompter gets no nudge and the marker is gone.");
+        }
+
+        // (u3) the prompter's own preset clears its marker too
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Own preset");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, mod, `rr_${postId}_2`, messageId(prompt));
+            await settle();
+            h.calls.length = 0;
+            await h.sendText("plain", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup" });
+            await h.sendText("late reason", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", replyToMessageId: messageId(prompt) });
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 0);
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP), "no nudge, no handled message");
+            console.log("  [OK] (u3) the prompter's own preset clears its marker.");
+        }
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);

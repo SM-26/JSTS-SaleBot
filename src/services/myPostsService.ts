@@ -165,6 +165,13 @@ export class MyPostsService {
         if (await this.refuseIfTakenDown(query, postId)) return;
 
         await postRepository.updateStatus(postId, "sold");
+        // Best-effort: Sold also ends the listing, so a moderator's take-down finds nothing to remove.
+        try {
+            const listing = await listingRepository.findByPostId(postId);
+            if (listing) await listingRepository.markSold(String(listing._id), new Date());
+        } catch (err) {
+            console.error(`[ERROR - handleSoldCallback] post ${postId}`, (err as Error).message);
+        }
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
