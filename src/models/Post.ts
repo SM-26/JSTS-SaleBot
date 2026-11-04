@@ -9,6 +9,12 @@ export interface IMediaItem {
 // Telegram's MessageEntity as stored (plain objects), only the fields we render.
 export type StoredEntity = Pick<MessageEntity, "type" | "offset" | "length" | "url" | "user" | "language" | "custom_emoji_id">;
 
+// Only the fields we store, as a plain object (also detaches Mongoose subdocuments).
+export function storedEntity(e: MessageEntity): StoredEntity {
+    const { type, offset, length, url, user, language, custom_emoji_id } = e;
+    return JSON.parse(JSON.stringify({ type, offset, length, url, user, language, custom_emoji_id }));
+}
+
 export interface IPost extends Document {
     userId: string;
     status: "pending" | "approved" | "rejected" | "sold";

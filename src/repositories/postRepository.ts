@@ -72,6 +72,10 @@ class PostRepository {
         return Post.find({ status: "sold", approvedMessageId: { $ne: null } });
     }
 
+    findApprovedOrSold(): Promise<IPost[]> {
+        return Post.find({ status: { $in: ["approved", "sold"] } }).exec();
+    }
+
     distinctUserIdsByStatus(status: IPost["status"]): Promise<string[]> {
         return Post.distinct("userId", { status });
     }

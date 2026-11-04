@@ -16,6 +16,13 @@ services:
     volumes:
       # Must be writable by UID 1000 (`node`): /config saves back to this file.
       - ./config.json:/app/config.json
+      # Blocked-word list, re-read within ~60 s of an edit. A DIRECTORY, not a
+      # file: editors that save by rename give a file a new inode, and a
+      # single-file bind mount would keep showing the old one.
+      - ./blocklist:/app/blocklist:ro
+    environment:
+      # Missing folder or file: the bot uses the list built into the image.
+      - BLOCKED_WORDS_PATH=/app/blocklist/blockedWords.json
     depends_on:
       mongoserver:
         condition: service_healthy

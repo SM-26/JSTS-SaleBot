@@ -23,6 +23,18 @@ export interface SendTextOptions {
     replyToMessageId?: number;
     /** Telegram message entities (formatting) of the text. */
     entities?: Record<string, unknown>[];
+    /** Forum topic id (`message_thread_id`); omitted by default, like General/topic 1. */
+    messageThreadId?: number;
+    /** Sets `is_topic_message`: the thread id is a real forum topic (not a reply-thread id). */
+    isTopicMessage?: boolean;
+    /** Marks the sender as a bot. */
+    isBot?: boolean;
+    mediaGroupId?: string;
+    caption?: string;
+    senderChat?: Record<string, unknown>;
+    forwardOrigin?: Record<string, unknown>;
+    /** Fixed message id, so an edit can target a message sent earlier. */
+    messageId?: number;
 }
 
 export interface PressButtonOptions {
@@ -90,21 +102,33 @@ export function createHarness(options: HarnessOptions = {}) {
     const send = (update: Record<string, unknown>) =>
         bot.handleUpdate({ update_id: nextUpdateId++, ...update } as Update);
 
-    const message = (content: Record<string, unknown>, { chatId, userId = 42, chatType = "private", replyToMessageId }: SendTextOptions = {}) => {
+    const buildMessage = (content: Record<string, unknown>, o: SendTextOptions, id: number) => {
+        const { chatId, userId = 42, chatType = "private", replyToMessageId } = o;
         const chat = chatId ?? userId;
-        return send({
-            message: {
-                message_id: nextMessageId++,
-                date: Math.floor(Date.now() / 1000),
-                chat: { id: chat, type: chatType },
-                from: { id: userId, is_bot: false, first_name: "Tester" },
-                ...content,
-                ...(replyToMessageId === undefined ? {} : {
-                    reply_to_message: { message_id: replyToMessageId, date: Math.floor(Date.now() / 1000), chat: { id: chat, type: chatType } }
-                })
-            }
-        });
+        return {
+            message_id: id,
+            date: Math.floor(Date.now() / 1000),
+            chat: { id: chat, type: chatType },
+            from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester" },
+            ...(o.messageThreadId === undefined ? {} : { message_thread_id: o.messageThreadId }),
+            ...(o.isTopicMessage ? { is_topic_message: true } : {}),
+            ...(o.mediaGroupId === undefined ? {} : { media_group_id: o.mediaGroupId }),
+            ...(o.caption === undefined ? {} : { caption: o.caption }),
+            ...(o.senderChat === undefined ? {} : { sender_chat: o.senderChat }),
+            ...(o.forwardOrigin === undefined ? {} : { forward_origin: o.forwardOrigin }),
+            ...content,
+            ...(replyToMessageId === undefined ? {} : {
+                reply_to_message: { message_id: replyToMessageId, date: Math.floor(Date.now() / 1000), chat: { id: chat, type: chatType } }
+            })
+        };
     };
+
+    const message = (content: Record<string, unknown>, options: SendTextOptions = {}) =>
+        send({ message: buildMessage(content, options, options.messageId ?? nextMessageId++) });
+
+    /** An `edited_message` update for an earlier message id. */
+    const sendEdit = (messageId: number, text: string, options: SendTextOptions = {}) =>
+        send({ edited_message: { ...buildMessage({ text }, options, messageId), edit_date: Math.floor(Date.now() / 1000) } });
 
     const sendText = (text: string, options: SendTextOptions = {}) => message({ text, ...(options.entities ? { entities: options.entities } : {}) }, options);
 
@@ -129,5 +153,5 @@ export function createHarness(options: HarnessOptions = {}) {
         });
     };
 
-    return { bot, calls, send, sendText, sendPhoto, pressButton };
+    return { bot, calls, send, message, sendText, sendPhoto, sendEdit, pressButton };
 }

@@ -9,6 +9,8 @@ import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from
 import userRepository from "../repositories/userRepository";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import draftRepository from "../repositories/draftRepository";
+import shadowLogRepository from "../repositories/shadowLogRepository";
+import { classify } from "../services/classifier";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -35,6 +37,8 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
+    classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
+    shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
 };
 
 /**
@@ -472,5 +476,67 @@ async function testCase_WizardDraftStatus(
     } catch (err) {
         console.error("[ERROR - testCase_WizardDraftStatus]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Wizard draft status failed: " + (err as Error).message });
+    }
+}
+
+// [text, hasMedia] pairs: one per tier, plus a bundle.
+const CLASSIFY_FIXTURES: Array<[string, boolean]> = [
+    ["גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", true],
+    ["M4 למכירה 900 ש\"ח", true],
+    ["1300 מרכז", true],
+    ["למכירה כוונת 300₪", false],
+    ["מחפש M4 עד 800₪", true],
+    ["מישהו יודע מתי המשחק?", false],
+    ["למכירה\nM4 900₪\nגלוק 600₪", true],
+];
+
+/**
+ * TEST CASE: run the classifier on a few fixed messages and DM one line each
+ * (tier · title · price). Pure: no DB, no group.
+ */
+async function testCase_ClassifyFixtures(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const lines = CLASSIFY_FIXTURES.map(([text, media]) => {
+            const { tier, parsed } = classify(text, media);
+            return `${tier} · ${parsed.title ?? "-"} · ${parsed.price ?? "-"}`;
+        });
+        await api.sendMessage({ chat_id: msg.chat.id, text: lines.join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_ClassifyFixtures]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Classify fixtures failed: " + (err as Error).message });
+    }
+}
+
+/**
+ * TEST CASE: DM the last 5 shadow_log rows (tier, wouldList, mergeWith, link). Read-only.
+ */
+async function testCase_ShadowLast5(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const rows = await shadowLogRepository.lastRows(5);
+        const text = rows.length
+            ? rows.map(r => `${r.tier} · wouldList=${r.wouldList} · merge=${r.mergeWith ?? "-"} · ${r.messageIds.length ? `https://t.me/c/${String(Math.abs(r.chatId)).replace(/^100/, "")}/${r.messageIds[0]}` : "—"}`).join("\n")
+            : "No shadow rows yet.";
+        await api.sendMessage({ chat_id: msg.chat.id, text });
+    } catch (err) {
+        console.error("[ERROR - testCase_ShadowLast5]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Shadow rows failed: " + (err as Error).message });
     }
 }

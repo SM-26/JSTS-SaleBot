@@ -1,5 +1,8 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
+import assert from "assert";
+import { findBlockedWord, reloadBlockedWords, setBlockedWordsPathForTest } from "../services/blockedWords";
 
 // Paths relative to src/tests/
 const LOCALES_DIR = path.join(__dirname, "../locales");
@@ -176,6 +179,75 @@ function runCheck() {
         console.warn(`  [WARN] Potentially unused keys (${unusedKeys.length}):\n     - ${unusedKeys.join("\n     - ")}`);
     } else {
         console.log("  [SUCCESS] All keys appear to be used.");
+    }
+
+    // 6b. The blocked-word list reloads from disk (the owner edits it on the server)
+    console.log("[INFO] Checking blocked-word reload...");
+    const tmpList = path.join(os.tmpdir(), `blockedWords-${process.pid}.json`);
+    try {
+        setBlockedWordsPathForTest(tmpList);
+        assert.ok(reloadBlockedWords() > 60, "missing override file: built-in list, no crash");
+        assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהשלוש"]));
+        assert.strictEqual(reloadBlockedWords(), 1, "the override is picked up once it appears");
+        assert.strictEqual(findBlockedWord("בדיקהשלוש"), "בדיקהשלוש");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהאחת"]));
+        assert.strictEqual(reloadBlockedWords(), 1);
+        assert.strictEqual(findBlockedWord("זו בדיקהאחת"), "בדיקהאחת");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהשתיים"]));
+        fs.utimesSync(tmpList, new Date(), new Date(Date.now() + 5000));
+        assert.strictEqual(reloadBlockedWords(), 1);
+        assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
+        assert.strictEqual(findBlockedWord("זו בדיקהאחת"), null, "old entry is gone");
+        for (const bad of ["{ not json", '{"a":1}', '["ok", 5]', '[""]', '["*"]', '[" * "]']) {
+            fs.writeFileSync(tmpList, bad);
+            assert.strictEqual(reloadBlockedWords(), 1, `invalid list ${bad} keeps the last good one`);
+            assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
+        }
+        // boot with an existing but invalid override (nothing good loaded yet): the built-in list, not an empty one
+        for (const bad of ["{ not json", '[""]']) {
+            fs.writeFileSync(tmpList, bad);
+            setBlockedWordsPathForTest(tmpList);
+            const realError = console.error;
+            const logged: string[] = [];
+            console.error = (...a: unknown[]) => { logged.push(a.join(" ")); };
+            try {
+                assert.ok(reloadBlockedWords() > 60, `invalid override ${bad} at boot loads the built-in list`);
+            } finally {
+                console.error = realError;
+            }
+            assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק", "blocked words still work after an invalid boot override");
+            assert.strictEqual(logged.length, 1, "logged once");
+        }
+    } finally {
+        setBlockedWordsPathForTest(undefined);
+        fs.rmSync(tmpList, { force: true });
+    }
+    assert.ok(reloadBlockedWords() > 60, "default list loads from the real file");
+    console.log("  [SUCCESS] Blocked-word list reloads and survives bad edits.");
+
+    // 7. Blocked words: the Hebrew locale must never say them (replicas are not weapons)
+    console.log("[INFO] Checking he strings for blocked words...");
+    assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק");
+    assert.strictEqual(findBlockedWord("מתנה לנשק"), "לנשק", "accepted false positive: listed separately in Rose");
+    assert.strictEqual(findBlockedWord("ליד תחנה קרובה"), null, "whole word only");
+    assert.strictEqual(findBlockedWord("גרסה חדשה"), null);
+    assert.strictEqual(findBlockedWord("נשקים למכירה"), "נשקים");
+    assert.strictEqual(findBlockedWord("ראו https://cutt.ly/abc123"), "https://cutt.ly/*");
+    assert.strictEqual(findBlockedWord("WATCH PORN now"), "watch porn");
+    assert.strictEqual(findBlockedWord("M4 למכירה"), null);
+    assert.strictEqual(findBlockedWord("http://rebrandXly/tindrlike"), null, "the dot in an entry is escaped");
+    assert.strictEqual(findBlockedWord("שלום @jessyy012"), "@jessyy012");
+    assert.strictEqual(findBlockedWord(undefined), null);
+    const heStrings: [string, string][] = [];
+    if (localeData.he) heStrings.push(...Object.entries(localeData.he).map(([k, v]): [string, string] => [`he/common.json:${k}`, v]));
+    if (faqDataMap.he) heStrings.push(...Object.entries(faqDataMap.he).map(([k, v]): [string, string] => [`he/faq.json:${k}`, v]));
+    for (const [where, value] of heStrings) {
+        const hit = findBlockedWord(value);
+        if (hit) {
+            console.error(`  [ERROR] Blocked word "${hit}" in ${where}`);
+            hasError = true;
+        }
     }
 
     if (hasError) process.exit(1);

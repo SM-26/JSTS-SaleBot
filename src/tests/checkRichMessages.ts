@@ -99,7 +99,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
         blocks.push(
             { type: "divider" },
             heading("helpModSection", 3),
-            { type: "list", items: ["helpPending", "helpClearPending", "helpAuth"].map(cmd) },
+            { type: "list", items: ["helpPending", "helpClearPending", "helpAuth", "helpStats"].map(cmd) },
         );
     }
 
@@ -107,7 +107,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
         blocks.push(
             { type: "divider" },
             heading("helpAdminSection", 3),
-            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest"].map(cmd) },
+            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel"].map(cmd) },
         );
     }
 

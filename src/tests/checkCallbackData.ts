@@ -31,6 +31,9 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     ["donate_150", { action: "donate", arg: "150" }],
     ["donate_other", { action: "donate", arg: "other" }],
     ["test_all", { action: "test", arg: "all" }],
+    [`lb_${ID}_s`, { action: "label", arg: `${ID}_s` }],
+    [`lb_${ID}_n`, { action: "label", arg: `${ID}_n` }],
+    [`lb_${ID}_k`, { action: "label", arg: `${ID}_k` }],
     // Unknown or ephemeral (handled by temporary listeners): must not route.
     ["confirm_123", null],
     ["done_media_123", null],
@@ -61,7 +64,7 @@ for (const dir of localeDirs) {
         generated.push(`faq_${nodeId}`);
     }
 }
-for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`]) generated.push(s);
+for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`]) generated.push(s);
 
 for (const s of generated) {
     assert.ok(Buffer.byteLength(s) <= 64, `callback_data over 64 bytes: "${s}"`);
