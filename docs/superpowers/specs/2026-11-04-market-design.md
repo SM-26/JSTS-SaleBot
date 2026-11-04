@@ -1,7 +1,8 @@
 # JSTS-SaleBot 3.0 "the market": design
 
-Status: draft for owner approval (2026-11-04). Source of every number: issue #104, log comments of 2026-11-03.
-Next step after approval: `superpowers:writing-plans`, one plan per slice.
+Status: approved by the owner on 2026-11-04, with a standing exception: the owner rewrites all user-facing text. Further
+notes, if any, will be minor. Source of every number: issue #104, log comments of 2026-11-03. Plans, one per slice:
+`docs/superpowers/plans/2026-11-04-slice*.md`.
 
 ## 1. Intent
 
