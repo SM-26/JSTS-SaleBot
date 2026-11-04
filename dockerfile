@@ -31,8 +31,10 @@ COPY --from=build /app/dist ./dist
 # emits .js, so the JSON has to be copied in explicitly or every string falls
 # back to its raw key. config.json is NOT baked in — mount it at /app/config.json.
 COPY --from=build /app/src/locales ./src/locales
-# The blocked-word list is read from disk too (process.cwd()/src/config/blockedWords.json).
-# compose.prod.yaml bind-mounts a host copy over it so the owner can edit it without a rebuild.
+# The blocked-word list is read from disk too. This copy is the built-in list and the
+# fallback. compose.prod.yaml bind-mounts the host folder ./blocklist at /app/blocklist and
+# sets BLOCKED_WORDS_PATH=/app/blocklist/blockedWords.json, so the owner edits the list
+# without a rebuild; if that file is missing or invalid at boot, the bot uses this copy.
 COPY --from=build /app/src/config/blockedWords.json ./src/config/blockedWords.json
 
 # Install only production dependencies (same pinned pnpm as the base stage)
