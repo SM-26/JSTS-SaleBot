@@ -12,6 +12,7 @@ import { InputService } from "../services/inputService";
 import { WizardService } from "../services/wizardService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
+import { PublishService } from "../services/publishService";
 import { UserService } from "../services/userService";
 import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
@@ -46,6 +47,8 @@ export class BotController {
     private wizardService: WizardService;
     private postService: PostService;
     private moderationService: ModerationService;
+    private publishService: PublishService;
+    private botUsername = "";
     private userService: UserService;
     private myPostsService: MyPostsService;
     private adminService: AdminService;
@@ -62,8 +65,9 @@ export class BotController {
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
+        this.publishService = new PublishService(api, this.config, this.postService);
+        this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService);
-        this.moderationService = new ModerationService(api, this.config, this.postService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
         this.adminService = new AdminService(api, this.config);
@@ -385,6 +389,7 @@ export class BotController {
     }
 
     registerRoutes(bot: Bot, botUsername: string): void {
+        this.botUsername = botUsername;
         const isPrivate = (msg: Message) => msg.chat.type === "private";
         const cmd = (
             names: string | string[],

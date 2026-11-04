@@ -16,14 +16,15 @@ class ListingRepository {
     // Idempotent per post (partial unique index on {source, postId}): the
     // startup reconcile and the approve path may both call it. The listing keeps
     // the post's own dates (an old post stays old for /stats and repost merges);
-    // `now` only stands in for a post without a valid createdAt.
-    createForPost(post: Post, origin: "dm" | "legacy", hold: boolean, now: Date): Promise<IListing> {
+    // `now` only stands in for a post without a valid createdAt. `liveAt` is when
+    // the listing goes public (approval): it starts the 30-day clock instead.
+    createForPost(post: Post, origin: "dm" | "legacy", hold: boolean, now: Date, liveAt?: Date): Promise<IListing> {
         const postId = String(post._id);
         const text = [post.title, post.description].filter(Boolean).join("\n");
         const priceValue = priceValueOf(post.price);
         const validDate = (d: Date | null | undefined): d is Date => d instanceof Date && !isNaN(d.getTime());
         const createdAt = validDate(post.createdAt) ? post.createdAt : now;
-        const refreshedAt = validDate(post.lastBumpAt) ? post.lastBumpAt : createdAt;
+        const refreshedAt = liveAt ?? (validDate(post.lastBumpAt) ? post.lastBumpAt : createdAt);
         return Listing.findOneAndUpdate(
             { source: "bot", postId },
             {

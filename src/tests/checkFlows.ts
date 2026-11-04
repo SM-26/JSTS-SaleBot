@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
+import Listing from "../models/Listing";
 import { createHarness, BOT_USERNAME, RecordedCall } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -547,6 +548,40 @@ async function run() {
             console.log("  [OK] (l) a sold card is re-rendered in place, bump leaves it, clear_sold refreshes the summary.");
         }
 
+        // (m) a moderator approval publishes the post and creates the bot listing
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const postId = await seedPost(seller, "Approve me");
+            const before = Date.now(); // the post's createdAt is earlier than the approval
+            await sleep(5);
+            h.calls.length = 0;
+            await h.pressButton(`approve_${postId}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 310 });
+            await settle();
+            const after = Date.now();
+
+            const post = (await Post.findById(postId))!;
+            assert.strictEqual(post.status, "approved");
+            assert.ok(post.approvedMessageId, "approvedMessageId is set");
+            const listing = (await Listing.findOne({ source: "bot", postId }))!;
+            assert.ok(listing, "a listing exists for the post");
+            assert.deepStrictEqual([listing.origin, listing.hold, listing.status, listing.sellerId], ["dm", false, "live", String(seller)]);
+            assert.ok(listing.refreshedAt.getTime() > before && listing.refreshedAt.getTime() <= after, "the 30-day clock starts at approval, not at post.createdAt");
+
+            const publishes = h.calls.filter((c) => c.method === "sendRichMessage");
+            assert.strictEqual(publishes.length, 1);
+            assert.strictEqual(Number(publishes[0].params.chat_id), APPROVED_GROUP);
+            const toSeller = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === seller);
+            assert.strictEqual(toSeller.length, 1, "the seller gets one DM");
+            assert.strictEqual(text(toSeller[0]), T("postApproved"));
+            assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === T("adminApproved")));
+            const card = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === 310)!;
+            assert.strictEqual(text(card), T("statusApproved"));
+            assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
+            console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);
@@ -554,6 +589,7 @@ async function run() {
         await User.deleteMany({ userId: { $in: ids } });
         await Post.deleteMany({ $or: [{ userId: { $in: ids } }, { _id: { $in: postIds } }] });
         await Draft.deleteMany({ userId: { $in: ids } });
+        await Listing.deleteMany({ sellerId: { $in: ids } });
         await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:(${ids.join("|")})$` } });
         await mongoose.disconnect();
     }

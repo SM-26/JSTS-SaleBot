@@ -6,6 +6,8 @@ import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { userService } from "./userService";
 import { PostService } from "./postService";
+import { PublishService } from "./publishService";
+import type { IListing } from "../models/Listing";
 import { localeService } from "./localeService";
 import { sessionKey } from "../controllers/middleware";
 
@@ -17,7 +19,9 @@ export class ModerationService {
     constructor(
         private api: Api,
         private config: BotConfig,
-        private postService: PostService
+        private postService: PostService,
+        private publishService: PublishService,
+        private getBotUsername: () => string // used from the reject presets on
     ) { }
 
     private get lang() {
@@ -37,6 +41,7 @@ export class ModerationService {
         const locale = localeService.resolveUserLocale(adminUser);
 
         let claimed = null;
+        let listing: IListing | null = null;
 
         try {
             console.debug('[DEBUG - ModerationService.handleCallback]', { adminId: query.from.id, data: query.data });
@@ -72,7 +77,7 @@ export class ModerationService {
             }
 
             if (isApprove) {
-                await this.handleApproval(query, postId, post, postAuthor, locale);
+                listing = await this.handleApproval(query, postId, post, postAuthor, locale);
             } else {
                 await this.handleRejection(ctx, query, postId, locale);
             }
@@ -87,7 +92,9 @@ export class ModerationService {
                 this.api.editMessageText({
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id,
-                    text: statusText
+                    text: statusText,
+                    // Every published card can be taken down (Decision 6).
+                    ...(listing ? { reply_markup: { inline_keyboard: [[{ text: localeService.t(this.lang, 'takeDownButton'), callback_data: `td_${listing._id}` }]] } } : {}),
                 }).catch((err: Error) => console.warn("[WARN - ModerationService.handleCallback] editMessageText failed:", err.message));
             }
         } catch (err) {
@@ -98,26 +105,9 @@ export class ModerationService {
         }
     }
 
-    private async handleApproval(query: CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<void> {
-        const richMessage = this.postService.formatPostRichMessage({
-            title: post.title,
-            description: post.description,
-            descriptionEntities: post.descriptionEntities,
-            price: post.price,
-            location: post.location,
-            media: post.media,
-            userId: Number(postAuthor.userId),
-            username: postAuthor.userName || undefined,
-            firstName: postAuthor.firstName || "User",
-        }, { showCta: true });
+    private async handleApproval(query: CallbackQuery, postId: string, post: Post, postAuthor: User, adminLocale: string): Promise<IListing | null> {
+        const listing = await this.publishService.publishApproved(post, postAuthor);
 
-        const messageId = await this.postService.sendToApproved(richMessage);
-        if (messageId) {
-            await postRepository.setApprovedMessageId(postId, messageId);
-        }
-
-        const authorLocale = localeService.resolveUserLocale(postAuthor);
-        this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, 'postApproved') });
         this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(adminLocale, 'adminApproved') });
 
         console.info('[INFO - ModerationService.handleApproval]', {
@@ -127,6 +117,7 @@ export class ModerationService {
             admin: { id: query.from.id, username: query.from.username },
             author: { id: post.userId, username: postAuthor.userName, firstName: postAuthor.firstName }
         });
+        return listing;
     }
 
     // Reject = claim (done by the caller), then ask for a reason. The author is
