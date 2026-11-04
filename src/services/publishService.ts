@@ -45,11 +45,15 @@ export class PublishService {
                 if ((err as { code?: number }).code !== 11000) throw err;
                 listing = await listingRepository.findByPostId(postId); // lost a race with the reconcile
             }
-            const authorLocale = localeService.resolveUserLocale(author);
-            await this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, "postApproved") });
         } catch (err) {
             console.error("[ERROR - PublishService.publishApproved]", (err as Error).message);
         }
+
+        // The post is public whatever happened to the listing, so the author is told.
+        // Detached: the moderator's callback never waits on this DM.
+        const authorLocale = localeService.resolveUserLocale(author);
+        this.api.sendMessage({ chat_id: Number(post.userId), text: localeService.t(authorLocale, "postApproved") })
+            .catch((err: Error) => console.error("[ERROR - PublishService.publishApproved] notifying the author failed:", err.message));
         return listing;
     }
 }

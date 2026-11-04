@@ -211,6 +211,8 @@ async function run() {
         }
         const again = await listingRepository.createForPost(post, "dm", false, at(5));
         assert.strictEqual(String(again._id), String(listing._id), "createForPost is idempotent per post");
+        const liveAgain = await listingRepository.createForPost(post, "dm", false, at(5), at(6));
+        assert.strictEqual(liveAgain.refreshedAt.getTime(), listing.refreshedAt.getTime(), "a repeat call with liveAt leaves the clock alone");
         assert.strictEqual((await listingRepository.findByPostId(post._id as string))!.title, "Gear");
         assert.ok((await listingRepository.findLiveForMatching()).some(l => String(l._id) === String(listing._id)));
         assert.ok((await listingRepository.findSellerRecent(post.userId, new Date(t0.getTime() - SEC))).some(l => String(l._id) === String(listing._id)));

@@ -36,6 +36,7 @@ async function run() {
     const { BotController } = await import("../controllers/botController");
     const { localeService } = await import("../services/localeService");
     const { default: draftRepository } = await import("../repositories/draftRepository");
+    const { default: listingRepository } = await import("../repositories/listingRepository");
 
     const MOD_GROUP = -1001000000001;
     const APPROVED_GROUP = -1001000000002;
@@ -580,6 +581,32 @@ async function run() {
             assert.strictEqual(text(card), T("statusApproved"));
             assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
             console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
+        // (n) a listing failure does not stop the author's DM; the card gets no Take down
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const postId = await seedPost(seller, "Listing fails");
+            const realCreate = listingRepository.createForPost;
+            listingRepository.createForPost = () => Promise.reject(new Error("boom"));
+            try {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${postId}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 311 });
+                await settle();
+            } finally {
+                listingRepository.createForPost = realCreate;
+            }
+            assert.strictEqual((await Post.findById(postId))!.status, "approved");
+            assert.strictEqual(await Listing.countDocuments({ postId }), 0);
+            const toSeller = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === seller);
+            assert.strictEqual(toSeller.length, 1, "the seller is still told");
+            assert.strictEqual(text(toSeller[0]), T("postApproved"));
+            const card = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === 311)!;
+            assert.strictEqual(text(card), T("statusApproved"));
+            assert.ok(!card.params.reply_markup, "no Take down without a listing");
+            console.log("  [OK] (n) a failed listing still tells the author and leaves the card without Take down.");
         }
 
         console.log("[OK] persistent flows.");
