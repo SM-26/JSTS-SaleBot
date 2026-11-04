@@ -54,7 +54,7 @@ export class ShadowAdminService {
         if (!row) return { text: localeService.t(locale, "labelEmpty"), reply_markup: { inline_keyboard: [] } };
         const id = String(row._id);
         return {
-            text: `${await this.linkTo(row)}\n${row.parsedTitle ?? "—"} · ${row.parsedPrice ?? "—"}`,
+            text: `${await this.linkTo(row)}\n${row.tier} · ${row.parsedPriceValue ?? "—"}`,
             reply_markup: {
                 inline_keyboard: [[
                     { text: localeService.t(locale, "labelSale"), callback_data: `lb_${id}_s` },

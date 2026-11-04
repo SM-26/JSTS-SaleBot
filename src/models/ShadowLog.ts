@@ -2,8 +2,9 @@ import mongoose, { Schema, Document } from "mongoose";
 import type { Tier } from "../services/classifier";
 
 // What automatic capture would have done (collection `shadow_log`). No member
-// text: only ids, the tier, the rule names and the parsed title/price, which
-// /label shows. Expires after 120 days.
+// text: only ids, the tier, the rule names and, for would-list rows, the
+// parsed price number (/label shows it; the labeler reads the original in the
+// group). Expires after 120 days.
 export interface ShadowLogRow {
     chatId: number;
     messageIds: number[];
@@ -14,8 +15,7 @@ export interface ShadowLogRow {
     wouldList: boolean;
     mergeWith?: string;
     matches?: string[];
-    parsedTitle?: string;
-    parsedPrice?: string;
+    parsedPriceValue?: number;
     label?: "sale" | "not_sale";
     labeledBy?: string;
     labeledAt?: Date;
@@ -33,8 +33,7 @@ const shadowLogSchema = new Schema<IShadowLog>({
     wouldList: { type: Boolean, required: true },
     mergeWith: { type: String },
     matches: { type: [String], default: undefined },
-    parsedTitle: { type: String },
-    parsedPrice: { type: String },
+    parsedPriceValue: { type: Number },
     label: { type: String, enum: ["sale", "not_sale"] },
     labeledBy: { type: String },
     labeledAt: { type: Date },

@@ -9,7 +9,7 @@ const REPOST_MS = 30 * 24 * 3600_000;
 const REPOST_OVERLAP = 0.8;
 
 // Claims one closed capture, records what automatic capture would have done
-// (no member text: ids and parsed title/price only) and marks it classified.
+// (no member text: ids, tier and, for would-list rows, the price number) and marks it classified.
 // False when nothing was claimed.
 export async function processOneClosed(config: BotConfig, now: Date): Promise<boolean> {
     const cap = await captureRepository.claimClosed();
@@ -31,6 +31,7 @@ export async function processOneClosed(config: BotConfig, now: Date): Promise<bo
         ? rankMatches(cap.text, await listingRepository.findLiveForMatching())
         : undefined;
 
+    const wouldList = tier === "strict" && !mergeWith;
     await shadowLogRepository.insert({
         chatId: cap.chatId,
         messageIds: cap.messageIds,
@@ -38,10 +39,9 @@ export async function processOneClosed(config: BotConfig, now: Date): Promise<bo
         at: now,
         tier,
         rules,
-        wouldList: tier === "strict" && !mergeWith,
+        wouldList,
         mergeWith,
-        parsedTitle: parsed.title,
-        parsedPrice: parsed.price,
+        parsedPriceValue: wouldList ? parsed.priceValue : undefined,
         matches,
     });
     await captureRepository.saveClassification(String(cap._id), tier, rules, parsed);

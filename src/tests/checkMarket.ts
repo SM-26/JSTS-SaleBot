@@ -287,7 +287,7 @@ async function run() {
         console.log("[OK] reconcile fail-closed and per-post isolation.");
 
         // shadow log
-        const row = await shadowLogRepository.insert({ chatId: CHAT, messageIds: [1], senderId: `${RUN}-x`, at: t0, tier: "strict", rules: ["r"], wouldList: true, parsedTitle: "t", parsedPrice: "5" });
+        const row = await shadowLogRepository.insert({ chatId: CHAT, messageIds: [1], senderId: `${RUN}-x`, at: t0, tier: "strict", rules: ["r"], wouldList: true, parsedPriceValue: 5 });
         assert.ok(await shadowLogRepository.sampleUnlabeled(), "an unlabeled would-list row exists");
         const labeled = await shadowLogRepository.setLabel(String(row._id), "sale", "mod1", at(1));
         assert.strictEqual(labeled?.label, "sale");
@@ -325,8 +325,8 @@ async function run() {
         // strict row, and no member text in it
         const strict = await rowOf("restart");
         assert.ok(strict && strict.tier === "strict" && strict.wouldList === true, "strict with media would list");
-        assert.strictEqual(strict.parsedPrice, '900 ש"ח');
-        const allowed = new Set(["_id", "__v", "chatId", "messageIds", "senderId", "at", "tier", "rules", "wouldList", "mergeWith", "matches", "parsedTitle", "parsedPrice"]);
+        assert.strictEqual(strict.parsedPriceValue, 900, "a would-list row keeps the price number");
+        const allowed = new Set(["_id", "__v", "chatId", "messageIds", "senderId", "at", "tier", "rules", "wouldList", "mergeWith", "matches", "parsedPriceValue"]);
         for (const k of Object.keys(strict)) assert.ok(allowed.has(k), `shadow_log field "${k}" is not an allowed field`);
         assert.ok(!("text" in strict), "no member text in shadow_log");
         console.log("[OK] strict row, no member text.");
@@ -346,6 +346,7 @@ async function run() {
         const merged = await rowOf("rp");
         assert.strictEqual(merged?.mergeWith, String(mine._id), "same text merges with the seller's listing");
         assert.strictEqual(merged?.wouldList, false);
+        assert.ok(merged && !("parsedPriceValue" in merged), "the price number is stored only for would-list rows");
         assert.ok((await rowOf("ov"))?.mergeWith, "near-duplicate text (overlap >= 0.8) merges");
         for (const name of ["old", "gone"]) {
             const r = await rowOf(name);

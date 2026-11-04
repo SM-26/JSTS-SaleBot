@@ -115,12 +115,14 @@ async function run() {
         await expectCalls("/stats as MOD", () => h.sendText("/stats", { userId: modId }));
         assert.strictEqual(h.calls.filter((c) => c.method === "sendMessage").length, 1, "/stats sends one message");
         assert.ok(/^.*7.*\|.*30.*$/m.test(lastText()), "/stats shows the 7 and 30 day header");
-        const shadow = await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [4242], senderId: "s", at: new Date(), tier: "strict", rules: [], wouldList: true, parsedTitle: "Bike", parsedPrice: "100" });
+        const shadow = await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [4242], senderId: "s", at: new Date(), tier: "strict", rules: [], wouldList: true, parsedPriceValue: 100 });
         try {
             await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true }); // only our row is sampled
             await expectCalls("/label as ADMIN", () => h.sendText("/label", { userId: adminId }));
             const labelCall = h.calls.find((c) => c.method === "sendMessage")!;
             assert.ok(String(labelCall.params.text).includes("t.me/"), "/label shows a link");
+            assert.ok(String(labelCall.params.text).endsWith("\nstrict · 100"), "/label shows the tier and the price number, no text");
+            assert.ok(!String(labelCall.params.text).includes("Bike"), "/label shows no title");
             const keyboard = (labelCall.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
             assert.deepStrictEqual(keyboard.map((b) => b.callback_data), [`lb_${shadow._id}_s`, `lb_${shadow._id}_n`, `lb_${shadow._id}_k`]);
             h.calls.length = 0;
