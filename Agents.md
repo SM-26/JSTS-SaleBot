@@ -25,7 +25,8 @@
 │   ├── bot.ts                    # Entry point: initializes DB, bot, registers routes
 │   ├── config/
 │   │   ├── db.ts                 # Mongoose connection helper
-│   │   └── pollingErrors.ts      # Polling error classification / de-duplicated logging
+│   │   ├── pollingErrors.ts      # Polling error classification / de-duplicated logging
+│   │   └── blockedWords.json     # Built-in blocked-word list (editable on the host, see docs/README.md)
 │   ├── controllers/
 │   │   ├── botController.ts      # Main router: registerRoutes() builds the v2 middleware chain
 │   │   ├── commands.ts           # command(): anchored, case-insensitive matcher, @ourbot only
@@ -39,21 +40,38 @@
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
 │   │   ├── userService.ts        # Ensures user record exists in DB on first interaction
-│   │   └── paymentService.ts     # Donation invoice creation & payment event handling
+│   │   ├── paymentService.ts     # Donation invoice creation & payment event handling
+│   │   ├── classifier.ts         # Pure classifier: tier (strict/ask/wtb/none), rules, parsed title/price, text hash
+│   │   ├── blockedWords.ts       # Blocked-word matcher, re-read from disk within ~60 s
+│   │   ├── captureService.ts     # Records sale-topic messages into capture windows (silent)
+│   │   ├── shadowService.ts      # tick(): close windows, classify, write shadow_log rows
+│   │   ├── matchService.ts       # Ranks live listings for a "wanted" message
+│   │   ├── marketService.ts      # Reconciles bot posts into listings (LEGACY_CUTOFF)
+│   │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
+│   │   └── shadowAdminService.ts # /label and /stats
 │   ├── models/
 │   │   ├── Post.ts               # Mongoose schema: Post (pending/approved/rejected/sold)
 │   │   ├── User.ts               # Mongoose schema: User (userId, username, authLevel)
-│   │   └── Draft.ts              # Mongoose schema: Draft (one /newPost wizard per user; collection `drafts`)
+│   │   ├── Draft.ts              # Mongoose schema: Draft (one /newPost wizard per user; collection `drafts`)
+│   │   ├── Listing.ts            # Mongoose schema: Listing (bot post or group message; collection `listings`)
+│   │   ├── Capture.ts            # Mongoose schema: Capture (sale-topic posting window; collection `captures`, 7-day TTL)
+│   │   ├── ShadowLog.ts          # Mongoose schema: ShadowLog (what capture would have done; `shadow_log`, 120-day TTL)
+│   │   └── Member.ts             # Mongoose schema: Member (last seen; collection `members`)
 │   ├── repositories/
 │   │   ├── postRepository.ts     # Post CRUD + status query helpers
 │   │   ├── userRepository.ts     # User lookup and auth-level helpers
 │   │   ├── draftRepository.ts    # Draft CRUD, atomic pushMedia/claim, isDraftExpired (against timeOut)
-│   │   └── sessionStore.ts       # MongoSessionStore: v2 session store (collection `bot_sessions`)
+│   │   ├── sessionStore.ts       # MongoSessionStore: v2 session store (collection `bot_sessions`)
+│   │   ├── listingRepository.ts  # Listing upserts, seller lookups, matching candidates
+│   │   ├── captureRepository.ts  # Capture windows: atomic append, close and classify claims
+│   │   ├── shadowLogRepository.ts # Shadow log rows, labels, stats
+│   │   └── memberRepository.ts   # Member last-seen touches
 │   ├── types/
 │   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, LocaleService, UserSession, etc.)
 │   ├── tests/
 │   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
 │   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
+│   │   ├── syntheticCapture.ts   # Manual (not in `pnpm test`): 20 messages through the controller on the TEST bot/group
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
 │       ├── en/
@@ -100,6 +118,10 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `minimumPhotos`     | number  | Minimum number of photos/videos required per post (0 = optional) |
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
+| `captureMode`       | string  | `"off"` (default) or `"shadow"`: record and classify sale-topic messages, send nothing |
+| `buyerMatches`      | string  | `"off"` or `"shadow"`: log the listings a "wanted" message would match |
+| `nudges`            | boolean | Reserved for a later slice; nothing reads it yet          |
+| `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); reserved for a later slice |
 
 ---
 
@@ -126,6 +148,7 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **Wizard state** lives in the `drafts` collection (`Draft` model, `draftRepository`): one document per user with the step, the answers, the media and `promptMessageId`. `WizardService` reads the user's draft on every update. Wizard buttons (Done-media, Confirm, Cancel, Continue/Start over) are valid only against the draft itself: it exists, its step matches and the pressed message is `promptMessageId`. Anything else falls through to `staleButtonCatchAll`, which answers "expired".
 - **Expiry**: `isDraftExpired(draft, config.timeOut)` is checked on every touch against the live `timeOut` (minutes, 0 = never). There is deliberately no TTL index; startup deletes drafts already past `timeOut`.
 - **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag and the moderator's pending reject-reason prompts (`pendingRejects`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
+- **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -145,6 +168,8 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/faq`    | All users | View airsoft FAQ and frequently asked questions  |
 | `/help`   | All users | Shows available commands (admins see extra items)|
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
+| `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
+| `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
@@ -184,6 +209,8 @@ pnpm run test            # runs every check-* script below, in this order
 | Script | What it checks | Needs `MONGO_URI` |
 |--------|----------------|------------------|
 | `pnpm run check-locals` | Locale files: JSON syntax, no empty values, key parity across `en`/`he`/`ru`, FAQ structure | no |
+| `pnpm run check-config` | `/config` value parsing per key (`configSchema`) | no |
+| `pnpm run check-classifier` | Classifier fixtures: tiers, price/title parsing, blocked words | no |
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
@@ -191,6 +218,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-store` | `MongoSessionStore` (TTL, expiry on read) | yes |
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
+| `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
 

@@ -29,6 +29,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Broadcasts** — Announce to the channel (`/broadcast`) or DM active/pending/approved users directly (`/broadcastUsers`)
 - **Forum Topics** — Moderation and approved posts target specific group topics
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
+- **Shadow Classifier (market groundwork)** — With `captureMode: "shadow"` the bot records messages in the sale topic into per-sender posting windows (90 s, closed after 30 s of quiet), classifies each (`strict`, `ask`, `wtb`, `none`) and logs what automatic capture *would* have done (`shadow_log`, 120 days). It **sends nothing** to the group or to members. Captured text lives 7 days. `buyerMatches: "shadow"` also logs which live listings a "wanted" message would match
+- **`/label` and `/stats`** — Admins hand-label would-list rows as sale / not sale (`/label`); moderators see tier counts, merge counts and label precision against the go/no-go gate (`/stats`)
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
 - **Role-Based Access Control (RBAC)** — Granular authorization with User, Moderator, and Admin roles, replacing simple `isAdmin` flags.
 
@@ -80,6 +82,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
 | `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
 | `/cancel` | In the moderation group: forget your pending reject-reason prompts. |
+| `/stats` | Shadow classifier numbers: rows per tier, would-list and merge counts, label precision. |
 
 ### 📝 For moderators
 
@@ -92,6 +95,7 @@ When you press **Reject**, the bot posts a prompt in the group. To give a reason
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
 | `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
+| `/label` | Label a random unlabeled would-list row as sale / not sale (or skip) to measure the shadow classifier. |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
 | `/broadcast` | Send a message to the approved channel, either by replying to an existing message or by typing a new message. |
 | `/broadcastUsers` | Send a direct message (PM) to every active user and every author of a pending or approved post (de-duplicated, excluding you). Text only; reports per-recipient delivery failures. |
@@ -224,12 +228,20 @@ src/
 ├── models/
 │   ├── Post.ts               # Post schema (title, price, photos, status…)
 │   ├── User.ts               # User schema (userId, name, authLevel, preferredLocale…)
-│   └── Draft.ts              # /newPost wizard draft (collection `drafts`, one per user)
+│   ├── Draft.ts              # /newPost wizard draft (collection `drafts`, one per user)
+│   ├── Listing.ts            # Market listing, from a bot post or a group message (collection `listings`)
+│   ├── Capture.ts            # Posting window of a sale-topic sender (collection `captures`, 7-day TTL)
+│   ├── ShadowLog.ts          # What automatic capture would have done (collection `shadow_log`, 120-day TTL)
+│   └── Member.ts             # Group member last seen (collection `members`)
 ├── repositories/
 │   ├── postRepository.ts     # Post CRUD
 │   ├── userRepository.ts     # User CRUD (upsert)
 │   ├── draftRepository.ts    # Draft CRUD, atomic media push/claim, expiry against timeOut
-│   └── sessionStore.ts       # Mongo store for v2 sessions (collection `bot_sessions`)
+│   ├── sessionStore.ts       # Mongo store for v2 sessions (collection `bot_sessions`)
+│   ├── listingRepository.ts  # Listings: per-post upsert, seller lookups, matching candidates
+│   ├── captureRepository.ts  # Capture windows: atomic append, close, classify claims
+│   ├── shadowLogRepository.ts # Shadow log rows, labels and stats
+│   └── memberRepository.ts   # Member last-seen touches
 ├── services/
 │   ├── wizardService.ts      # /newPost wizard as a step machine over drafts; /cancel
 │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
@@ -242,6 +254,14 @@ src/
 │   ├── broadcastUsersService.ts # /broadcastUsers audience resolution & throttled DM fan-out
 │   ├── paymentService.ts     # Donation invoice creation & payment event handling
 │   ├── userService.ts        # User registration
+│   ├── classifier.ts         # Pure message classifier: tier, rules, parsed title/price, text hash, token overlap
+│   ├── blockedWords.ts       # Hot-reloaded blocked-word matcher (`src/config/blockedWords.json`)
+│   ├── captureService.ts     # Records sale-topic messages into windows (silent)
+│   ├── shadowService.ts      # Closes windows, classifies, writes `shadow_log` rows
+│   ├── matchService.ts       # Ranks live listings for a "wanted" message
+│   ├── marketService.ts      # Reconciles bot posts into listings
+│   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
+│   ├── shadowAdminService.ts # /label and /stats
 │   ├── localeService.ts      # User-specific localization & FAQ loading
 │   └── faqService.ts         # FAQ command handler with locale-specific content
 ├── locales/
@@ -250,6 +270,9 @@ src/
 │   └── ru/                   # Russian
 ├── tests/
 │   ├── checkLocals.ts        # Localization integrity script (run by `pnpm test`)
+│   ├── checkClassifier.ts    # Classifier fixtures
+│   ├── checkMarket.ts        # Market collections, capture windows, sweeper, shadow pipeline (needs MONGO_URI)
+│   ├── syntheticCapture.ts   # Manual: 20 messages through the controller on the TEST bot/group; sends nothing
 │   ├── checkCallbackData.ts  # Golden test pinning callback_data formats
 │   ├── checkPlatform.ts      # Offline checks: command matcher, middleware
 │   ├── checkSessionStore.ts  # Session store (needs MONGO_URI)
@@ -407,6 +430,10 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `donationsEnabled`   | boolean | Enable/Disable the /donate command                |
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
+| `captureMode`        | enum | `"off"` or `"shadow"`: record and classify sale-topic messages without sending anything |
+| `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match |
+| `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
+| `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); reserved for a later slice |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
 
 ### 4. Run
