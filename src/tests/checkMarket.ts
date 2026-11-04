@@ -213,6 +213,25 @@ async function run() {
         assert.ok((await listingRepository.countByStatus(new Date(t0.getTime() - SEC))).sold >= 1);
         console.log("[OK] listings.");
 
+        // a listing keeps its post's dates: a 100-day-old post is not "recent" and cannot be a repost target
+        const DAY = 24 * 3600 * SEC;
+        const liveSince = async (since: Date) => (await listingRepository.countByStatus(since)).live ?? 0;
+        const liveBefore = [await liveSince(new Date(t0.getTime() - 30 * DAY)), await liveSince(new Date(t0.getTime() - 7 * DAY))];
+        const agedSeller = `${RUN}-aged`;
+        const aged = await listingRepository.createForPost(
+            { ...post, _id: `${RUN}-aged-post`, userId: agedSeller, createdAt: new Date(t0.getTime() - 100 * DAY) } as Post, "dm", false, t0);
+        assert.strictEqual(aged.createdAt.getTime(), t0.getTime() - 100 * DAY, "createdAt is the post's date");
+        assert.strictEqual(aged.refreshedAt.getTime(), t0.getTime() - 100 * DAY, "refreshedAt falls back to the post's date");
+        assert.deepStrictEqual([await liveSince(new Date(t0.getTime() - 30 * DAY)), await liveSince(new Date(t0.getTime() - 7 * DAY))], liveBefore, "an old post is not in the 7/30-day /stats columns");
+        assert.strictEqual((await listingRepository.findSellerRecent(agedSeller, new Date(t0.getTime() - 30 * DAY))).length, 0, "an old listing is not a repost target");
+        const bumped = await listingRepository.createForPost(
+            { ...post, _id: `${RUN}-bumped-post`, userId: agedSeller, createdAt: new Date(t0.getTime() - 100 * DAY), lastBumpAt: new Date(t0.getTime() - 2 * DAY) } as Post, "dm", false, t0);
+        assert.strictEqual(bumped.refreshedAt.getTime(), t0.getTime() - 2 * DAY, "refreshedAt is the last bump");
+        assert.strictEqual((await listingRepository.findSellerRecent(agedSeller, new Date(t0.getTime() - 30 * DAY))).length, 1, "a recently bumped post is a repost target");
+        const undatedPost = await listingRepository.createForPost({ ...post, _id: `${RUN}-undated-post`, userId: agedSeller, createdAt: undefined } as unknown as Post, "dm", false, at(7));
+        assert.strictEqual(undatedPost.createdAt.getTime(), at(7).getTime(), "a post without a date falls back to now");
+        console.log("[OK] listing dates come from the post.");
+
         // reconcile posts -> bot listings (clean slate: it walks every approved/sold post)
         await Promise.all([PostModel.deleteMany({}), Listing.deleteMany({})]);
         const mk = (name: string, createdAt: Date, status: "approved" | "sold" | "pending") =>
