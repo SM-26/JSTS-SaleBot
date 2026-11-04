@@ -18,6 +18,7 @@ import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
+import { CaptureService } from "../services/captureService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -51,6 +52,7 @@ export class BotController {
     private paymentService: PaymentService;
     private faqService: FaqService;
     private broadcastUsersService: BroadcastUsersService;
+    private captureService: CaptureService;
 
     constructor(api: Api) {
         this.api = api;
@@ -67,6 +69,7 @@ export class BotController {
         this.paymentService = new PaymentService(api, this.config);
         this.faqService = new FaqService(api, this.config);
         this.broadcastUsersService = new BroadcastUsersService(api);
+        this.captureService = new CaptureService(this.config);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -401,7 +404,8 @@ export class BotController {
             if (await this.moderationService.handleRejectReply(ctx)) return;
 
             // 3. Handle Replies in the Approved Group (Buyer to Seller communication)
-            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message) {
+            // (in a forum topic Telegram adds the topic's root message as reply_to_message: not a reply to a post)
+            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message && msg.reply_to_message.message_id !== msg.message_thread_id) {
                 await this.postService.handlePublicReply(msg);
                 return;
             }
@@ -425,6 +429,19 @@ export class BotController {
                 return;
             }
 
+            // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
+            if ((this.config.captureMode ?? "off") !== "off" && this.captureService.isSaleTopicMessage(msg)) {
+                await this.captureService.handleGroupMessage(msg);
+            }
+
+            return next();
+        });
+
+        bot.on("edited_message", async (ctx, next) => {
+            const msg = ctx.editedMessage;
+            if (msg && (this.config.captureMode ?? "off") !== "off" && this.captureService.isSaleTopicMessage(msg)) {
+                await this.captureService.handleEdit(msg);
+            }
             return next();
         });
 
