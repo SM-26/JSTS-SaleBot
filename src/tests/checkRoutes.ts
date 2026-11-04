@@ -159,8 +159,16 @@ async function run() {
             await h.sendText("/stats", { userId: modId });
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
             assert.ok(/\d+\.\d%/.test(lastText()), "/stats shows precision with one decimal");
+
+            // /test shadow_last5: a row without message ids shows a dash, not "undefined"
+            await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [], senderId: "last5-test", at: new Date(Date.now() + 60_000), tier: "none", rules: [], wouldList: false });
+            h.calls.length = 0;
+            await h.pressButton("test_shadow_last5", { userId: adminId, messageId: 63 });
+            assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")), "shadow_last5 answers");
+            const last5 = String(h.calls.find((c) => c.method === "sendMessage")!.params.text);
+            assert.ok(last5.split("\n")[0].endsWith(" · —") && !last5.includes("undefined"), `shadow_last5 shows — for empty messageIds, got ${last5}`);
         } finally {
-            await ShadowLog.deleteMany({ senderId: "skip-test" });
+            await ShadowLog.deleteMany({ senderId: { $in: ["skip-test", "last5-test"] } });
             await ShadowLog.deleteOne({ _id: shadow._id });
             await User.deleteOne({ userId: String(modId) });
         }

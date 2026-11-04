@@ -504,11 +504,16 @@ async function testCase_ClassifyFixtures(
     inputService: InputService,
     msg: Message
 ): Promise<void> {
-    const lines = CLASSIFY_FIXTURES.map(([text, media]) => {
-        const { tier, parsed } = classify(text, media);
-        return `${tier} · ${parsed.title ?? "-"} · ${parsed.price ?? "-"}`;
-    });
-    await api.sendMessage({ chat_id: msg.chat.id, text: lines.join("\n") });
+    try {
+        const lines = CLASSIFY_FIXTURES.map(([text, media]) => {
+            const { tier, parsed } = classify(text, media);
+            return `${tier} · ${parsed.title ?? "-"} · ${parsed.price ?? "-"}`;
+        });
+        await api.sendMessage({ chat_id: msg.chat.id, text: lines.join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_ClassifyFixtures]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Classify fixtures failed: " + (err as Error).message });
+    }
 }
 
 /**
@@ -527,7 +532,7 @@ async function testCase_ShadowLast5(
     try {
         const rows = await shadowLogRepository.lastRows(5);
         const text = rows.length
-            ? rows.map(r => `${r.tier} · wouldList=${r.wouldList} · merge=${r.mergeWith ?? "-"} · https://t.me/c/${String(Math.abs(r.chatId)).replace(/^100/, "")}/${r.messageIds[0]}`).join("\n")
+            ? rows.map(r => `${r.tier} · wouldList=${r.wouldList} · merge=${r.mergeWith ?? "-"} · ${r.messageIds.length ? `https://t.me/c/${String(Math.abs(r.chatId)).replace(/^100/, "")}/${r.messageIds[0]}` : "—"}`).join("\n")
             : "No shadow rows yet.";
         await api.sendMessage({ chat_id: msg.chat.id, text });
     } catch (err) {
