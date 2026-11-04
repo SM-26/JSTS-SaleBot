@@ -1,7 +1,8 @@
 # --- Base Stage ---
 FROM node:26-alpine AS base
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries pnpm settings (e.g. minimumReleaseAge exemptions) the install must see.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # node:26 no longer bundles Corepack, so install pnpm directly — pinned to the
 # "packageManager" field in package.json so Docker, CI and local never drift.
 RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
@@ -25,7 +26,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Only copy what is strictly necessary
-COPY --from=build /app/package.json /app/pnpm-lock.yaml ./
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=build /app/dist ./dist
 # Locales are read from disk at runtime (process.cwd()/src/locales) and tsc only
 # emits .js, so the JSON has to be copied in explicitly or every string falls
