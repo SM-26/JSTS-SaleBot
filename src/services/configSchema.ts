@@ -17,8 +17,8 @@ export type ConfigFieldSpec =
 export const CONFIG_SCHEMA: Record<string, ConfigFieldSpec> = {
     lang: { kind: "enum", values: () => localeService.availableLocales },
     mediaLayout: { kind: "enum", values: () => ["slideshow", "collage"] },
-    // ponytail: later slices extend these arrays (optin / on)
-    captureMode: { kind: "enum", values: () => ["off", "shadow"] },
+    // ponytail: later slices extend these arrays (on)
+    captureMode: { kind: "enum", values: () => ["off", "shadow", "optin"] },
     buyerMatches: { kind: "enum", values: () => ["off", "shadow"] },
     rulesUrl: { kind: "string", pattern: /^https:\/\/t\.me\//, allowEmpty: true },
 

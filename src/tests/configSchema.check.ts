@@ -52,7 +52,8 @@ console.log("  [SUCCESS] nullable numbers coerce \"null\" to real null.");
 
 // --- market switches and string kind --------------------------------------
 assert.deepStrictEqual(parseConfigValue("captureMode", "shadow"), { ok: true, value: "shadow" });
-assert.strictEqual(parseConfigValue("captureMode", "optin").ok, false, "optin is not allowed yet");
+assert.deepStrictEqual(parseConfigValue("captureMode", "optin"), { ok: true, value: "optin" });
+assert.strictEqual(parseConfigValue("captureMode", "hybrid").ok, false, "hybrid is not allowed");
 assert.deepStrictEqual(parseConfigValue("buyerMatches", "off"), { ok: true, value: "off" });
 assert.strictEqual(parseConfigValue("buyerMatches", "on").ok, false, "on is not allowed yet");
 assert.deepStrictEqual(parseConfigValue("nudges", "true"), { ok: true, value: true });
