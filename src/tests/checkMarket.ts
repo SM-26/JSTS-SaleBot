@@ -35,7 +35,7 @@ async function checkPure() {
     console.error = () => {};
     try {
         const s = startSweeper([{ name: "flaky", everyMs: 50, run: async () => { if (!threw) { threw = true; throw new Error("boom"); } ran++; } }]);
-        await sleep(125);
+        for (const end = Date.now() + 2000; ran < 1 && Date.now() < end;) await sleep(10); // poll, not a fixed sleep
         s.stop();
         const seen = ran;
         assert.ok(seen >= 1, "the job ran again after throwing once");
