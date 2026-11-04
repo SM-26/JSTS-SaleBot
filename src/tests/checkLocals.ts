@@ -186,7 +186,11 @@ function runCheck() {
     const tmpList = path.join(os.tmpdir(), `blockedWords-${process.pid}.json`);
     try {
         setBlockedWordsPathForTest(tmpList);
-        assert.strictEqual(reloadBlockedWords(), 0, "missing file: empty list, no crash");
+        assert.ok(reloadBlockedWords() > 60, "missing override file: built-in list, no crash");
+        assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק");
+        fs.writeFileSync(tmpList, JSON.stringify(["בדיקהשלוש"]));
+        assert.strictEqual(reloadBlockedWords(), 1, "the override is picked up once it appears");
+        assert.strictEqual(findBlockedWord("בדיקהשלוש"), "בדיקהשלוש");
         fs.writeFileSync(tmpList, JSON.stringify(["בדיקהאחת"]));
         assert.strictEqual(reloadBlockedWords(), 1);
         assert.strictEqual(findBlockedWord("זו בדיקהאחת"), "בדיקהאחת");
@@ -195,7 +199,7 @@ function runCheck() {
         assert.strictEqual(reloadBlockedWords(), 1);
         assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");
         assert.strictEqual(findBlockedWord("זו בדיקהאחת"), null, "old entry is gone");
-        for (const bad of ["{ not json", '{"a":1}', '["ok", 5]', '[""]']) {
+        for (const bad of ["{ not json", '{"a":1}', '["ok", 5]', '[""]', '["*"]', '[" * "]']) {
             fs.writeFileSync(tmpList, bad);
             assert.strictEqual(reloadBlockedWords(), 1, `invalid list ${bad} keeps the last good one`);
             assert.strictEqual(findBlockedWord("בדיקהשתיים כאן"), "בדיקהשתיים");

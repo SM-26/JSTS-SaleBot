@@ -35,18 +35,27 @@ function fileKey(): string {
     }
 }
 
-/** Forces a reload from disk. A bad file keeps the last good list. Returns the entry count. */
+/** Forces a reload from disk. A bad file keeps the last good list; a missing override falls back to the built-in list. Returns the entry count. */
 export function reloadBlockedWords(): number {
     lastCheck = Date.now();
     seenKey = fileKey();
+    let source = filePath;
+    if (seenKey === "missing" && filePath !== DEFAULT_PATH) {
+        console.error(`[ERROR - blockedWords] ${filePath} does not exist, using the built-in list ${DEFAULT_PATH}`);
+        source = DEFAULT_PATH;
+    }
     try {
-        const list: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
-        if (!Array.isArray(list) || !list.every(e => typeof e === "string" && e.trim() !== "")) {
-            throw new Error("expected an array of non-empty strings");
+        const list: unknown = JSON.parse(fs.readFileSync(source, "utf8"));
+        if (!Array.isArray(list)) throw new Error("expected an array of strings");
+        for (const e of list) {
+            // An empty or `*`-only entry would match every message.
+            if (typeof e !== "string" || e.replace(/[*\s]/g, "") === "") {
+                throw new Error(`bad entry ${JSON.stringify(e)}: expected a string with some text besides * and spaces`);
+            }
         }
-        matchers = list.map(compile);
+        matchers = (list as string[]).map(compile);
     } catch (error) {
-        console.error(`[ERROR - blockedWords] keeping ${matchers.length} entries, cannot load ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`[ERROR - blockedWords] keeping ${matchers.length} entries, cannot load ${source}: ${error instanceof Error ? error.message : String(error)}`);
     }
     return matchers.length;
 }
