@@ -175,5 +175,9 @@
     "listingSoldButton": "🤝 נמכר",
     "listingRefreshButton": "🔄 רענון",
     "listingRemoveButton": "🗑 הסרה",
-    "listingManageButton": "⚙️ ניהול בבוט"
+    "listingManageButton": "⚙️ ניהול בבוט",
+    "listingSoldToast": "סומן כנמכר",
+    "listingRefreshedToast": "רועננה",
+    "listingRemovedToast": "הוסרה מהשוק",
+    "captureModCard": "המודעה הראשונה של מוכר חדש: {name}\n{title} · {price}\n{link}"
 }

@@ -175,5 +175,9 @@
     "listingSoldButton": "🤝 Продано",
     "listingRefreshButton": "🔄 Обновить",
     "listingRemoveButton": "🗑 Удалить",
-    "listingManageButton": "⚙️ Управлять в боте"
+    "listingManageButton": "⚙️ Управлять в боте",
+    "listingSoldToast": "Отмечено как проданное",
+    "listingRefreshedToast": "Обновлено",
+    "listingRemovedToast": "Удалено с рынка",
+    "captureModCard": "Первое объявление нового продавца: {name}\n{title} · {price}\n{link}"
 }

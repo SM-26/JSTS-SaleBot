@@ -175,5 +175,9 @@
     "listingSoldButton": "🤝 Sold",
     "listingRefreshButton": "🔄 Refresh",
     "listingRemoveButton": "🗑 Remove",
-    "listingManageButton": "⚙️ Manage in bot"
+    "listingManageButton": "⚙️ Manage in bot",
+    "listingSoldToast": "Marked as sold",
+    "listingRefreshedToast": "Refreshed",
+    "listingRemovedToast": "Removed from the market",
+    "captureModCard": "New seller's first listing: {name}\n{title} · {price}\n{link}"
 }

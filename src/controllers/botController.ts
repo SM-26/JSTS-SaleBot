@@ -22,6 +22,7 @@ import { FaqService } from "../services/faqService";
 import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
+import { GroupListingService } from "../services/groupListingService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -60,6 +61,7 @@ export class BotController {
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
+    readonly groupListings: GroupListingService;
 
     constructor(api: Api) {
         this.api = api;
@@ -69,6 +71,7 @@ export class BotController {
         this.postService = new PostService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
+        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
@@ -342,6 +345,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "listing") {
+            await this.groupListings.handleListingCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -474,6 +482,8 @@ export class BotController {
             if (msg && this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
                 await this.captureService.handleEdit(msg);
             }
+            // Existing group listings are kept in step in every captureMode.
+            if (msg && msg.chat.id === this.config.approvedGroupId) await this.groupListings.handleEdit(msg);
             return next();
         });
 

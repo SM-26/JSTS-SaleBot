@@ -4,6 +4,9 @@ import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Listing from "../models/Listing";
+import Capture from "../models/Capture";
+import Member from "../models/Member";
+import { seedCapture } from "./fixtures";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -31,6 +34,8 @@ async function run() {
     console.log("[INFO] Checking persistent flows...");
     await mongoose.connect(MONGO_URI);
     await Draft.init();
+    await Capture.init();
+    await Listing.init();
 
     // config.json is read at import time, so load the controller only after the SKIP check.
     const { BotController } = await import("../controllers/botController");
@@ -1408,6 +1413,280 @@ async function run() {
             console.log("  [OK] (u5) a hidden blocked URL sends a trusted seller's post to moderation.");
         }
 
+        // Slice 2, Task 4: group listings. Labels (v1)..(v13); (a)..(u5) are taken above.
+        await Capture.deleteMany({ chatId: APPROVED_GROUP });
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        {
+            const SALE_TEXT = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            const NOTE_ID = 5100;
+            let msgSeq = 1_000_000 + (Date.now() % 1_000_000);
+            const nextMsg = () => msgSeq++;
+            const tp = (key: string, params?: Record<string, string>) => localeService.t(cfg.lang, key, params);
+            const seedAsked = (seller: number, text = SALE_TEXT, messageIds = [nextMsg()]) => seedCapture({
+                senderId: String(seller), chatId: APPROVED_GROUP, messageIds, text, state: "asked",
+                note: { ephemeralMessageId: NOTE_ID, sentAt: new Date(), kind: "ask" },
+            });
+            type Ctrl = ReturnType<typeof boot>["ctrl"];
+            // A seller with one live group listing (refreshed an hour ago unless `now` says otherwise).
+            const addListing = async (ctrl: Ctrl, seller: number, now = new Date(Date.now() - 3_600_000)) => {
+                const capture = await seedAsked(seller);
+                const result = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS, now);
+                assert.strictEqual(result.kind, "added");
+                if (result.kind !== "added") throw new Error("unreachable");
+                return { capture, listing: result.listing, id: String(result.listing._id) };
+            };
+            const press = (h: H, data: string, userId: number, extra: { noMessage?: boolean } = {}) =>
+                h.pressButton(data, { userId, ...GROUP, ...extra });
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const noteEdits = (h: H) => callsTo(h, "editEphemeralMessageText");
+            const noteKeyboard = (c: RecordedCall) => (c.params.reply_markup as { inline_keyboard: unknown[][] }).inline_keyboard;
+            const rawEdit = (h: H, messageId: number, userId: number, content: Record<string, unknown>) => h.send({
+                edited_message: {
+                    message_id: messageId, date: Math.floor(Date.now() / 1000), edit_date: Math.floor(Date.now() / 1000),
+                    chat: { id: APPROVED_GROUP, type: "supergroup" }, from: { id: userId, is_bot: false, first_name: "Tester" }, ...content,
+                },
+            });
+
+            // (v1) addToMarket creates a group listing
+            {
+                const { ctrl } = boot();
+                const seller = user();
+                const capture = await seedAsked(seller);
+                const result = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS);
+                assert.strictEqual(result.kind, "added");
+                if (result.kind !== "added") throw new Error("unreachable");
+                const l = (await Listing.findById(result.listing._id))!;
+                assert.deepStrictEqual([l.source, l.origin, l.status, l.sellerId], ["group", "capture", "live", String(seller)]);
+                assert.deepStrictEqual([...l.messageIds], [...capture.messageIds]);
+                assert.strictEqual(l.text, SALE_TEXT);
+                assert.strictEqual(l.note?.ephemeralMessageId, NOTE_ID);
+                const c = (await Capture.findById(capture._id))!;
+                assert.deepStrictEqual([c.state, c.listingId], ["added", String(l._id)]);
+                console.log("  [OK] (v1) addToMarket creates a group listing.");
+            }
+
+            // (v2) the first listing sends one take-down card, the second none
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const first = await addListing(ctrl, seller);
+                const toMod = () => callsTo(h, "sendMessage").filter((c) => Number(c.params.chat_id) === MOD_GROUP);
+                assert.strictEqual(toMod().length, 1);
+                const buttons = keyboard(toMod()[0]);
+                assert.deepStrictEqual(buttons.map((b) => [b.text, b.callback_data]), [[T("takeDownButton"), `td_${first.id}`]]);
+                await addListing(ctrl, seller);
+                assert.strictEqual(toMod().length, 1, "no card for the second listing");
+                console.log("  [OK] (v2) a seller's first listing sends one take-down card.");
+            }
+
+            // (v3) a double Add is one listing; a failed create gives the capture back
+            {
+                const { ctrl } = boot();
+                const seller = user();
+                const capture = await seedAsked(seller);
+                const id = String(capture._id);
+                const results = await Promise.all([ctrl.groupListings.addToMarket(id, FIELDS), ctrl.groupListings.addToMarket(id, FIELDS)]);
+                assert.deepStrictEqual(results.map((r) => r.kind).sort(), ["added", "already"]);
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(seller) }), 1);
+
+                const second = user();
+                const other = await seedAsked(second);
+                const original = listingRepository.createFromCapture;
+                listingRepository.createFromCapture = async () => { throw new Error("boom"); };
+                try {
+                    await assert.rejects(ctrl.groupListings.addToMarket(String(other._id), FIELDS), /boom/);
+                } finally {
+                    listingRepository.createFromCapture = original;
+                }
+                assert.strictEqual((await Capture.findById(other._id))!.state, "asked");
+                assert.strictEqual((await ctrl.groupListings.addToMarket(String(other._id), FIELDS)).kind, "added", "the button still works");
+                console.log("  [OK] (v3) a double Add is one listing and a failed create gives the capture back.");
+            }
+
+            // (v4) a foreign press is refused
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const intruder = user();
+                const { id } = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${id}_s_n`, intruder);
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("notYourButton")]);
+                assert.strictEqual((await Listing.findById(id))!.status, "live");
+                assert.strictEqual(noteEdits(h).length, 0);
+                console.log("  [OK] (v4) another member's press is refused.");
+            }
+
+            // (v5) + (v6) Sold from the note, then a second press on the ended listing
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const { id } = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${id}_s_n`, seller);
+                await settle();
+                const l = (await Listing.findById(id))!;
+                assert.deepStrictEqual([l.status, l.endedBy], ["sold", "seller"]);
+                assert.deepStrictEqual(answers(h), [T("listingSoldToast")]);
+                assert.strictEqual(noteEdits(h).length, 1);
+                const edit = noteEdits(h)[0];
+                assert.deepStrictEqual(
+                    [Number(edit.params.ephemeral_message_id), Number(edit.params.receiver_user_id), Number(edit.params.chat_id)],
+                    [NOTE_ID, seller, APPROVED_GROUP]);
+                assert.strictEqual(String(edit.params.text), tp("listingSoldNote", { title: FIELDS.title }));
+                assert.deepStrictEqual(noteKeyboard(edit), []);
+                assert.strictEqual(callsTo(h, "editMessageText").length, 0, "the note is edited from Mongo, not from query.message");
+                console.log("  [OK] (v5) Sold from the note ends the listing and edits the note.");
+
+                h.calls.length = 0;
+                await press(h, `ls_${id}_f_n`, seller);
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("listingEnded")]);
+                assert.strictEqual((await Listing.findById(id))!.status, "sold");
+                assert.strictEqual(noteEdits(h).length, 1);
+                assert.strictEqual(String(noteEdits(h)[0].params.text), tp("listingSoldNote", { title: FIELDS.title }));
+                console.log("  [OK] (v6) a press on an ended listing says so and re-edits the note.");
+            }
+
+            // (v7) Refresh
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const { id, listing } = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${id}_f_n`, seller);
+                await settle();
+                const l = (await Listing.findById(id))!;
+                assert.strictEqual(l.status, "live");
+                assert.ok(l.refreshedAt.getTime() > listing.refreshedAt.getTime(), "refreshedAt moved");
+                assert.deepStrictEqual(answers(h), [T("listingRefreshedToast")]);
+                const edit = noteEdits(h)[0];
+                assert.strictEqual(String(edit.params.text), tp("listingRefreshedCard", { title: FIELDS.title, price: FIELDS.price }));
+                const rows = noteKeyboard(edit) as { callback_data?: string; url?: string }[][];
+                assert.deepStrictEqual(rows.map((r) => r.length), [3, 1]);
+                assert.deepStrictEqual(rows[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.ok(rows[1][0].url?.includes(`?start=l_${id}`));
+                console.log("  [OK] (v7) Refresh renews the clock and re-edits the note.");
+            }
+
+            // (v8) Remove never touches the group message
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const { id } = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${id}_r_n`, seller);
+                await settle();
+                const l = (await Listing.findById(id))!;
+                assert.deepStrictEqual([l.status, l.endedBy, l.title, l.text], ["removed", "seller", undefined, undefined]);
+                assert.deepStrictEqual(answers(h), [T("listingRemovedToast")]);
+                assert.deepStrictEqual(
+                    h.calls.filter((c) => Number(c.params.chat_id) === APPROVED_GROUP).map((c) => c.method), ["editEphemeralMessageText"]);
+                for (const m of ["deleteMessage", "editMessageText", "sendMessage", "sendRichMessage"]) assert.strictEqual(callsTo(h, m).length, 0, m);
+                assert.strictEqual(String(noteEdits(h)[0].params.text), T("listingRemovedNote"));
+                console.log("  [OK] (v8) Remove ends the listing and never touches the member's message.");
+            }
+
+            // (v9) ls_ is refused on a bot listing
+            {
+                const { h } = boot();
+                const seller = user();
+                const now = new Date();
+                const bot = await Listing.create({
+                    source: "bot", origin: "dm", postId: new mongoose.Types.ObjectId().toHexString(), messageIds: [], sellerId: String(seller),
+                    title: "Radio", media: [], status: "live", hold: false, isBundle: false, createdAt: now, refreshedAt: now,
+                });
+                for (const action of ["r", "s", "f"]) {
+                    h.calls.length = 0;
+                    await press(h, `ls_${bot._id}_${action}_c`, seller);
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("staleButton")], action);
+                    assert.strictEqual((await Listing.findById(bot._id))!.status, "live", action);
+                    assert.strictEqual(callsTo(h, "editMessageText").length + noteEdits(h).length, 0, action);
+                }
+                console.log("  [OK] (v9) every ls_ button is refused on a bot listing.");
+            }
+
+            // (v10) a press without query.message
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const onNote = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${onNote.id}_s_n`, seller, { noMessage: true });
+                await settle();
+                assert.strictEqual((await Listing.findById(onNote.id))!.status, "sold");
+                assert.strictEqual(noteEdits(h).length, 1, "the note is edited from Mongo");
+
+                const onCard = await addListing(ctrl, seller);
+                h.calls.length = 0;
+                await press(h, `ls_${onCard.id}_s_c`, seller, { noMessage: true });
+                await settle();
+                assert.strictEqual((await Listing.findById(onCard.id))!.status, "sold");
+                assert.deepStrictEqual(answers(h), [T("listingSoldToast")]);
+                assert.strictEqual(callsTo(h, "editMessageText").length, 0);
+                console.log("  [OK] (v10) a press without query.message still ends the listing.");
+            }
+
+            // (v11) an edit updates the price; edits that name no listing or carry no text change nothing
+            const EDITED = "גלוק 17 למכירה\nבמצב מעולה\n1,100₪";
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const capture = await seedAsked(seller, SALE_TEXT, [nextMsg(), nextMsg()]);
+                const added = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS);
+                assert.strictEqual(added.kind, "added");
+                if (added.kind !== "added") throw new Error("unreachable");
+                const id = String(added.listing._id);
+                const before = (await Listing.findById(id))!;
+
+                await h.sendEdit(nextMsg(), EDITED, { userId: seller, ...GROUP });
+                await rawEdit(h, capture.messageIds[0], seller, { photo: [{ file_id: "p", file_unique_id: "p", width: 1, height: 1 }] });
+                const untouched = (await Listing.findById(id))!;
+                assert.deepStrictEqual([untouched.price, untouched.textHash], [before.price, before.textHash]);
+
+                await h.sendEdit(capture.messageIds[1], EDITED, { userId: seller, ...GROUP });
+                const after = (await Listing.findById(id))!;
+                assert.deepStrictEqual([after.price, after.priceValue, after.status], ["1,100₪", 1100, "live"]);
+                assert.notStrictEqual(after.textHash, before.textHash);
+                console.log("  [OK] (v11) an edit updates the price; unrelated and text-less edits change nothing.");
+
+                // (v13) the same in every captureMode
+                cfg.captureMode = "off";
+                try {
+                    await h.sendEdit(capture.messageIds[0], SALE_TEXT, { userId: seller, ...GROUP });
+                    assert.strictEqual((await Listing.findById(id))!.priceValue, 1300);
+                } finally {
+                    cfg.captureMode = "optin";
+                }
+                console.log("  [OK] (v13) the edit sync works with captureMode off.");
+            }
+
+            // (v12) an edit adding a blocked word removes the listing without a take-down
+            {
+                const { h, ctrl } = boot();
+                const seller = user();
+                const hiddenLink = [{ type: "text_link", offset: 0, length: 3, url: "https://cutt.ly/x" }];
+                for (const edit of [{ text: "גלוק 17 למכירה נשק 1,100₪" }, { text: "ראו כאן", entities: hiddenLink }]) {
+                    const capture = await seedAsked(seller);
+                    const added = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS);
+                    assert.strictEqual(added.kind, "added");
+                    if (added.kind !== "added") throw new Error("unreachable");
+                    h.calls.length = 0;
+                    await rawEdit(h, capture.messageIds[0], seller, edit);
+                    const l = (await Listing.findById(added.listing._id))!;
+                    assert.deepStrictEqual([l.status, l.endedBy, l.title], ["removed", "system", undefined], edit.text);
+                    assert.strictEqual(noteEdits(h).length, 1, "the note shows the ending");
+                }
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(seller), status: "taken_down" }), 0);
+                console.log("  [OK] (v12) an edit adding a blocked word removes the listing, never as a take-down.");
+            }
+        }
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);
@@ -1416,6 +1695,8 @@ async function run() {
         await Post.deleteMany({ $or: [{ userId: { $in: ids } }, { _id: { $in: postIds } }] });
         await Draft.deleteMany({ userId: { $in: ids } });
         await Listing.deleteMany({ sellerId: { $in: ids } });
+        await Capture.deleteMany({ senderId: { $in: ids } });
+        await Member.deleteMany({ userId: { $in: ids } });
         await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:(${ids.join("|")})$` } });
         await mongoose.disconnect();
     }
