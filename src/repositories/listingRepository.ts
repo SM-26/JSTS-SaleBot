@@ -2,6 +2,12 @@ import Listing, { IListing } from "../models/Listing";
 import { textHash } from "../services/classifier";
 import type { Post } from "../types";
 
+// First number in the price as written ("2,500" -> 2500); undefined when there is none.
+function priceValueOf(price: string | undefined): number | undefined {
+    const m = price?.match(/\d[\d,]*/);
+    return m ? Number(m[0].replace(/,/g, "")) : undefined;
+}
+
 class ListingRepository {
     findByPostId(postId: string): Promise<IListing | null> {
         return Listing.findOne({ source: "bot", postId }).exec();
@@ -12,6 +18,7 @@ class ListingRepository {
     createForPost(post: Post, origin: "dm" | "legacy", hold: boolean, now: Date): Promise<IListing> {
         const postId = String(post._id);
         const text = [post.title, post.description].filter(Boolean).join("\n");
+        const priceValue = priceValueOf(post.price);
         return Listing.findOneAndUpdate(
             { source: "bot", postId },
             {
@@ -23,6 +30,7 @@ class ListingRepository {
                     sellerId: post.userId,
                     title: post.title,
                     price: post.price,
+                    ...(priceValue !== undefined ? { priceValue } : {}),
                     location: post.location,
                     text,
                     textHash: textHash(text),

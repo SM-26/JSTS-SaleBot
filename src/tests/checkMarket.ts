@@ -79,6 +79,25 @@ async function run() {
         assert.strictEqual(albums[0].media.length, 5);
         console.log("[OK] concurrent album items.");
 
+        // user values in the pipeline update are data, not field paths
+        const e = { chatId: CHAT, senderId: `${RUN}-e`, senderName: "E" };
+        await captureRepository.appendMessage({ ...e, messageId: 40, text: "hello", media: [] }, at(0));
+        for (const [i, name] of ["$$$ Deals", "$text", "$"].entries()) {
+            const r = await captureRepository.appendMessage({ ...e, senderName: name, messageId: 41 + i, media: [], mediaGroupId: `$g${i}` }, at(1 + i));
+            assert.strictEqual(r.senderName, name, "senderName is stored verbatim");
+            assert.ok(r.mediaGroupIds.includes(`$g${i}`));
+        }
+        assert.strictEqual((await Capture.findOne({ senderId: e.senderId }))!.text, "hello");
+
+        // lastAt never moves backwards; a redelivered messageId is a no-op
+        const lateFirst = await captureRepository.appendMessage({ ...e, messageId: 60, media: [{ fileId: "late", type: "photo" }] }, at(20));
+        const earlier = await captureRepository.appendMessage({ ...e, messageId: 61, media: [] }, at(10));
+        assert.strictEqual(earlier.lastAt.getTime(), lateFirst.lastAt.getTime(), "lastAt must not move backwards");
+        const redelivered = await captureRepository.appendMessage({ ...e, messageId: 60, media: [{ fileId: "late", type: "photo" }] }, at(21));
+        assert.strictEqual(redelivered.messageIds.filter(m => m === 60).length, 1, "same messageId twice: one id");
+        assert.strictEqual(redelivered.media.filter(m => m.fileId === "late").length, 1, "same messageId twice: one media item");
+        console.log("[OK] pipeline values are literal, lastAt monotonic, redelivery is a no-op.");
+
         // edit replaces that message's text in an open capture
         const edited = await captureRepository.reparseOpen(CHAT, 3, "new text");
         assert.strictEqual(edited?.text, "new text\nsecond line");
@@ -127,11 +146,16 @@ async function run() {
         assert.strictEqual(listing.status, "live");
         assert.strictEqual(listing.text, "Gear\nGood shape");
         assert.ok(listing.textHash);
+        assert.strictEqual(listing.priceValue, 100);
+        for (const [price, want] of [["2,500", 2500], ["3000 טיפה גמיש", 3000], ["מחיר לא ידוע", undefined]] as const) {
+            const l = await listingRepository.createForPost({ ...post, _id: `${RUN}-pv-${price}`, price }, "dm", false, t0);
+            assert.strictEqual(l.priceValue, want, `priceValue of "${price}"`);
+        }
         const again = await listingRepository.createForPost(post, "dm", false, at(5));
         assert.strictEqual(String(again._id), String(listing._id), "createForPost is idempotent per post");
         assert.strictEqual((await listingRepository.findByPostId(post._id as string))!.title, "Gear");
         assert.ok((await listingRepository.findLiveForMatching()).some(l => String(l._id) === String(listing._id)));
-        assert.strictEqual((await listingRepository.findSellerRecent(post.userId, new Date(t0.getTime() - SEC))).length, 1);
+        assert.ok((await listingRepository.findSellerRecent(post.userId, new Date(t0.getTime() - SEC))).some(l => String(l._id) === String(listing._id)));
         const sold = await listingRepository.markSold(String(listing._id), at(10));
         assert.strictEqual(sold?.status, "sold");
         assert.strictEqual(await listingRepository.markSold(String(listing._id), at(11)), null, "sold is final");

@@ -77,23 +77,26 @@ class CaptureRepository {
         throw new Error("captureRepository.appendMessage: could not settle after retry");
     }
 
-    private pushInto(id: string, input: CaptureMessageInput, now: Date) {
+    // Null when the window is no longer open. A redelivered messageId is a no-op (the filter skips it).
+    private async pushInto(id: string, input: CaptureMessageInput, now: Date): Promise<ICapture | null> {
         const part: ICapturePart[] = input.text
             ? [{ messageId: input.messageId, text: input.text, ...(input.entities?.length ? { entities: input.entities } : {}) }]
             : [];
-        return Capture.findOneAndUpdate({ _id: id, state: "open" }, [
+        const updated = await Capture.findOneAndUpdate({ _id: id, state: "open", messageIds: { $ne: input.messageId } }, [
             {
                 $set: {
                     messageIds: { $concatArrays: ["$messageIds", [input.messageId]] },
                     media: { $concatArrays: ["$media", { $literal: input.media }] },
-                    mediaGroupIds: input.mediaGroupId ? { $setUnion: ["$mediaGroupIds", [input.mediaGroupId]] } : "$mediaGroupIds",
+                    mediaGroupIds: input.mediaGroupId ? { $setUnion: ["$mediaGroupIds", { $literal: [input.mediaGroupId] }] } : "$mediaGroupIds",
                     parts: sortedParts({ $concatArrays: ["$parts", { $literal: part }] }),
-                    senderName: input.senderName,
-                    lastAt: now,
+                    senderName: { $literal: input.senderName },
+                    lastAt: { $max: ["$lastAt", now] }, // album items race: never move backwards
                 },
             },
             REBUILD,
         ], { returnDocument: "after", updatePipeline: true }).exec();
+        if (updated) return updated;
+        return Capture.findOne({ _id: id, state: "open", messageIds: input.messageId }).exec();
     }
 
     // Sweeper step 1: close one window that went quiet (30 s) or hit the cap (90 s).
