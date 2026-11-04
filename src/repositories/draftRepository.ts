@@ -1,7 +1,7 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
 import type { IMediaItem } from "../models/Post";
 
-export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId">>;
+export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing">>;
 
 /** `timeOut` is minutes from config.json; 0 (or less) means drafts never expire. */
 export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes: number, now = Date.now()): boolean {
@@ -20,7 +20,7 @@ class DraftRepository {
             { userId },
             {
                 $set: { chatId, locale, step: "title", media: [], promptMessageId, startedAt: now, updatedAt: now },
-                $unset: { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1 },
+                $unset: { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1 },
             },
             { upsert: true, returnDocument: "after" }
         ).exec();

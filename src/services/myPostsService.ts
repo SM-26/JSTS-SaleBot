@@ -2,6 +2,7 @@ import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api/types";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
+import listingRepository from "../repositories/listingRepository";
 import { PostService } from "./postService";
 import { localeService } from "./localeService";
 import { isApiError } from "../config/telegramErrors";
@@ -141,6 +142,15 @@ export class MyPostsService {
         await this.refreshMessage(query);
     }
 
+    // A moderator take-down leaves the post "approved" but off the market: no Bump, no Sold.
+    private async refuseIfTakenDown(query: CallbackQuery, postId: string): Promise<boolean> {
+        const listing = await listingRepository.findByPostId(postId);
+        if (listing?.status !== "taken_down") return false;
+        const user: User | null = await userRepository.findByUserId(String(query.from.id));
+        await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(localeService.resolveUserLocale(user), 'postTakenDown'), show_alert: true });
+        return true;
+    }
+
     async handleSoldCallback(query: CallbackQuery): Promise<void> {
         const postId = query.data!.replace("sold_", "");
         const post: Post | null = await postRepository.findById(postId);
@@ -152,7 +162,16 @@ export class MyPostsService {
             return;
         }
 
+        if (await this.refuseIfTakenDown(query, postId)) return;
+
         await postRepository.updateStatus(postId, "sold");
+        // Best-effort: Sold also ends the listing, so a moderator's take-down finds nothing to remove.
+        try {
+            const listing = await listingRepository.findByPostId(postId);
+            if (listing) await listingRepository.markSold(String(listing._id), new Date());
+        } catch (err) {
+            console.error(`[ERROR - handleSoldCallback] post ${postId}`, (err as Error).message);
+        }
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
@@ -209,6 +228,8 @@ export class MyPostsService {
             await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postNotFound') });
             return;
         }
+
+        if (await this.refuseIfTakenDown(query, postId)) return;
 
         if (post.status !== "approved") {
             const user: User | null = await userRepository.findByUserId(String(query.from.id));

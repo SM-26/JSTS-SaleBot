@@ -12,6 +12,7 @@ import { InputService } from "../services/inputService";
 import { WizardService } from "../services/wizardService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
+import { PublishService } from "../services/publishService";
 import { UserService } from "../services/userService";
 import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
@@ -20,6 +21,7 @@ import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
 import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
+import { TakeDownService } from "../services/takeDownService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -46,6 +48,8 @@ export class BotController {
     private wizardService: WizardService;
     private postService: PostService;
     private moderationService: ModerationService;
+    private publishService: PublishService;
+    private botUsername = "";
     private userService: UserService;
     private myPostsService: MyPostsService;
     private adminService: AdminService;
@@ -55,6 +59,7 @@ export class BotController {
     private broadcastUsersService: BroadcastUsersService;
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
+    private takeDownService: TakeDownService;
 
     constructor(api: Api) {
         this.api = api;
@@ -62,10 +67,12 @@ export class BotController {
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService);
-        this.moderationService = new ModerationService(api, this.config, this.postService);
+        this.publishService = new PublishService(api, this.config, this.postService);
+        this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
+        this.takeDownService = new TakeDownService(api, this.config);
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
         this.paymentService = new PaymentService(api, this.config);
@@ -325,6 +332,16 @@ export class BotController {
             return;
         }
 
+        if (route.action === "rejectReason") {
+            await this.moderationService.handleReasonCallback(ctx, query, route.arg);
+            return;
+        }
+
+        if (route.action === "takeDown") {
+            await this.takeDownService.handleCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -385,6 +402,7 @@ export class BotController {
     }
 
     registerRoutes(bot: Bot, botUsername: string): void {
+        this.botUsername = botUsername;
         const isPrivate = (msg: Message) => msg.chat.type === "private";
         const cmd = (
             names: string | string[],
@@ -459,8 +477,10 @@ export class BotController {
             return next();
         });
 
-        bot.use(cmd("start", (msg) => {
+        bot.use(cmd("start", (msg, args) => {
             if (!isPrivate(msg)) return;
+            // The "Fix and resend" button on a reject notice deep-links here.
+            if (args === "sell") return this.wizardService.handleNewPost(msg);
             return this.HandleStart(msg);
         }));
         bot.use(cmd("newpost", (msg) => {

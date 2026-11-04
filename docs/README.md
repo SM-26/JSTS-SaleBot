@@ -22,10 +22,13 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Live Preview** — Users see a formatted preview, with Confirm/Cancel on the same message
 - **Admin Moderation** — Posts sent to a moderation group with approve/reject buttons
 - **Pending Management** — Admins can list (`/pending`) and bulk-expire (`/clearpending`) posts
-- **Rejection Reasons** — Moderators can give an optional reason by replying to the bot's prompt, or press **Skip**
+- **Rejection Reasons** — Moderators pick one of four preset reasons (buttons), reply to the bot's prompt with their own. The author is told exactly once, and the message carries **Fix and resend** and, when `rulesUrl` is set, a **Group rules** button
+- **Trusted-Seller Publishing** — A seller with an approved or sold post and no moderator take-down in the last 90 days publishes at once. The moderation group gets a "Published (trusted seller)" card to review after the fact
+- **Take Down** — Moderators can take down any published post from its card. The group message is removed, the author is told, the post can no longer be bumped or marked sold, and the seller loses trusted status for 90 days
+- **Blocked-Word Check** — A blocked word in the title, description, price or location is caught at the preview (for everyone, trusted sellers too): the bot names the word and asks for that field again
 - **Post Bumping** — Users can bump their approved posts to the top (subject to daily limits)
 - **Donations** — Users can support the bot via Telegram Stars (`/donate`)
-- **Auto-Publish** — Approved posts are forwarded to a public sales group
+- **Auto-Publish** — Approved posts (and trusted sellers' posts) are forwarded to a public sales group
 - **Broadcasts** — Announce to the channel (`/broadcast`) or DM active/pending/approved users directly (`/broadcastUsers`)
 - **Forum Topics** — Moderation and approved posts target specific group topics
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
@@ -86,7 +89,9 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 
 ### 📝 For moderators
 
-When you press **Reject**, the bot posts a prompt in the group. To give a reason, **reply to that prompt message** with the reason text, or press **Skip** to reject without one. A message that is not a reply to the prompt is ignored (the bot reminds you to reply), so the reason can't be attached to the wrong post. The author is notified once you reply or skip. The prompt is stored in the database, so it survives a bot restart.
+When you press **Reject**, the bot posts a prompt in the group with four preset reasons. Press one, or **reply to that prompt message** with your own text. A message that is not a reply to the prompt is ignored (the bot reminds you to reply), so the reason can't be attached to the wrong post. The author is notified exactly once, with a **Fix and resend** button and the group rules link (if `rulesUrl` is set). The prompt is stored in the database, so it survives a bot restart.
+
+Every published post card carries **🚫 Take down** (when its listing exists). Trusted sellers' posts appear in the group at once with a "Published (trusted seller)" card, so check those after the fact. Taking a post down removes it from the sales group, tells the author, and ends their trusted status for 90 days.
 
 ### ⚙️ Admin Commands
 | Command | Description |
@@ -248,7 +253,7 @@ src/
 │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
 │   ├── postService.ts        # Post Rich Message formatting, publish to groups, bump/sold edits
 │   ├── myPostsService.ts     # User post management (list, bump, mark sold)
-│   ├── moderationService.ts  # Approve/reject logic; reject-reason prompt (reply or Skip)
+│   ├── moderationService.ts  # Approve/reject logic; reject-reason prompt (presets or reply)
 │   ├── pendingService.ts     # /pending listing & /clearpending bulk expire
 │   ├── adminService.ts       # /config, /broadcast, promote/demote/auth
 │   ├── configSchema.ts       # Per-key type rules validating /config values
@@ -437,7 +442,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `captureMode`        | enum | `"off"` or `"shadow"`: record and classify sale-topic messages without sending anything. Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
-| `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); reserved for a later slice |
+| `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
 
 ### 4. Run
@@ -468,7 +473,8 @@ Post saved to MongoDB (status: pending)
 Sent to moderation group with ✅ Approve / ❌ Reject buttons
     ↓
 ┌─ Approved → Published to sales group + user notified
-└─ Rejected → Moderator replies to the reason prompt (or presses Skip) → user notified
+└─ Rejected → Moderator picks a preset or replies → user notified once
+(Trusted sellers skip the wait: published at once, reviewed afterwards; a moderator can Take down)
 ```
 
 ---

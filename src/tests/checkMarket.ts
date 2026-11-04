@@ -11,6 +11,7 @@ import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
+import { isTrustedSeller, TRUST_REVOKE_MS } from "../services/trustService";
 import { tick } from "../services/shadowService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
@@ -210,6 +211,8 @@ async function run() {
         }
         const again = await listingRepository.createForPost(post, "dm", false, at(5));
         assert.strictEqual(String(again._id), String(listing._id), "createForPost is idempotent per post");
+        const liveAgain = await listingRepository.createForPost(post, "dm", false, at(5), at(6));
+        assert.strictEqual(liveAgain.refreshedAt.getTime(), listing.refreshedAt.getTime(), "a repeat call with liveAt leaves the clock alone");
         assert.strictEqual((await listingRepository.findByPostId(post._id as string))!.title, "Gear");
         assert.ok((await listingRepository.findLiveForMatching()).some(l => String(l._id) === String(listing._id)));
         assert.ok((await listingRepository.findSellerRecent(post.userId, new Date(t0.getTime() - SEC))).some(l => String(l._id) === String(listing._id)));
@@ -384,6 +387,56 @@ async function run() {
         await tick({ ...cfg, buyerMatches: "off" }, at(62));
         assert.strictEqual((await rowOf("wtboff"))?.matches, undefined, "no matches unless buyerMatches is shadow");
         console.log("[OK] wtb logs matches.");
+
+        // take-down: live|expired only, atomic, text/media/title dropped
+        const mkListing = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+            source: "group", origin: "capture", sellerId: `${RUN}-${seller}`, chatId: CHAT, messageIds: [1],
+            title: "t", text: "secret text", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: t0, refreshedAt: t0, ...extra,
+        });
+        const T = at(5);
+        const td = await mkListing("td1");
+        const before = await listingRepository.takeDown(String(td._id), T);
+        assert.ok(before && before.status === "live" && before.title === "t" && before.sellerId === `${RUN}-td1`, "takeDown returns the before-document");
+        const tdRaw = await Listing.collection.findOne({ _id: td._id });
+        assert.ok(tdRaw?.status === "taken_down" && tdRaw.endedBy === "moderator" && +tdRaw.endedAt === +T, "taken_down by moderator at T");
+        assert.ok(!("text" in tdRaw) && !("media" in tdRaw) && !("title" in tdRaw), "text, media and title are unset");
+        assert.strictEqual((await listingRepository.findById(String(td._id)))?.status, "taken_down", "findById");
+        assert.strictEqual(await listingRepository.takeDown(String(td._id), T), null, "second takeDown loses");
+        const tdSold = await mkListing("td2", { status: "sold" });
+        assert.strictEqual(await listingRepository.takeDown(String(tdSold._id), T), null, "sold is final");
+        const tdExp = await mkListing("td3", { status: "expired" });
+        assert.ok(await listingRepository.takeDown(String(tdExp._id), T), "an expired listing can be taken down");
+        const raceL = await mkListing("td4");
+        const race = await Promise.all([listingRepository.takeDown(String(raceL._id), T), listingRepository.takeDown(String(raceL._id), T)]);
+        assert.strictEqual(race.filter(Boolean).length, 1, "concurrent takeDown: exactly one wins");
+        console.log("[OK] takeDown.");
+
+        // trust: a published post earns it; a moderator take-down of anything revokes it for 90 days
+        const NOW = at(100);
+        const seller = (n: string) => `${RUN}-tr-${n}`;
+        const mkTrustPost = (n: string, status: Post["status"]) => PostModel.create({ userId: seller(n), title: "p", price: "1", status });
+        await mkTrustPost("pend", "pending");
+        await mkTrustPost("rej", "rejected");
+        await mkTrustPost("appr", "approved");
+        await mkTrustPost("sold", "sold");
+        await mkTrustPost("rev", "approved");
+        await mkTrustPost("revg", "approved");
+        await mkTrustPost("rm", "approved");
+        await mkListing(`tr-grp`);
+        const takenAt = (n: string, extra: Record<string, unknown> = {}) => mkListing(`tr-${n}`, { status: "taken_down", endedBy: "moderator", endedAt: NOW, ...extra });
+        await takenAt("rev", { source: "bot", origin: "dm", chatId: undefined, postId: "p-rev" });
+        await takenAt("revg");
+        await mkListing("tr-rm", { status: "removed", endedBy: "seller", endedAt: NOW });
+        const trust = (n: string, now = NOW) => isTrustedSeller(`${RUN}-tr-${n}`, now);
+        assert.deepStrictEqual(
+            [await trust("none"), await trust("pend"), await trust("rej"), await trust("appr"), await trust("sold"), await trust("grp")],
+            [false, false, false, true, true, false], "trust follows approved/sold posts only; captured listings do not count");
+        const day = 24 * 60 * 60 * 1000;
+        assert.strictEqual(await trust("rev", new Date(NOW.getTime() + TRUST_REVOKE_MS - 1)), false, "revoked until T + 90 d - 1 ms");
+        assert.strictEqual(await trust("rev", new Date(NOW.getTime() + TRUST_REVOKE_MS)), true, "restored at T + 90 d");
+        assert.strictEqual(await trust("revg", new Date(NOW.getTime() + day)), false, "a group take-down revokes too");
+        assert.strictEqual(await trust("rm"), true, "a seller's own removal does not revoke");
+        console.log("[OK] isTrustedSeller.");
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([

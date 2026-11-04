@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import assert from "assert";
-import { findBlockedWord, reloadBlockedWords, setBlockedWordsPathForTest } from "../services/blockedWords";
+import { findBlockedWord, findBlockedField, reloadBlockedWords, setBlockedWordsPathForTest } from "../services/blockedWords";
 
 // Paths relative to src/tests/
 const LOCALES_DIR = path.join(__dirname, "../locales");
@@ -239,6 +239,10 @@ function runCheck() {
     assert.strictEqual(findBlockedWord("http://rebrandXly/tindrlike"), null, "the dot in an entry is escaped");
     assert.strictEqual(findBlockedWord("שלום @jessyy012"), "@jessyy012");
     assert.strictEqual(findBlockedWord(undefined), null);
+    assert.deepStrictEqual(findBlockedField({ title: "מחזיק לנשק", location: "נשק" }), { field: "title", word: "לנשק" }, "first hit in title/description/price/location order (\"לנשק\" is its own entry, so that is the word named)");
+    assert.deepStrictEqual(findBlockedField({ title: "M4", description: "כולל נשק", price: "900", location: "מרכז" }), { field: "description", word: "נשק" });
+    assert.strictEqual(findBlockedField({ title: "M4", price: "900" }), null);
+    assert.strictEqual(findBlockedField({}), null);
     const heStrings: [string, string][] = [];
     if (localeData.he) heStrings.push(...Object.entries(localeData.he).map(([k, v]): [string, string] => [`he/common.json:${k}`, v]));
     if (faqDataMap.he) heStrings.push(...Object.entries(faqDataMap.he).map(([k, v]): [string, string] => [`he/faq.json:${k}`, v]));

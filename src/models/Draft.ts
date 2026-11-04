@@ -19,6 +19,8 @@ export interface IDraft extends Document {
     location?: string;
     media: IMediaItem[];
     promptMessageId: number;
+    // Set while the seller re-enters a field that held a blocked word (see WizardService.previewOrFix).
+    fixing?: boolean;
     startedAt: Date;
     updatedAt: Date;
 }
@@ -40,6 +42,7 @@ const draftSchema = new Schema<IDraft>({
     location: { type: String },
     media: { type: [mediaItemSchema], default: [] },
     promptMessageId: { type: Number, required: true },
+    fixing: { type: Boolean, default: undefined },
     startedAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true },
 }, { timestamps: false });

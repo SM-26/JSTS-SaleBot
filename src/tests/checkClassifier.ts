@@ -27,6 +27,7 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["bare largest wins", "גלוק 17 למכירה 900", true, "ask", { priceValue: 900, isBundle: false }],
     ["dashed phone is no price", "למכירה וסט 050-1234567", true, "none", { priceValue: undefined }],
     ["phone number is not a price", "למכירה 0501234567", true, "none"],
+    ["radio fixture, new in box", "מכשיר קשר\nבאופנג UV-5R\nחדש באריזה\n270 ₪ בית דגן", true, "strict", { priceValue: 270, location: "בית דגן", title: "מכשיר קשר" }],
 ];
 
 let failed = 0;

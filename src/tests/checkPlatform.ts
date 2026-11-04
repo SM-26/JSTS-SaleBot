@@ -4,6 +4,7 @@ import { command, parseCommand } from "../controllers/commands";
 import { ensureUserMiddleware, errorBoundary, requireAuthLevel, sessionKey, staleButtonCatchAll } from "../controllers/middleware";
 import { createHarness, BOT_USERNAME } from "./harness";
 import { AuthLevel } from "../types";
+import { isTestBotToken, isTestDbUri, TEST_BOT_ID_PREFIX } from "./testBot";
 
 /**
  * Offline checks for the v2 platform modules (command matcher, middleware).
@@ -176,6 +177,17 @@ async function main() {
         assert.deepStrictEqual(keys, ["42:42", "-100:7", "5:9", undefined]);
     }
     console.log("  [SUCCESS] sessionKey is chat:user, undefined without a chat.");
+
+    assert.ok(isTestBotToken(`${TEST_BOT_ID_PREFIX}AAHx`));
+    for (const t of [undefined, "", "1234567890:AAHx", "9299714864", "x9299714864:AAHx"]) {
+        assert.strictEqual(isTestBotToken(t), false, String(t));
+    }
+    assert.ok(isTestDbUri("mongodb://127.0.0.1:27031/SalesBotTestDB"));
+    assert.ok(isTestDbUri("mongodb://u:p@h1:1,h2:2/mytest?replicaSet=rs"));
+    for (const u of [undefined, "", "mongodb://127.0.0.1:27017", "mongodb://127.0.0.1:27017/", "mongodb://test@prod-host/SalesBotDB", "mongodb://prod/SalesBotDB?x=test", "not a uri"]) {
+        assert.strictEqual(isTestDbUri(u), false, String(u));
+    }
+    console.log("  [SUCCESS] test-bot token and test-db gates refuse everything else.");
 
     console.log("[SUCCESS] All platform checks passed.");
 }

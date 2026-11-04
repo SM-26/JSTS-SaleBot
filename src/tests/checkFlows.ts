@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
-import { createHarness, BOT_USERNAME, RecordedCall } from "./harness";
+import Listing from "../models/Listing";
+import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
 // Persistent flows (issue #84, phase 5): the /newpost wizard, the reject-reason
@@ -35,6 +36,7 @@ async function run() {
     const { BotController } = await import("../controllers/botController");
     const { localeService } = await import("../services/localeService");
     const { default: draftRepository } = await import("../repositories/draftRepository");
+    const { default: listingRepository } = await import("../repositories/listingRepository");
 
     const MOD_GROUP = -1001000000001;
     const APPROVED_GROUP = -1001000000002;
@@ -42,8 +44,8 @@ async function run() {
     let counter = 0;
     const newId = () => base + counter++;
 
-    const boot = () => {
-        const h = createHarness();
+    const boot = (options: HarnessOptions = {}) => {
+        const h = createHarness(options);
         const ctrl = new BotController(h.bot.api);
         ctrl.registerRoutes(h.bot, BOT_USERNAME);
         return { h, ctrl };
@@ -378,7 +380,7 @@ async function run() {
 
         // seed an author and moderators for the reject flows
         const author = user();
-        await User.create({ userId: String(author), firstName: "Author", authLevel: 0 });
+        await User.create({ userId: String(author), firstName: "Author", authLevel: 0, preferredLocale: "en" });
         const mod = user();
         await User.create({ userId: String(mod), firstName: "Mod", authLevel: 2 });
         const otherMod = user();
@@ -392,9 +394,10 @@ async function run() {
             await rejectButton(one, mod, postId);
             await settle();
             const sent = one.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
-            assert.strictEqual(sent.length, 1, "one prompt message carrying the Skip button");
+            assert.strictEqual(sent.length, 1, "one prompt message carrying the preset buttons");
             assert.strictEqual(text(sent[0]), T("rejectReasonPrompt"));
-            assert.ok(/^skip_reason_\d+_\d+$/.test(keyboard(sent[0])[0].callback_data));
+            assert.deepStrictEqual(keyboard(sent[0]).map((b) => b.callback_data), [1, 2, 3, 4].map((n) => `rr_${postId}_${n}`));
+            assert.ok(!keyboard(sent[0]).some((b) => b.callback_data.startsWith("skip_reason_")), "no Skip button any more");
             assert.strictEqual((await Post.findById(postId))!.status, "rejected", "claimed on Reject");
             assert.ok(!one.calls.some((c) => Number(c.params.chat_id) === author && c.method === "sendMessage"), "the author is told only after a reason");
 
@@ -403,14 +406,14 @@ async function run() {
             await settle();
             assert.strictEqual((await Post.findById(postId))!.rejectionReason, "Photos are too dark");
             const told = two.calls.find((c) => c.method === "sendMessage" && Number(c.params.chat_id) === author);
-            assert.strictEqual(text(told!), T("postRejectedWithReason") + "Photos are too dark");
+            assert.strictEqual(text(told!), localeService.t("en", "postRejectedWithReason") + "Photos are too dark");
             assert.ok(two.calls.some((c) => c.method === "editMessageReplyMarkup" && Number(c.params.message_id) === messageId(sent[0])), "Skip keyboard removed");
 
-            // the Skip button is dead now
+            // the preset buttons are dead now: the notice was already claimed
             two.calls.length = 0;
             await two.pressButton(keyboard(sent[0])[0].callback_data, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: messageId(sent[0]) });
             await settle();
-            assert.ok(two.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === T("staleButton")));
+            assert.ok(two.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === T("adminPostHandled")));
             assert.ok(!two.calls.some((c) => Number(c.params.chat_id) === author));
             console.log("  [OK] (h) reject with a reason works across a restart.");
         }
@@ -423,8 +426,8 @@ async function run() {
             await rejectButton(h, mod, postId);
             await settle();
             const [prompt] = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
-            const skip = prompt; // one message: the prompt carries the Skip button
-            const skipData = keyboard(skip)[0].callback_data;
+            const skip = prompt; // one message: the prompt, whose id keys the legacy Skip marker
+            const skipData = `skip_reason_${mod}_${Date.now()}`; // a Skip button from before the presets
 
             h.calls.length = 0;
             await h.pressButton(skipData, { userId: otherMod, chatId: MOD_GROUP, chatType: "supergroup", messageId: messageId(skip) });
@@ -436,7 +439,7 @@ async function run() {
             await h.pressButton(skipData, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: messageId(skip) });
             await settle();
             const told = h.calls.find((c) => c.method === "sendMessage" && Number(c.params.chat_id) === author);
-            assert.strictEqual(text(told!), T("postRejected"));
+            assert.strictEqual(text(told!), localeService.t("en", "postRejected"));
             assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup" && Number(c.params.message_id) === messageId(skip)));
             assert.strictEqual((await Post.findById(postId))!.rejectionReason ?? null, null);
 
@@ -547,6 +550,864 @@ async function run() {
             console.log("  [OK] (l) a sold card is re-rendered in place, bump leaves it, clear_sold refreshes the summary.");
         }
 
+        // (m) a moderator approval publishes the post and creates the bot listing
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const postId = await seedPost(seller, "Approve me");
+            const before = Date.now(); // the post's createdAt is earlier than the approval
+            await sleep(5);
+            h.calls.length = 0;
+            await h.pressButton(`approve_${postId}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 310 });
+            await settle();
+            const after = Date.now();
+
+            const post = (await Post.findById(postId))!;
+            assert.strictEqual(post.status, "approved");
+            assert.ok(post.approvedMessageId, "approvedMessageId is set");
+            const listing = (await Listing.findOne({ source: "bot", postId }))!;
+            assert.ok(listing, "a listing exists for the post");
+            assert.deepStrictEqual([listing.origin, listing.hold, listing.status, listing.sellerId], ["dm", false, "live", String(seller)]);
+            assert.ok(listing.refreshedAt.getTime() > before && listing.refreshedAt.getTime() <= after, "the 30-day clock starts at approval, not at post.createdAt");
+
+            const publishes = h.calls.filter((c) => c.method === "sendRichMessage");
+            assert.strictEqual(publishes.length, 1);
+            assert.strictEqual(Number(publishes[0].params.chat_id), APPROVED_GROUP);
+            const toSeller = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === seller);
+            assert.strictEqual(toSeller.length, 1, "the seller gets one DM");
+            assert.strictEqual(text(toSeller[0]), T("postApproved"));
+            assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === T("adminApproved")));
+            const card = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === 310)!;
+            assert.strictEqual(text(card), T("statusApproved"));
+            assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
+            console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
+        // (n) a listing failure does not stop the author's DM; the card gets no Take down
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const postId = await seedPost(seller, "Listing fails");
+            const realCreate = listingRepository.createForPost;
+            listingRepository.createForPost = () => Promise.reject(new Error("boom"));
+            try {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${postId}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 311 });
+                await settle();
+            } finally {
+                listingRepository.createForPost = realCreate;
+            }
+            assert.strictEqual((await Post.findById(postId))!.status, "approved");
+            assert.strictEqual(await Listing.countDocuments({ postId }), 0);
+            const toSeller = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === seller);
+            assert.strictEqual(toSeller.length, 1, "the seller is still told");
+            assert.strictEqual(text(toSeller[0]), T("postApproved"));
+            const card = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === 311)!;
+            assert.strictEqual(text(card), T("statusApproved"));
+            assert.ok(!card.params.reply_markup, "no Take down without a listing");
+            console.log("  [OK] (n) a failed listing still tells the author and leaves the card without Take down.");
+        }
+
+        // Task 4: submitPost. (p) new seller / (q) trusted / (q2) publish failure / (q3) pending+rejected / (q4) blocked word.
+        // Labels differ from the brief's (n)/(o): (n) already exists above.
+        const confirmWizard = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
+            await h.sendText("/newpost", { userId: u });
+            await h.sendText(title, { userId: u });
+            await h.sendText(description, { userId: u });
+            await h.sendText(price, { userId: u });
+            await h.sendText(location, { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            const preview = h.calls.find((c) => c.method === "sendRichMessage")!;
+            h.calls.length = 0;
+            await h.pressButton(keyboard(preview)[0].callback_data, { userId: u, messageId: messageId(preview) });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u), title }))!;
+            postIds.push(String(post._id));
+            return post;
+        };
+        // A draft saved at "confirm" (as before the blocked-word preview gate existed), then its Confirm button.
+        const confirmSavedDraft = async (h: H, u: number, fields: { title?: string; description?: string; descriptionEntities?: { type: string; offset: number; length: number; url?: string }[]; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", descriptionEntities, price = "1,500", location = "Tel Aviv" } = fields;
+            const now = new Date();
+            const promptMessageId = 9000 + (u % 1000);
+            await Draft.create({
+                userId: String(u), chatId: u, locale: cfg.lang, step: "confirm", title, description, ...(descriptionEntities ? { descriptionEntities } : {}), price, location,
+                media: [{ fileId: "f0", type: "photo" }, { fileId: "f1", type: "photo" }], promptMessageId, startedAt: now, updatedAt: now,
+            });
+            h.calls.length = 0;
+            await h.pressButton(`confirm_${u}_1`, { userId: u, messageId: promptMessageId });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u), title }))!;
+            postIds.push(String(post._id));
+            return post;
+        };
+        const richTo = (h: H, chat: number) => h.calls.filter((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === chat);
+        const seedPostFor = async (u: number, status: "approved" | "rejected" | "pending") => {
+            const p = await Post.create({ userId: String(u), title: "Old", description: "d", price: "10", location: "l", media: [], status });
+            postIds.push(String(p._id));
+        };
+        const isModCard = (c: RecordedCall, id: string) =>
+            JSON.stringify(keyboard(c).map((b) => b.callback_data)) === JSON.stringify([`approve_${id}`, `reject_${id}`]);
+        const toAuthor = (h: H, u: number) => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === u).map(text);
+
+        // (p)
+        {
+            const { h } = boot();
+            const u = user();
+            const post = await confirmWizard(h, u);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(await Listing.countDocuments({ postId: String(post._id) }), 0);
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            console.log("  [OK] (p) a new seller's post goes to the moderation card.");
+        }
+
+        // (q)
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "approved");
+            assert.ok(post.approvedMessageId);
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 1);
+            const listing = (await Listing.findOne({ postId: String(post._id) }))!;
+            assert.ok(listing && listing.origin === "dm" && listing.status === "live");
+            assert.ok(toAuthor(h, u).includes(T("postApproved")));
+            assert.ok(!toAuthor(h, u).includes(T("postCreated")));
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(JSON.stringify(cards[0].params.rich_message).includes(T("trustedPublishedLabel")));
+            const kb = keyboard(cards[0]);
+            assert.strictEqual(kb.length, 1);
+            assert.ok(/^td_[0-9a-f]{24}$/.test(kb[0].callback_data));
+            assert.strictEqual(kb[0].callback_data, `td_${listing._id}`);
+            assert.strictEqual(kb[0].text, T("takeDownButton"));
+            assert.strictEqual(post.moderationMessageId, messageId(cards[0]));
+            console.log("  [OK] (q) a trusted seller publishes at once; the review card carries Take down.");
+        }
+
+        // (q2)
+        {
+            let n = 5000;
+            const { h } = boot({ responses: {
+                sendRichMessage: (p: Record<string, unknown>) => Number(p.chat_id) === APPROVED_GROUP
+                    ? { ok: false, error_code: 500, description: "boom" }
+                    : { message_id: n++, chat: { id: Number(p.chat_id), type: "private" }, date: 1 },
+            } });
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "pending");
+            assert.ok(!post.approvedMessageId);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            assert.ok(!toAuthor(h, u).includes(T("postApproved")));
+            assert.strictEqual(await Listing.countDocuments({ postId: String(post._id) }), 0);
+            console.log("  [OK] (q2) a failed publish falls back to the moderation card.");
+        }
+
+        // (q3)
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "rejected");
+            await seedPostFor(u, "pending");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "pending");
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (q3) pending and rejected posts don't make a seller trusted.");
+        }
+
+        // (q4) Decision 7: a blocked word in any saved field keeps even a trusted seller in moderation.
+        // The wizard stops these at the preview now (Task 7), so the draft is saved straight at "confirm".
+        {
+            const { findBlockedWord } = await import("../services/blockedWords");
+            const bad = "https://t.me/vipemployment_bot";
+            assert.ok(findBlockedWord(bad), "the probe must be on the blocklist");
+            const wasValidate = cfg.validatePrice;
+            cfg.validatePrice = false; // so the price field can carry the probe
+            try {
+                for (const field of ["title", "description", "price", "location"] as const) {
+                    const { h } = boot();
+                    const u = user();
+                    await seedPostFor(u, "approved");
+                    const post = await confirmSavedDraft(h, u, { [field]: `x ${bad}` });
+                    assert.strictEqual(post.status, "pending", field);
+                    assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0, field);
+                    assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)), field);
+                }
+            } finally {
+                cfg.validatePrice = wasValidate;
+            }
+            console.log("  [OK] (q4) a blocked word in any field keeps a trusted seller in moderation.");
+        }
+
+        // (q5) setApprovedMessageId rejects after the group message exists: the post stays approved, never a second card.
+        {
+            const { default: postRepository } = await import("../repositories/postRepository");
+            const real = postRepository.setApprovedMessageId;
+            let failed = 0;
+            postRepository.setApprovedMessageId = ((...args: Parameters<typeof real>) => {
+                if (failed++ === 0) return Promise.reject(new Error("db blip"));
+                return real.apply(postRepository, args);
+            }) as typeof real;
+            try {
+                const { h } = boot();
+                const u = user();
+                await seedPostFor(u, "approved");
+                const post = await confirmWizard(h, u);
+                assert.strictEqual(post.status, "approved");
+                assert.strictEqual(richTo(h, APPROVED_GROUP).length, 1, "exactly one public message");
+                assert.ok(!richTo(h, MOD_GROUP).some((c) => keyboard(c).some((b) => /^(approve|reject)_/.test(b.callback_data))), "no approve/reject card");
+                assert.ok(toAuthor(h, u).includes(T("postApproved")));
+                assert.ok(!toAuthor(h, u).includes(T("postCreated")));
+            } finally {
+                postRepository.setApprovedMessageId = real;
+            }
+            console.log("  [OK] (q5) a failure after the group message keeps the post approved.");
+        }
+
+        // Task 5: moderator take-down (td_). Labels (r)..(r8) stand for the brief's (p)..(p8): (p)..(q5) are taken above.
+        const tdPress = (h: H, who: number, listingId: string, cardId: number) =>
+            h.pressButton(`td_${listingId}`, { userId: who, chatId: MOD_GROUP, chatType: "supergroup", messageId: cardId });
+        const answers = (h: H) => h.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => String(c.params.text));
+        const deletes = (h: H) => h.calls.filter((c) => c.method === "deleteMessage");
+        const publishTrusted = async (h: H, title = "Bike") => {
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u, { title });
+            const listing = (await Listing.findOne({ postId: String(post._id) }))!;
+            const cardId = messageId(richTo(h, MOD_GROUP)[0]);
+            return { u, post, listing, cardId, listingId: String(listing._id) };
+        };
+
+        // (r) + (r2) + (r5) + (r4): one published post, taken down, pressed again, bumped and sold, resubmitted
+        {
+            const { h } = boot();
+            const { u, post, cardId, listingId } = await publishTrusted(h);
+            const oldMessageId = post.approvedMessageId!;
+            assert.ok(oldMessageId);
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            const after = (await Listing.findById(listingId))!;
+            assert.strictEqual(after.status, "taken_down");
+            assert.strictEqual(after.endedBy, "moderator");
+            const del = deletes(h);
+            assert.strictEqual(del.length, 1);
+            assert.strictEqual(Number(del[0].params.chat_id), APPROVED_GROUP);
+            assert.strictEqual(Number(del[0].params.message_id), oldMessageId);
+            const reloaded = (await Post.findById(post._id))!;
+            assert.strictEqual(reloaded.status, "approved");
+            assert.strictEqual(reloaded.approvedMessageId ?? null, null);
+            assert.deepStrictEqual(toAuthor(h, u), [T("takeDownNotice").replace("{title}", "Bike")]);
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId)!;
+            assert.strictEqual(text(edit), T("statusTakenDown"));
+            assert.ok(!(edit.params.reply_markup as Keyboard | undefined)?.inline_keyboard.length, "the button is gone");
+            console.log("  [OK] (r) a moderator takes a post down: group message deleted, seller told, card closed.");
+
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.deepStrictEqual(toAuthor(h, u), []);
+            console.log("  [OK] (r2) a second press says already, with no second delete or DM.");
+
+            for (const data of [`bump_${post._id}`, `sold_${post._id}`]) {
+                h.calls.length = 0;
+                await h.pressButton(data, { userId: u, messageId: 900 });
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("postTakenDown")], data);
+                assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0, data);
+                const p = (await Post.findById(post._id))!;
+                assert.strictEqual(p.status, "approved", data);
+                assert.strictEqual(p.approvedMessageId ?? null, null, data);
+            }
+            console.log("  [OK] (r5) the seller's Bump and Sold are refused on a taken-down post.");
+
+            h.calls.length = 0;
+            const next = await confirmWizard(h, u, { title: "Bike2" });
+            assert.strictEqual(next.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(next._id)));
+            console.log("  [OK] (r4) a taken-down seller is no longer trusted.");
+        }
+
+        // (r3) a plain user and the seller cannot take down
+        {
+            const { h } = boot();
+            const { u, listingId, cardId } = await publishTrusted(h);
+            const stranger = user();
+            for (const who of [stranger, u]) {
+                h.calls.length = 0;
+                await tdPress(h, who, listingId, cardId);
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("notAdmin")]);
+                assert.strictEqual((await Listing.findById(listingId))!.status, "live");
+                assert.strictEqual(deletes(h).length, 0);
+                assert.deepStrictEqual(toAuthor(h, u), []);
+            }
+            console.log("  [OK] (r3) td_ from a non-moderator is refused and changes nothing.");
+        }
+
+        // (r6) the group message is already gone
+        {
+            const { h } = boot({ responses: { deleteMessage: { ok: false, error_code: 400, description: "Bad Request: message to delete not found" } } });
+            const { u, listingId, cardId } = await publishTrusted(h);
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            console.log("  [OK] (r6) a group message already gone still counts as taken down.");
+        }
+
+        // (r7) the seller blocked the bot
+        {
+            let block = false;
+            let n = 6000;
+            const { h } = boot({ responses: {
+                sendMessage: (p: Record<string, unknown>) => block && Number(p.chat_id) !== MOD_GROUP
+                    ? { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }
+                    : { message_id: n++, chat: { id: Number(p.chat_id), type: "private" }, date: 1 },
+            } });
+            const { listingId, cardId } = await publishTrusted(h);
+            block = true;
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.strictEqual(deletes(h).length, 1);
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            console.log("  [OK] (r7) a seller who blocked the bot does not stop the take-down.");
+        }
+
+        // (r8) a sold listing cannot be taken down
+        {
+            const { h } = boot();
+            const { listingId, cardId } = await publishTrusted(h);
+            await listingRepository.markSold(listingId, new Date());
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual((await Listing.findById(listingId))!.status, "sold");
+            assert.strictEqual(deletes(h).length, 0);
+            console.log("  [OK] (r8) td_ on a sold listing says already and changes nothing.");
+        }
+
+        // (r9) the toast fails: the delete, the post update, the DM and the card edit still happen
+        {
+            let failAnswers = false;
+            const { h } = boot({ responses: {
+                answerCallbackQuery: () => failAnswers ? { ok: false, error_code: 400, description: "Bad Request: query is too old" } : true,
+            } });
+            const { u, post, cardId, listingId } = await publishTrusted(h);
+            failAnswers = true;
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            const del = deletes(h);
+            assert.strictEqual(del.length, 1);
+            assert.strictEqual(Number(del[0].params.message_id), post.approvedMessageId);
+            assert.strictEqual(((await Post.findById(post._id))!).approvedMessageId ?? null, null);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            assert.ok(h.calls.some((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId && text(c) === T("statusTakenDown")));
+            console.log("  [OK] (r9) a failing toast does not skip the delete, the DM or the card edit.");
+        }
+
+        // (r10) the post lookup throws: the listing is not stranded silently, the DM and card edit still happen
+        {
+            const { default: postRepository } = await import("../repositories/postRepository");
+            const { h } = boot();
+            const { u, cardId, listingId, post } = await publishTrusted(h);
+            const real = postRepository.findById;
+            postRepository.findById = (() => Promise.reject(new Error("db blip"))) as unknown as typeof real;
+            const logged: string[] = [];
+            const realErr = console.error;
+            console.error = (...args: unknown[]) => { logged.push(args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")); };
+            try {
+                h.calls.length = 0;
+                await tdPress(h, mod, listingId, cardId);
+                await settle();
+            } finally {
+                postRepository.findById = real;
+                console.error = realErr;
+            }
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            assert.ok(h.calls.some((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId));
+            assert.ok(logged.some((l) => l.includes("load post failed") && l.includes(listingId) && l.includes(String(post._id))), "the log carries the ids");
+            console.log("  [OK] (r10) a failing post lookup is logged with the ids and the other effects still run.");
+        }
+
+        // (r11) a group listing: the member's message is never touched
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Member", authLevel: 0 });
+            const now = new Date();
+            const listing = await Listing.create({
+                source: "group", origin: "capture", chatId: APPROVED_GROUP, messageIds: [555], sellerId: String(seller),
+                title: "Radio", media: [], status: "live", hold: false, isBundle: false, createdAt: now, refreshedAt: now,
+            });
+            h.calls.length = 0;
+            await tdPress(h, mod, String(listing._id), 321);
+            await settle();
+            assert.strictEqual((await Listing.findById(listing._id))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.ok(!h.calls.some((c) => Number(c.params.chat_id) === APPROVED_GROUP), "nothing sent to the member's chat");
+            assert.strictEqual(toAuthor(h, seller).length, 1);
+            console.log("  [OK] (r11) a group listing is taken down without touching the member's message.");
+        }
+
+        // (r12) a malformed id answers "already" without throwing
+        {
+            const { h } = boot();
+            for (const data of ["td_nothex", "td_"]) {
+                h.calls.length = 0;
+                await h.pressButton(data, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: 322 });
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("takeDownAlready")], data);
+            }
+            console.log("  [OK] (r12) a malformed td_ id answers already.");
+        }
+
+        // (r13) an expired listing can be taken down
+        {
+            const { h } = boot();
+            const { post, cardId, listingId } = await publishTrusted(h);
+            await Listing.updateOne({ _id: listingId }, { $set: { status: "expired" } });
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            const after = (await Listing.findById(listingId))!;
+            assert.strictEqual(after.status, "taken_down");
+            assert.strictEqual(after.endedBy, "moderator");
+            assert.strictEqual(deletes(h).length, 1);
+            assert.strictEqual(((await Post.findById(post._id))!).approvedMessageId ?? null, null);
+            console.log("  [OK] (r13) an expired listing can be taken down.");
+        }
+
+        // Task 6: reject presets. Labels (s)..(s7) stand for the brief's (q)..(q7): (q)..(q5) are taken above.
+        const TEN = (key: string) => localeService.t("en", key);
+        const rrPress = (h: H, who: number, data: string, messageId = 400) =>
+            h.pressButton(data, { userId: who, chatId: MOD_GROUP, chatType: "supergroup", messageId });
+        const toAuthorDMs = (h: H) => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === author);
+        const promptOf = async (h: H, postId: string, who = mod) => {
+            h.calls.length = 0;
+            await rejectButton(h, who, postId);
+            await settle();
+            const [p] = h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
+            h.calls.length = 0;
+            return p;
+        };
+
+        // (s) a preset reason, with the author's buttons
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Preset me");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, mod, `rr_${postId}_2`, messageId(prompt));
+            await settle();
+            const post = (await Post.findById(postId))!;
+            assert.strictEqual(post.status, "rejected");
+            assert.strictEqual(post.rejectionReason, T("rejectPreset2"));
+            assert.ok(post.rejectionNotifiedAt);
+            const dms = toAuthorDMs(h);
+            assert.strictEqual(dms.length, 1);
+            assert.strictEqual(text(dms[0]), TEN("postRejectedWithReason") + TEN("rejectPreset2"));
+            type UrlKeyboard = { inline_keyboard: { text: string; url?: string }[][] };
+            const rows = (c: RecordedCall) => (c.params.reply_markup as UrlKeyboard).inline_keyboard;
+            assert.deepStrictEqual(rows(dms[0]), [[{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }]]);
+            const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === messageId(prompt))!;
+            assert.ok(text(edit).includes(T("statusRejected")) && text(edit).includes(T("rejectPreset2")), text(edit));
+            assert.deepStrictEqual(answers(h), [T("adminRejected")]);
+            assert.strictEqual(localeService.t("he", "rejectPreset2"), "תיאור ו\\או תמונות לא ברורות");
+
+            // the rules button appears only with a rulesUrl
+            const rules = "https://t.me/airsoft_yad2/54833/115880";
+            cfg.rulesUrl = rules;
+            try {
+                const p2 = await seedPost(author, "Preset rules");
+                const prompt2 = await promptOf(h, p2);
+                await rrPress(h, mod, `rr_${p2}_1`, messageId(prompt2));
+                await settle();
+                assert.deepStrictEqual(rows(toAuthorDMs(h)[0]), [
+                    [{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }],
+                    [{ text: TEN("rejectRulesButton"), url: rules }],
+                ]);
+            } finally {
+                cfg.rulesUrl = original.rulesUrl;
+            }
+            console.log("  [OK] (s) a preset rejects with the reason, one author DM with Fix and (if set) Rules buttons.");
+        }
+
+        // (s2) a typed reply after another moderator's preset won
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Race typed");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, otherMod, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            h.calls.length = 0;
+            await h.sendText("too late", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", replyToMessageId: messageId(prompt) });
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 0, "the author is not told twice");
+            assert.ok(h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP && text(c) === T("adminPostHandled")));
+            assert.strictEqual((await Post.findById(postId))!.rejectionReason, T("rejectPreset1"));
+            console.log("  [OK] (s2) a typed reply after someone else's preset is told the post is handled.");
+        }
+
+        // (s3) two moderators, two presets
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Race presets");
+            const prompt = await promptOf(h, postId);
+            await Promise.all([
+                rrPress(h, mod, `rr_${postId}_1`, messageId(prompt)),
+                rrPress(h, otherMod, `rr_${postId}_3`, messageId(prompt)),
+            ]);
+            await settle();
+            const dms = toAuthorDMs(h);
+            assert.strictEqual(dms.length, 1);
+            const stored = (await Post.findById(postId))!.rejectionReason!;
+            assert.ok([T("rejectPreset1"), T("rejectPreset3")].includes(stored));
+            const n = stored === T("rejectPreset1") ? 1 : 3;
+            assert.strictEqual(text(dms[0]), TEN("postRejectedWithReason") + TEN(`rejectPreset${n}`));
+            assert.deepStrictEqual(answers(h).sort(), [T("adminPostHandled"), T("adminRejected")].sort());
+            console.log("  [OK] (s3) two presets at once: one DM, one winner.");
+        }
+
+        // (s4) a non-moderator cannot press a preset
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Not a mod");
+            const prompt = await promptOf(h, postId);
+            const plain = user();
+            await User.create({ userId: String(plain), firstName: "Plain", authLevel: 0 });
+            await rrPress(h, plain, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("notAdmin")]);
+            assert.strictEqual(toAuthorDMs(h).length, 0);
+            assert.ok(!(await Post.findById(postId))!.rejectionNotifiedAt);
+            await rrPress(h, mod, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 1, "the moderator still wins afterwards");
+            console.log("  [OK] (s4) rr_ from a non-moderator is refused.");
+        }
+
+        // (s5) a bad preset number
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Bad n");
+            const prompt = await promptOf(h, postId);
+            for (const n of [9, 0]) await rrPress(h, mod, `rr_${postId}_${n}`, messageId(prompt));
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("staleButton"), T("staleButton")]);
+            assert.strictEqual(toAuthorDMs(h).length, 0);
+            assert.ok(!(await Post.findById(postId))!.rejectionNotifiedAt);
+            console.log("  [OK] (s5) rr_ with a bad number is stale.");
+        }
+
+        // (s6) the seller blocked the bot
+        {
+            const { h } = boot({ responses: {
+                sendMessage: (p: Record<string, unknown>) => Number(p.chat_id) === author
+                    ? { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }
+                    : { message_id: 9000 + Math.floor(Math.random() * 1000), chat: { id: Number(p.chat_id), type: "private" }, date: 1 },
+            } });
+            const postId = await seedPost(author, "Blocked");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, mod, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            assert.ok((await Post.findById(postId))!.rejectionNotifiedAt);
+            const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === messageId(prompt))!;
+            assert.ok(text(edit).includes(T("authorNotNotified")), text(edit));
+            assert.deepStrictEqual(answers(h), [T("adminRejected")]);
+            console.log("  [OK] (s6) a blocked seller is flagged on the prompt; the rejection stands.");
+        }
+
+        // (s7) /start sell opens the wizard
+        {
+            const { h } = boot();
+            const u = user();
+            h.calls.length = 0;
+            await h.sendText("/start sell", { userId: u });
+            await settle();
+            assert.ok(text(h.calls.find((c) => c.method === "sendMessage")!).startsWith(T("welcome")));
+            assert.strictEqual((await draftOf(u))!.step, "title");
+            const v = user();
+            h.calls.length = 0;
+            await h.sendText("/start", { userId: v });
+            await settle();
+            assert.strictEqual(text(h.calls.find((c) => c.method === "sendMessage")!), T("greeting"));
+            assert.strictEqual(await draftOf(v), null);
+            console.log("  [OK] (s7) /start sell opens the wizard; plain /start greets.");
+        }
+
+        // Task 7: blocked words at the preview. Labels (t)..(t7) stand for the brief's (r)..(r7): (r)..(r8) are taken above.
+        const BAD = "מחזיק לנשק";
+        const noticeFor = (field: string, word: string) => localeService.t(cfg.lang, "blockedWordNotice", { field: T(field), word });
+        // Wizard answers + two photos + Done; leaves h.calls holding what Done caused.
+        const toDone = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
+            await h.sendText("/newpost", { userId: u });
+            for (const answer of [title, description, price, location]) await h.sendText(answer, { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+        };
+        const dmTo = (h: H, u: number) => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === u).map(text);
+
+        // (t) a blocked title stops at the preview
+        {
+            const { h } = boot();
+            const u = user();
+            await toDone(h, u, { title: BAD });
+            assert.strictEqual(richTo(h, u).length, 0, "no preview");
+            const msgs = dmTo(h, u);
+            assert.strictEqual(msgs.length, 2, JSON.stringify(msgs));
+            assert.strictEqual(msgs[0], noticeFor("fieldTitle", "לנשק"));
+            assert.ok(msgs[1].startsWith(T("welcome")), "then the title prompt");
+            const d = (await draftOf(u))!;
+            assert.strictEqual(d.step, "title");
+            assert.strictEqual(d.fixing, true);
+            assert.strictEqual(await Post.countDocuments({ userId: String(u) }), 0);
+            console.log("  [OK] (t) a blocked title stops at the preview and asks for the title again.");
+
+            // (t2) still blocked
+            h.calls.length = 0;
+            await h.sendText("נשק למכירה", { userId: u });
+            await settle();
+            const again = dmTo(h, u);
+            assert.strictEqual(again[0], noticeFor("fieldTitle", "נשק"));
+            assert.ok(again[1].startsWith(T("welcome")));
+            const d2 = (await draftOf(u))!;
+            assert.strictEqual(d2.step, "title");
+            assert.strictEqual(d2.fixing, true);
+            assert.strictEqual(richTo(h, u).length, 0);
+            console.log("  [OK] (t2) still-blocked text asks again.");
+
+            // (t7) restart while fixing: Continue re-sends the title prompt, still fixing
+            const { h: h2 } = boot();
+            await h2.sendText("/newpost", { userId: u });
+            await settle();
+            assert.ok(dmTo(h2, u).includes(T("draftInProgress")), "Continue / Start over was offered");
+            const offered = (await draftOf(u))!;
+            h2.calls.length = 0;
+            await h2.pressButton(`draft_continue_${u}`, { userId: u, messageId: offered.promptMessageId });
+            await settle();
+            assert.ok(dmTo(h2, u).some((m) => m.startsWith(T("welcome"))), "the title prompt is re-sent");
+            const d7 = (await draftOf(u))!;
+            assert.strictEqual(d7.step, "title");
+            assert.strictEqual(d7.fixing, true);
+            console.log("  [OK] (t7) a restart while fixing keeps the draft on the title, fixing.");
+
+            // (t3) clean text goes straight back to the preview
+            h2.calls.length = 0;
+            await h2.sendText("מחזיק", { userId: u });
+            await settle();
+            const preview = richTo(h2, u);
+            assert.strictEqual(preview.length, 1, "the preview comes back");
+            assert.deepStrictEqual(keyboard(preview[0]).map((b) => b.callback_data.split("_")[0]), ["confirm", "cancel"]);
+            const d3 = (await draftOf(u))!;
+            assert.strictEqual(d3.step, "confirm");
+            assert.strictEqual(d3.fixing, undefined);
+            assert.strictEqual(d3.promptMessageId, messageId(preview[0]));
+            assert.deepStrictEqual([d3.title, d3.description, d3.price, d3.location], ["מחזיק", "Blue mountain bike", "1,500", "Tel Aviv"]);
+            h2.calls.length = 0;
+            await h2.pressButton(keyboard(preview[0])[0].callback_data, { userId: u, messageId: messageId(preview[0]) });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u) }))!;
+            postIds.push(String(post._id));
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(post.title, "מחזיק");
+            assert.ok(isModCard(richTo(h2, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (t3) fixed text returns to the preview; Confirm then creates the post.");
+        }
+
+        // (t4) each field stops at the preview and asks for its own step
+        {
+            const wasValidate = cfg.validatePrice;
+            cfg.validatePrice = false; // so the price field can carry a blocked word
+            try {
+                const cases = [
+                    { field: "description", label: "fieldDescription", prompt: "enterDescription" },
+                    { field: "price", label: "fieldPrice", prompt: "enterPrice" },
+                    { field: "location", label: "fieldLocation", prompt: "enterLocation" },
+                ] as const;
+                for (const { field, label, prompt } of cases) {
+                    const { h } = boot();
+                    const u = user();
+                    await toDone(h, u, { [field]: "כולל נשק" });
+                    assert.strictEqual(richTo(h, u).length, 0, field);
+                    const msgs = dmTo(h, u);
+                    assert.strictEqual(msgs[0], noticeFor(label, "נשק"), field);
+                    assert.ok(msgs[1].startsWith(T(prompt)), field);
+                    const d = (await draftOf(u))!;
+                    assert.strictEqual(d.step, field);
+                    assert.strictEqual(d.fixing, true);
+                    // clean text replaces it and the preview returns
+                    h.calls.length = 0;
+                    await h.sendText("100", { userId: u });
+                    await settle();
+                    assert.strictEqual(richTo(h, u).length, 1, field);
+                    assert.strictEqual((await draftOf(u))!.step, "confirm");
+                }
+            } finally {
+                cfg.validatePrice = wasValidate;
+            }
+            console.log("  [OK] (t4) a blocked description, price and location each re-ask their own step.");
+        }
+
+        // (t5) a trusted seller is stopped at the preview too
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            await toDone(h, u, { description: "כולל נשק" });
+            assert.strictEqual(richTo(h, u).length, 0);
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.strictEqual(richTo(h, MOD_GROUP).length, 0);
+            assert.strictEqual((await draftOf(u))!.step, "description");
+            assert.strictEqual(await Post.countDocuments({ userId: String(u), title: "Bike" }), 0);
+            console.log("  [OK] (t5) a trusted seller with a blocked word is stopped at the preview.");
+        }
+
+        // (t6) a draft saved before the release: the submitPost guard still sends it to moderation
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmSavedDraft(h, u, { title: BAD });
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            console.log("  [OK] (t6) a pre-release draft with a blocked title still goes to moderation.");
+        }
+
+        // Final fix wave. Labels (u)..(u3) are fresh.
+        // (u) Sold ends the listing: a moderator's later td_ finds nothing to take down
+        {
+            const { h } = boot();
+            const { u, post, listing, cardId, listingId } = await publishTrusted(h);
+            assert.strictEqual(listing.status, "live");
+            await h.pressButton(`sold_${post._id}`, { userId: u, messageId: 901 });
+            await settle();
+            assert.strictEqual((await Post.findById(post._id))!.status, "sold");
+            const sold = (await Listing.findById(listingId))!;
+            assert.strictEqual(sold.status, "sold");
+            assert.strictEqual(sold.endedBy, "seller");
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.deepStrictEqual(toAuthor(h, u), []);
+            assert.strictEqual((await Listing.findById(listingId))!.status, "sold");
+            h.calls.length = 0;
+            const next = await confirmWizard(h, u, { title: "Bike2" });
+            assert.strictEqual(next.status, "approved", "the seller is still trusted");
+            console.log("  [OK] (u) Sold ends the listing: a later td_ says already, no delete, no DM, seller still trusted.");
+        }
+
+        // (u2) another moderator's preset leaves no nudge for the prompter, and the stale marker is gone
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Cross mod");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, otherMod, `rr_${postId}_1`, messageId(prompt));
+            await settle();
+            h.calls.length = 0;
+            await h.sendText("anything else", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup" });
+            await settle();
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && text(c) === T("replyToPromptHint")), "no nudge");
+            h.calls.length = 0;
+            await h.sendText("late reason", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", replyToMessageId: messageId(prompt) });
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 0, "no second DM");
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP), "the marker is forgotten");
+            console.log("  [OK] (u2) after another moderator's preset the prompter gets no nudge and the marker is gone.");
+        }
+
+        // (u3) the prompter's own preset clears its marker too
+        {
+            const { h } = boot();
+            const postId = await seedPost(author, "Own preset");
+            const prompt = await promptOf(h, postId);
+            await rrPress(h, mod, `rr_${postId}_2`, messageId(prompt));
+            await settle();
+            h.calls.length = 0;
+            await h.sendText("plain", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup" });
+            await h.sendText("late reason", { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", replyToMessageId: messageId(prompt) });
+            await settle();
+            assert.strictEqual(toAuthorDMs(h).length, 0);
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP), "no nudge, no handled message");
+            console.log("  [OK] (u3) the prompter's own preset clears its marker.");
+        }
+
+        // (u4) a blocked word hidden in a text_link URL stops at the preview
+        const hidden = [{ type: "text_link", offset: 0, length: 3, url: "https://cutt.ly/x" }];
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("/newpost", { userId: u });
+            await h.sendText("Bike", { userId: u });
+            await h.sendText("ראו כאן", { userId: u, entities: hidden });
+            await h.sendText("1,500", { userId: u });
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            assert.strictEqual(richTo(h, u).length, 0, "no preview");
+            assert.strictEqual(dmTo(h, u)[0], noticeFor("fieldDescription", "https://cutt.ly/*"));
+            assert.strictEqual((await draftOf(u))!.step, "description");
+            console.log("  [OK] (u4) a blocked word in a text_link URL stops at the preview as a description problem.");
+        }
+
+        // (u5) the same on a saved draft: a trusted seller goes to moderation
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmSavedDraft(h, u, { description: "ראו כאן", descriptionEntities: hidden });
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (u5) a hidden blocked URL sends a trusted seller's post to moderation.");
+        }
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);
@@ -554,6 +1415,7 @@ async function run() {
         await User.deleteMany({ userId: { $in: ids } });
         await Post.deleteMany({ $or: [{ userId: { $in: ids } }, { _id: { $in: postIds } }] });
         await Draft.deleteMany({ userId: { $in: ids } });
+        await Listing.deleteMany({ sellerId: { $in: ids } });
         await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:(${ids.join("|")})$` } });
         await mongoose.disconnect();
     }
