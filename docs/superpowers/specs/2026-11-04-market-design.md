@@ -42,7 +42,8 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - Inline search, Mini App catalogue, Contact-seller deep links on group posts, multi-community (`/setup`, welcome
   notes, member tags, guest mode). Directions B-later and C of the pitch.
 - AI extraction. The design runs on rules alone; section 10 marks where the AI plugs in later.
-- Ratings, verified badges, auto-translate, weekly digests, price-drop alerts (all dropped in #104).
+- Ratings, auto-translate, weekly digests, price-drop alerts (all dropped in #104). Seller badges came back as an
+  optional addition (17.1).
 - Moving listings to a separate topic. Listings stay in the sale topic.
 - Seller-deleted approved posts (never: Sold is the way out). Editing an approved post's price, text or media is a
   possible later feature, not 3.0 (owner).
@@ -788,3 +789,37 @@ Answered:
 - Q4. The preset reasons are the owner's four, plus a group-rules button (9.3).
 
 None left open.
+
+## 17. Optional additions (owner, 2026-11-04)
+
+The owner raised these after approval as optional. They are not in slices 0–6 yet. Each one says where it would
+slot in, and the owner's open choices are in the inbox (`C:\Users\or_ga\Documents\SaleBot-inbox`).
+
+### 17.1 Seller badges
+
+Two marks, either or both. Both extend the trust line in 11.3:
+
+- **Top seller 🏅 (automatic).** It is earned when sold ÷ ended listings is at least X%, with at least N ended listings,
+  where ended = `sold` + `expired` + `removed` (live listings don't count against a seller who is still selling).
+  Proposed: X = 60%, N = 5. The market-wide baseline is 28%, and N stops one lucky sale from earning it. Both are
+  constants, set by the owner. Marking Sold without a sale can game it. That is accepted, as it is today.
+- **Verified by the group ✅ (hand-picked).** ADMIN `/verify <userId>` and `/unverify <userId>`. It is stored as
+  `members.verifiedAt` and `verifiedBy` (members is a new collection, so this is additive, and the doc is upserted
+  for bot users who have none yet).
+
+They are shown wherever the trust line shows: new group cards, DM cards, alerts and buyer notes. They slot into slice
+3, which builds the trust line.
+
+### 17.2 The Beit Dagan meeting point
+
+בית דגן is the group's official meeting place (it is already in the FAQ). A seller can mark an item "also available
+at the meeting point", and buyers can filter on it:
+
+- An optional `meetup: boolean` on listings, drafts and posts. These are new optional fields, so 2.0.1 ignores them,
+  and rollback is safe.
+- **Listing:** the wizard's location step and the DM preview get a toggle button [📍 גם בבית דגן]. In captured text,
+  "בית דגן" parses as the location, and a listing whose location is בית דגן counts as `meetup`.
+- **Shown** as "📍 {location} · גם בבית דגן" on the post and the cards.
+- **Buyers:** a wanted-to-buy post or saved search that names "בית דגן" only matches `meetup` listings, or listings
+  located there.
+- **Slots:** the toggle goes in slice 5 (the DM preview's field buttons), and the filter goes in slice 4 (matching).
