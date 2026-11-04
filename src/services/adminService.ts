@@ -66,12 +66,16 @@ export class AdminService {
         const lines = Object.entries(this.config).map(
             ([key, value]) => `<b>${key}</b>: <code>${value}</code>`
         );
+        // Keys an older config.json predates are still settable, so show them.
+        for (const key of Object.keys(CONFIG_SCHEMA)) {
+            if (!(key in this.config)) lines.push(`<b>${key}</b>: <code>(unset)</code>`);
+        }
         const text = `${localeService.t(locale, 'configTitle')}\n\n${lines.join("\n")}`;
         await this.api.sendMessage({ chat_id: chatId, text, parse_mode: "HTML" });
     }
 
     private async updateConfig(chatId: number, key: string, rawValue: string, locale: string): Promise<void> {
-        if (!(key in this.config) || !(key in CONFIG_SCHEMA)) {
+        if (!(key in CONFIG_SCHEMA)) {
             await this.api.sendMessage({ chat_id: chatId, text: localeService.t(locale, 'configKeyNotFound') });
             return;
         }

@@ -190,6 +190,8 @@ function runCheck() {
     assert.strictEqual(findBlockedWord("ראו https://cutt.ly/abc123"), "https://cutt.ly/*");
     assert.strictEqual(findBlockedWord("WATCH PORN now"), "watch porn");
     assert.strictEqual(findBlockedWord("M4 למכירה"), null);
+    assert.strictEqual(findBlockedWord("http://rebrandXly/tindrlike"), null, "the dot in an entry is escaped");
+    assert.strictEqual(findBlockedWord("שלום @jessyy012"), "@jessyy012");
     assert.strictEqual(findBlockedWord(undefined), null);
     const heStrings: [string, string][] = [];
     if (localeData.he) heStrings.push(...Object.entries(localeData.he).map(([k, v]): [string, string] => [`he/common.json:${k}`, v]));

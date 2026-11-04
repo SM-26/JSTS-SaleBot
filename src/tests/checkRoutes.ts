@@ -6,7 +6,8 @@ import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import { createHarness, BOT_USERNAME } from "./harness";
-import type { BotConfig } from "../types";
+import { AuthLevel, BotConfig } from "../types";
+import type { Message } from "node-telegram-bot-api/types";
 
 // Smoke test for BotController.registerRoutes on the offline harness: every
 // user command is routed, look-alikes are not, the /newPost wizard answers
@@ -42,6 +43,9 @@ async function run() {
     const config: BotConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "../../config.json"), "utf-8"));
 
     const userId = 7_000_000_000 + (Date.now() % 1_000_000_000);
+    const adminId = userId + 1;
+    const configPath = path.join(__dirname, "../../config.json");
+    const originalConfigFile = fs.readFileSync(configPath);
     const h = createHarness();
     new BotController(h.bot.api).registerRoutes(h.bot, BOT_USERNAME);
 
@@ -123,8 +127,26 @@ async function run() {
         );
         assert.strictEqual((await Draft.findOne({ userId: String(userId) }))?.title, "A bicycle");
 
+        // /config can set a key an older config.json predates (captureMode), and lists it as unset.
+        await User.create({ userId: String(adminId), firstName: "Admin", authLevel: AuthLevel.ADMIN });
+        const { AdminService } = await import("../services/adminService");
+        const oldConfig: BotConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+        delete oldConfig.captureMode;
+        const admin = new AdminService(h.bot.api, oldConfig);
+        const configMsg = { message_id: 1, date: 0, chat: { id: adminId, type: "private" }, from: { id: adminId, is_bot: false, first_name: "Admin" } } as Message;
+        const adminLocale = localeService.resolveUserLocale(await userRepository.findByUserId(String(adminId)));
+        h.calls.length = 0;
+        await admin.handleConfig(configMsg, "");
+        assert.ok(String(h.calls.at(-1)?.params.text).includes("<b>captureMode</b>: <code>(unset)</code>"), "/config lists the missing key as unset");
+        h.calls.length = 0;
+        await admin.handleConfig(configMsg, "captureMode shadow");
+        assert.ok(String(h.calls.at(-1)?.params.text).includes(localeService.t(adminLocale, "configUpdated")), "/config accepts a key missing from config.json");
+        assert.strictEqual(oldConfig.captureMode, "shadow");
+
         console.log("[OK] commands, look-alikes, stale button and the persisted wizard are routed correctly.");
     } finally {
+        fs.writeFileSync(configPath, originalConfigFile); // updateConfig writes config.json
+        await User.deleteOne({ userId: String(adminId) });
         await User.deleteOne({ userId: String(userId) });
         await Post.deleteMany({ userId: String(userId) });
         await Draft.deleteMany({ userId: String(userId) });
