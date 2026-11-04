@@ -8,6 +8,9 @@ import memberRepository from "../repositories/memberRepository";
 const storedEntities = (entities?: MessageEntity[]): StoredEntity[] | undefined =>
     entities?.length ? entities.map(storedEntity) : undefined;
 
+// The one place that says when capture runs (unset or "off" = no capture).
+export const isCaptureOn = (config: BotConfig): boolean => config.captureMode === "shadow" || config.captureMode === "optin";
+
 // Records sale-topic messages into per-sender windows. Never sends anything.
 export class CaptureService {
     constructor(private config: BotConfig) {}

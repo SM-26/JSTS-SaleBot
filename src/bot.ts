@@ -9,6 +9,7 @@ import { BotController } from "./controllers/botController";
 import { errorBoundary } from "./controllers/middleware";
 import { createPollErrorLogger } from "./config/pollingErrors";
 import { reconcileBotListings } from "./services/marketService";
+import { isCaptureOn } from "./services/captureService";
 import { tick } from "./services/shadowService";
 import { startSweeper } from "./services/sweeper";
 
@@ -60,7 +61,7 @@ async function main() {
                 await reconcile();
                 sweeper = startSweeper([
                     // read live: /config can switch captureMode without a restart
-                    { name: "captures", everyMs: 10_000, run: async () => { if ((controller.config.captureMode ?? "off") !== "off") await tick(controller.config, new Date()); } },
+                    { name: "captures", everyMs: 10_000, run: async () => { if (isCaptureOn(controller.config)) await tick(controller.config, new Date()); } },
                     { name: "reconcile", everyMs: 3_600_000, run: reconcile },
                 ]);
             },

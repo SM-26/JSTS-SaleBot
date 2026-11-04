@@ -18,7 +18,7 @@ import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
-import { CaptureService } from "../services/captureService";
+import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
@@ -381,8 +381,7 @@ export class BotController {
     }
 
     private captureOn(): boolean {
-        const mode = this.config.captureMode;
-        return mode === "shadow" || mode === "optin";
+        return isCaptureOn(this.config);
     }
 
     registerRoutes(bot: Bot, botUsername: string): void {

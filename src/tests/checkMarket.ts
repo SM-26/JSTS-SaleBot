@@ -67,6 +67,10 @@ async function checkPure() {
     assert.deepStrictEqual(rankMatches("מחפש glock 17", [L("old", "glock 17", 1, 100), L("fresh", "glock 17", 1, 0), L("older", "glock 17", 1, 200)]), ["fresh", "old", "older"], "equal overlap: newest refresh first");
     assert.deepStrictEqual(rankMatches("מחפש glock 17 מצוין", [L("partial", "glock 17 תיק נרתיק", 1, 0), L("full", "glock 17 מצוין", 1, 500)]), ["full", "partial"], "higher overlap first, even if older");
     console.log("[OK] rankMatches.");
+
+    const { isCaptureOn } = await import("../services/captureService");
+    assert.deepStrictEqual([undefined, "off", "shadow", "optin"].map(captureMode => isCaptureOn({ captureMode } as BotConfig)), [false, false, true, true], "capture runs only for shadow/optin");
+    console.log("[OK] isCaptureOn.");
 }
 
 async function run() {
