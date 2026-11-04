@@ -658,10 +658,12 @@ contain no member names, phone numbers or copied posts.
 
 ### Slice 1: trust-based moderation + reject reasons + take down
 
-- **Scope:** 9.1, 9.3, 9.4; AGENTS.md rule update.
+- **Scope:** 9.1, 9.3, 9.4; the blocked-word check at the wizard preview (5.5), shipped with trust because trusted
+  posts skip review; AGENTS.md rule update.
 - **Checks:**
   - `check-flows`: new seller → moderation card; trusted → instant publish + take-down card; take down within 90 days
-    → not trusted; preset reason → author notified with that reason; old `skip_reason_` still works.
+    → not trusted; preset reason → author notified with that reason; old `skip_reason_` still works; a title with
+    "לנשק" stops at the preview and asks for the title again.
   - `check-callbacks`: `rr_`, `td_` pinned.
   - `check-claim`: concurrent preset-reason presses.
 - **/test:** "Post as trusted seller", "Post as new seller".
