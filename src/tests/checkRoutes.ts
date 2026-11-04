@@ -186,7 +186,7 @@ async function run() {
         assert.ok(await Member.exists({ userId: String(senderBase + 1) }), "the sender is touched as a member");
 
         const ignored: [string, number, () => Promise<void>][] = [
-            ["other topic", 2, () => h.sendText("bike", { ...group, userId: senderBase + 2, messageThreadId: 48138 })],
+            ["other topic", 2, () => h.sendText("bike", { ...group, userId: senderBase + 2, messageThreadId: 48138, isTopicMessage: true })],
             ["bot sender", 3, () => h.sendText("bike", { ...group, userId: senderBase + 3, isBot: true })],
             ["reply", 4, () => h.sendText("bike", { ...group, userId: senderBase + 4, replyToMessageId: 999_999_999 })],
             ["command", 5, () => h.sendText("/sell bike", { ...group, userId: senderBase + 5 })],
@@ -202,7 +202,7 @@ async function run() {
 
         // A named topic: its messages carry the thread id, and Telegram's root reply is not a real reply.
         live.approvedTopicId = 11;
-        await expectSilence("topic root reply", () => h.sendText("bike", { ...group, userId: senderBase + 9, messageThreadId: 11, replyToMessageId: 11 }));
+        await expectSilence("topic root reply", () => h.sendText("bike", { ...group, userId: senderBase + 9, messageThreadId: 11, isTopicMessage: true, replyToMessageId: 11 }));
         assert.strictEqual((await rows(senderBase + 9)).length, 1, "a named topic accepts its thread id (root reply ignored)");
         await expectSilence("topic without thread id", () => h.sendText("bike", { ...group, userId: senderBase + 10 }));
         assert.strictEqual((await rows(senderBase + 10)).length, 0, "a named topic needs its thread id");
@@ -211,11 +211,27 @@ async function run() {
         const approvedMessageId = 900_000_000 + (Date.now() % 100_000_000);
         await Post.create({ userId: String(userId), title: "Reply target", description: "d", price: "10", location: "l", media: [], status: "approved", approvedMessageId });
         h.calls.length = 0;
-        await h.sendText("is it available?", { ...group, userId: senderBase + 13, messageThreadId: 11, replyToMessageId: approvedMessageId });
+        await h.sendText("is it available?", { ...group, userId: senderBase + 13, messageThreadId: 11, isTopicMessage: true, replyToMessageId: approvedMessageId });
         assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === userId)), "the post's author is notified of the reply");
         assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + 13) }), 0, "a reply to a post is not captured");
         await sleep(QUIET_MS);
         live.approvedTopicId = 1;
+
+        // Critical regression (prod): in the General topic (approvedTopicId 1) a reply to a bot post carries
+        // message_thread_id = the replied-to post and no is_topic_message. It is a buyer reply: the seller is
+        // notified (capture on or off) and nothing is captured.
+        for (const [offset, mode] of [[17, "shadow"], [18, undefined]] as const) {
+            const replyTargetId = approvedMessageId + 1 + offset;
+            await Post.create({ userId: String(userId), title: "General reply target", description: "d", price: "10", location: "l", media: [], status: "approved", approvedMessageId: replyTargetId });
+            if (mode) live.captureMode = mode; else delete live.captureMode;
+            h.calls.length = 0;
+            await h.sendText("is it available?", { ...group, userId: senderBase + offset, messageThreadId: replyTargetId, replyToMessageId: replyTargetId });
+            assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === userId)),
+                `topic 1 reply-thread reply notifies the author (captureMode ${mode ?? "off"})`);
+            assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + offset) }), 0, "a reply-thread reply is not captured");
+            await sleep(QUIET_MS);
+        }
+        live.captureMode = "shadow";
 
         // A video keeps its file id; an album item keeps its media group id.
         await h.message({ video: { file_id: "vid1", file_unique_id: "v", width: 10, height: 10, duration: 1 } }, { ...group, userId: senderBase + 14 });
@@ -243,7 +259,7 @@ async function run() {
         // An edit outside the sale topic changes nothing.
         const outsider = senderBase + 16;
         await h.sendText("bike 100", { ...group, userId: outsider, messageId: 777_002 });
-        await expectSilence("edit outside the sale topic", () => h.sendEdit(777_002, "changed", { ...group, userId: outsider, messageThreadId: 48138 }));
+        await expectSilence("edit outside the sale topic", () => h.sendEdit(777_002, "changed", { ...group, userId: outsider, messageThreadId: 48138, isTopicMessage: true }));
         assert.strictEqual((await rows(outsider))[0].text, "bike 100", "an edit outside the sale topic is ignored");
         delete live.captureMode;
         live.approvedTopicId = savedTopic;
@@ -270,7 +286,7 @@ async function run() {
         await User.deleteOne({ userId: String(userId) });
         await Post.deleteMany({ userId: String(userId) });
         await Draft.deleteMany({ userId: String(userId) });
-        const captureSenders = Array.from({ length: 17 }, (_, i) => String(senderBase + i));
+        const captureSenders = Array.from({ length: 19 }, (_, i) => String(senderBase + i));
         await Capture.deleteMany({ senderId: { $in: captureSenders } });
         await Member.deleteMany({ userId: { $in: captureSenders } });
         await mongoose.connection.db!.collection<{ _id: string }>("bot_sessions").deleteMany({ _id: { $regex: `:${userId}$` } });

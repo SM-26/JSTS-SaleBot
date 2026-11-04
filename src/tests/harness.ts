@@ -25,6 +25,8 @@ export interface SendTextOptions {
     entities?: Record<string, unknown>[];
     /** Forum topic id (`message_thread_id`); omitted by default, like General/topic 1. */
     messageThreadId?: number;
+    /** Sets `is_topic_message`: the thread id is a real forum topic (not a reply-thread id). */
+    isTopicMessage?: boolean;
     /** Marks the sender as a bot. */
     isBot?: boolean;
     mediaGroupId?: string;
@@ -109,6 +111,7 @@ export function createHarness(options: HarnessOptions = {}) {
             chat: { id: chat, type: chatType },
             from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester" },
             ...(o.messageThreadId === undefined ? {} : { message_thread_id: o.messageThreadId }),
+            ...(o.isTopicMessage ? { is_topic_message: true } : {}),
             ...(o.mediaGroupId === undefined ? {} : { media_group_id: o.mediaGroupId }),
             ...(o.caption === undefined ? {} : { caption: o.caption }),
             ...(o.senderChat === undefined ? {} : { sender_chat: o.senderChat }),

@@ -417,8 +417,10 @@ export class BotController {
             if (await this.moderationService.handleRejectReply(ctx)) return;
 
             // 3. Handle Replies in the Approved Group (Buyer to Seller communication)
-            // (in a forum topic Telegram adds the topic's root message as reply_to_message: not a reply to a post)
-            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message && msg.reply_to_message.message_id !== msg.message_thread_id) {
+            // (in a real forum topic Telegram adds the topic's root message as reply_to_message: not a reply to a post;
+            // outside one, message_thread_id is the reply-thread root = the replied-to post, so that IS a reply)
+            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message
+                && !(msg.is_topic_message && msg.reply_to_message.message_id === msg.message_thread_id)) {
                 await this.postService.handlePublicReply(msg);
                 return;
             }

@@ -15,12 +15,13 @@ export class CaptureService {
     isSaleTopicMessage(msg: Message): boolean {
         if (msg.chat.id !== this.config.approvedGroupId) return false;
         const topic = Number(this.config.approvedTopicId);
-        const thread = msg.message_thread_id;
+        // outside a real forum topic message_thread_id is a reply-thread id, not a topic: treat it as General
+        const thread = msg.is_topic_message ? msg.message_thread_id : undefined;
         // prod's topic 1 is the General topic: its messages carry no message_thread_id
         if (topic === 1 ? thread !== undefined && thread !== 1 : thread !== topic) return false;
         if (!msg.from || msg.from.is_bot || msg.sender_chat || msg.forward_origin) return false;
-        // in a forum topic Telegram sets reply_to_message to the topic's root message
-        if (msg.reply_to_message && msg.reply_to_message.message_id !== thread) return false;
+        // in a real forum topic Telegram sets reply_to_message to the topic's root message
+        if (msg.reply_to_message && !(msg.is_topic_message && msg.reply_to_message.message_id === thread)) return false;
         if (msg.text?.startsWith("/")) return false;
         return Boolean(msg.text || msg.caption || msg.photo || msg.video);
     }
