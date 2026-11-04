@@ -202,7 +202,7 @@ the expiry clock. Posts that become `approved` after 3.0 get normal (non-hold) `
 
 ### 5.4 New config keys
 
-All three go into `BotConfig`, `CONFIG_SCHEMA` and `/config` (AGENTS.md rule), and into `config.json.example`,
+All four go into `BotConfig`, `CONFIG_SCHEMA` and `/config` (AGENTS.md rule), and into `config.json.example`,
 like `validatePrice`.
 
 | key | values | default in example | meaning |
@@ -210,6 +210,7 @@ like `validatePrice`.
 | `captureMode` | `off` \| `shadow` \| `optin` | `shadow` | `shadow` logs only; `optin` also sends notes. `hybrid` is added only in slice G. |
 | `buyerMatches` | `off` \| `shadow` \| `on` | `shadow` | `shadow` logs matches, `on` sends buyer notes. |
 | `nudges` | boolean | `false` | Day-7 "still for sale?" messages. Off until the owner's go-ahead, because they are unprompted messages to real users. Expiry runs regardless (it sends nothing). |
+| `rulesUrl` | string | `""` | Link to the group rules, shown as a button on reject notices (9.3). Prod: `https://t.me/airsoft_yad2/54833/115880`. Config, not code, because it is community-specific like the group ids. |
 
 They are live kill switches for the rollout, and each one that sends to real users is flipped only on the owner's
 go-ahead. The day counts (7, 30), the window (90 s) and the limits in this
@@ -451,15 +452,16 @@ listing gets a moderation-topic card with Take down (post-moderation), so modera
 ### 9.3 Reject needs a reason
 
 Reject keeps the atomic claim. The prompt replaces Skip with preset reason buttons plus "Other: reply to this
-message" (the existing reply-tracking path). Draft presets (owner question Q4):
+message" (the existing reply-tracking path). Presets (owner, Q4), as `he` locale strings, with `en`/`ru`
+translations:
 
-1. חסר מחיר או תיאור
-2. תמונות לא ברורות או חסרות
-3. פריט שאסור למכור בקבוצה
-4. כפילות של מודעה קיימת
-5. לא קשור לאיירסופט
+1. חסר מחיר
+2. תיאור ו\או תמונות לא ברורות
+3. פריט לא חוקי
+4. כפילות של מודעה קיימת - אפשר להקפיץ או להמתין
 
-The author is told the reason, in their language, with a one-tap "Fix and resend" deep link `start=sell`.
+The author is told the reason, in their language, with two buttons: a one-tap "Fix and resend" deep link
+`start=sell`, and a URL button to the group rules (`rulesUrl`, 5.4; no button when it is empty).
 Callback `rr_<postId>_<n>`. The old `skip_reason_` buttons already in the moderation topic keep working through the
 existing `handleSkip` (formats are frozen). New prompts just don't carry Skip.
 
@@ -514,7 +516,15 @@ messages are not re-rendered for it. `check-rich` keeps the old golden and gets 
 
 The reconcile creates `legacy` listings for the 28 posts. The one-time job (admin command `/stalecheck`, which shows
 a dry-run count and the exact text first, then needs a second confirm) sends **one DM per seller** (they are all bot
-users), listing their posts with buttons per post. **Draft text for owner approval (Q2):**
+users), listing their posts with buttons per post. The idea and "no answer in 7 days → leaves the market" are
+approved (owner, Q2).
+
+**Pilot first (owner):** `/stalecheck <userId> [userId…]` sends only to those sellers, so the owner can give the
+sellers he knows a heads-up and treat them as beta testers. A later `/stalecheck` with no ids sends to the rest. The
+send-once guard is per seller.
+
+**Text:** the owner writes the final wording after seeing the real layout on the test bot ("Stale-check dry run (to
+me only)", slice 3). It lives in the locale files. The draft below only fixes the layout and the placeholders:
 
 > שלום {firstName} 👋
 > כאן הבוט של קבוצת המכירות. אנחנו מסדרים את השוק, ויש לך אצלנו מודעות שמסומנות כפעילות כבר יותר מחודש:
@@ -548,7 +558,9 @@ The bot can't read history, so this runs offline:
 3. `/catchup import` (admin, DM, the file attached) stores the offers on `members.pendingCatchup`. Nothing is sent.
 4. `/catchup send` (admin, after the owner's go-ahead) arms delivery. Because notes to offline members likely never
    arrive, each seller's offer is delivered as a private note on their next message in the sale topic, within 30
-   days. After that it is dropped. **Draft text (owner approves at go-ahead, Q3):**
+   days. After that it is dropped. The idea and delivery on the next message are approved (owner, Q3). **The owner
+   writes the final text after seeing the layout on the test bot ("Catch-up offer to me", slice 6).** The draft only
+   fixes the layout:
 
    > 🛒 ראינו שפרסמת כאן לאחרונה {n} פריטים. להוסיף אותם לשוק של הבוט? כך קונים שמחפשים אותם יקבלו התראה.
    > [➕ בחר פריטים בבוט ↗] [לא תודה]
@@ -647,7 +659,7 @@ contain no member names, phone numbers or copied posts.
   - `check-rich`: the old golden is unchanged; a new golden with the trust line.
 - **/test:** "Age my test listing 7 days", "Age 30 days", "Stale-check dry run (to me only)".
 - **Synthetic:** the stale DM sent to the owner only, from a seeded test DB.
-- **Owner gate:** the exact text (Q2) and the go-ahead for the real send. Slice 3 can deploy before that: legacy
+- **Owner gate:** the owner's final text (after the dry run), then the pilot send, then the rest. Slice 3 can deploy before that: legacy
   listings stay on hold and `nudges` stays off until the owner turns it on.
 
 ### Slice 4: buyer matches + saved searches
@@ -677,7 +689,8 @@ contain no member names, phone numbers or copied posts.
   - script unit check on a synthetic export JSON (no real data): grouping, tiers, merge.
   - `check-market`: offer held until the next message, dropped after 30 days, never twice.
 - **/test:** "Catch-up offer to me".
-- **Owner gates:** review of `catchup.json`, the text (Q3), the go-ahead to send.
+- **Owner gates:** review of `catchup.json`, the owner's final text (after "Catch-up offer to me"), the go-ahead to
+  send.
 
 ### Slice G (after 3.0, only if the gate in 6.4 passes)
 
@@ -708,7 +721,9 @@ contain no member names, phone numbers or copied posts.
 - Removed and taken-down listings lose their text and media.
 - Hybrid is not built until the gate passes.
 - Day counts, window and limits are constants, not config. The only new config keys are the switches `captureMode`,
-  `buyerMatches` and `nudges`.
+  `buyerMatches` and `nudges`, plus `rulesUrl`.
+- The rules link is a button on the author's reject notice, not on the moderator's reason prompt.
+- `/stalecheck` can send to a pilot list of user ids first (11.4).
 - The 28 legacy listings stay on hold (no nudge, no expiry, not in matches) until `/stalecheck` sends.
 - A member deleting their own group post is invisible to the bot: Telegram sends no update. In 3.0 such a listing
   stays live until Sold, the day-7 nudge or the day-30 expiry. Buyer notes and alerts show the post date so an old
@@ -721,11 +736,8 @@ Answered:
 - Q1. Captured listings from new sellers go live at once, with a moderator take-down card (9.2).
 - Q1b. Captured listings don't count toward trust. Trust comes only from a moderator-approved bot post (9.1).
 
-Open:
+- Q2. The stale-seller message is approved as an idea, with a pilot first. The owner writes the text at slice 3 (11.4).
+- Q3. The catch-up offer is approved as an idea. The owner writes the text at slice 6 (11.5).
+- Q4. The preset reasons are the owner's four, plus a group-rules button (9.3).
 
-Q2. The exact text of the one-time message to the 14 stale sellers (11.4), and "no answer in 7 days → leaves the
-market".
-
-Q3. The catch-up offer text (11.5) and delivery on the seller's next message (vs one batch now).
-
-Q4. The preset reject reasons (9.3).
+None left open.
