@@ -74,7 +74,7 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - Bots can't DM a user who never started the bot. Durable contact with a group-only member starts when they tap a
   deep link.
 - Bots can't read chat history. The catch-up scan uses the owner's Telegram Desktop export, offline.
-- Blocked words (5.5): a plain Hebrew substring blacklist, starting with `נשק`. No Hebrew bot text and nothing the
+- Blocked words (5.5): the Rose blocklist, matched as Rose matches it. No Hebrew bot text and nothing the
   bot publishes may contain one. Enforced by `check-locals` and at publish time.
 - Prod token and prod DB are never used in tests: test bot `@JSTS_testing_bot`, user-facing test group
   `-1002445943058` topic 73 plays the sale topic, moderation test group `-1002474192098` topic 15.
@@ -235,20 +235,19 @@ messages arrive without `message_thread_id` (or with 1); the existing `Number(to
 
 ### 5.5 Blocked words (owner)
 
-A plain substring blacklist on Hebrew text, the same kind the group's Rose bot enforces. It matches the letters, not
-the meaning: `נשק` blocks anything that contains it, so it catches "לנשק" as "for a gun" and also blocks "לנשק" as
-"to kiss". That false positive is accepted on purpose, for simplicity. Other languages are not checked.
+The bot uses the group's Rose blocklist exactly as Rose applies it (owner, revised 2026-11-04: "keep as is to
+Rose"). It matches the letters, not the meaning. Rose lists the forms it wants blocked as separate entries (`נשק`,
+`הנשק`, `לנשק`, `נשקים`, `רובה`, `לרובה`, …), so "לנשק" is blocked whether it means "for a gun" or "to kiss". That
+false positive is accepted.
 
-- **The list:** one repo file, `src/config/blockedWords.json`, shaped `{ "substring": [...], "words": [...] }`. (My
-  call: a file rather than a config key, because it changes rarely and `/config` has no list type.)
-  - `substring`: `["נשק"]`, matched with `text.includes()`, as the owner decided. It covers נשקים, הנשק and לנשק too.
-  - `words`: Rose's blocklist (66 entries, exported 2026-11-04), matched as whole words, the way Rose matches them.
-    A term matches only when it isn't part of a longer word, so "רובה" doesn't block "קרובה" (near), "גרס" doesn't
-    block "גרסה" (version), and "זין" doesn't block "מזין". Spam links and handles are matched as whole tokens. A
-    trailing `*` (Rose's wildcard, e.g. `https://cutt.ly/*`) is a prefix match. Rose's `forward:` entries are
-    dropped: they block forwards, and capture ignores forwards already. (My call, from Rose's own semantics: pure
-    substring matching on the whole list would block common words.)
-  - `findBlockedWord(text)` checks both lists and returns the first hit.
+- **The list:** one repo file, `src/config/blockedWords.json`, holding Rose's 66 entries, exported 2026-11-04 (the
+  export stays in the owner's inbox, outside the repo). (My call: a file rather than a config key, because it changes
+  rarely and `/config` has no list type.)
+- **Matching, as Rose does it:** case-insensitive, and an entry matches only as a whole word or phrase. It must not
+  be part of a longer word, so "רובה" doesn't block "קרובה" (near) and "גרס" doesn't block "גרסה" (version). A `*` in
+  an entry is a wildcard (e.g. `https://cutt.ly/*`). `forward:` entries are dropped, because they block forwards and
+  capture ignores forwards already.
+- `findBlockedWord(text)` returns the first entry that matches, or null.
 - **Bot text:** `check-locals` fails if any `he` string contains a blocked word.
 - **What the bot publishes for a user** (wizard and one-message DM listing, 8.1): a title, description, price or
   location containing a blocked word stops at the preview. The bot names the word and asks for that field again
