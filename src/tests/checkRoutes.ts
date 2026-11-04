@@ -38,6 +38,8 @@ async function run() {
 
     console.log("[INFO] Checking BotController routes...");
     await mongoose.connect(MONGO_URI);
+    // this check deletes shadow_log rows (below): throwaway database only, same guard as checkMarket
+    assert.ok(/test/i.test(mongoose.connection.name), `refusing to run on database "${mongoose.connection.name}" (name must contain "test")`);
 
     // config.json is read at import time, so load the controller only after the SKIP check.
     const { BotController } = await import("../controllers/botController");
@@ -117,7 +119,8 @@ async function run() {
         assert.ok(/^.*7.*\|.*30.*$/m.test(lastText()), "/stats shows the 7 and 30 day header");
         const shadow = await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [4242], senderId: "s", at: new Date(), tier: "strict", rules: [], wouldList: true, parsedPriceValue: 100 });
         try {
-            await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true }); // only our row is sampled
+            // only our row is sampled (/label picks from all chats, so this cannot be scoped; the test-database guard above makes it safe)
+            await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, label: { $exists: false }, wouldList: true });
             await expectCalls("/label as ADMIN", () => h.sendText("/label", { userId: adminId }));
             const labelCall = h.calls.find((c) => c.method === "sendMessage")!;
             assert.ok(String(labelCall.params.text).includes("t.me/"), "/label shows a link");
