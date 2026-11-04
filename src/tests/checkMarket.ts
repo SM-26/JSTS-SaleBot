@@ -3,11 +3,13 @@ import mongoose from "mongoose";
 import Capture from "../models/Capture";
 import Listing from "../models/Listing";
 import Member from "../models/Member";
+import PostModel from "../models/Post";
 import ShadowLog from "../models/ShadowLog";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
+import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import type { Post } from "../types";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
@@ -162,6 +164,29 @@ async function run() {
         assert.ok((await listingRepository.countByStatus(new Date(t0.getTime() - SEC))).sold >= 1);
         console.log("[OK] listings.");
 
+        // reconcile posts -> bot listings (clean slate: it walks every approved/sold post)
+        await Promise.all([PostModel.deleteMany({}), Listing.deleteMany({})]);
+        const mk = (name: string, createdAt: Date, status: "approved" | "sold" | "pending") =>
+            PostModel.create({ userId: `${RUN}-r-${name}`, title: name, description: "d", price: "10", location: "TLV", media: [], createdAt, status });
+        const oldPost = await mk("old", new Date("2026-09-09T00:00:00Z"), "approved");
+        const newPost = await mk("new", new Date(LEGACY_CUTOFF.getTime() + SEC), "approved");
+        await mk("pending", new Date("2026-09-09T00:00:00Z"), "pending");
+        const soldOld = await mk("soldold", new Date("2026-09-09T00:00:00Z"), "sold");
+        const r1 = await reconcileBotListings(t0);
+        assert.deepStrictEqual(r1, { created: 3, sold: 1 }, "pending posts get no listing; sold-at-creation posts end sold");
+        const oldL = await listingRepository.findByPostId(String(oldPost._id));
+        assert.ok(oldL && oldL.origin === "legacy" && oldL.hold === true && oldL.status === "live", "reconcile creates legacy hold");
+        const newL = await listingRepository.findByPostId(String(newPost._id));
+        assert.ok(newL && newL.origin === "dm" && newL.hold === false && newL.status === "live", "reconcile new post not held");
+        const soldL = await listingRepository.findByPostId(String(soldOld._id));
+        assert.ok(soldL && soldL.origin === "legacy" && soldL.hold === false && soldL.status === "sold", "sold legacy post: no hold, sold");
+        await PostModel.updateOne({ _id: newPost._id }, { $set: { status: "sold" } });
+        assert.deepStrictEqual(await reconcileBotListings(at(1)), { created: 0, sold: 1 });
+        assert.strictEqual((await listingRepository.findByPostId(String(newPost._id)))!.status, "sold", "reconcile sold");
+        assert.deepStrictEqual(await reconcileBotListings(at(2)), { created: 0, sold: 0 }, "reconcile idempotent");
+        assert.strictEqual(await Listing.countDocuments({ source: "bot" }), 3, "one listing per post");
+        console.log("[OK] reconcile.");
+
         // shadow log
         const row = await shadowLogRepository.insert({ chatId: CHAT, messageIds: [1], senderId: `${RUN}-x`, at: t0, tier: "strict", rules: ["r"], wouldList: true, parsedTitle: "t", parsedPrice: "5" });
         assert.ok(await shadowLogRepository.sampleUnlabeled(), "an unlabeled would-list row exists");
@@ -178,6 +203,7 @@ async function run() {
         await Promise.all([
             Capture.deleteMany({ chatId: CHAT }),
             Listing.deleteMany({ sellerId: like }),
+            PostModel.deleteMany({ userId: like }),
             Member.deleteMany({ userId: like }),
             ShadowLog.deleteMany({ chatId: CHAT }),
         ]);
