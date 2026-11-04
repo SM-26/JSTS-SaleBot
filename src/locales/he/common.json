@@ -152,7 +152,7 @@
     "statsBody": "{title}\n\nחלון: 7 ימים | 30 ימים\nפוסטי מכירה (strict+ask): {sale7} | {sale30}\nמחפשים לקנות: {wtb7} | {wtb30}\nהיו עולים לרשימה: {list7} | {list30}\nפרסומים חוזרים שאוחדו: {merge7} | {merge30}\nמודעות: {status7} | {status30}\nישנות בהמתנה: {held}\nמתויגות: {n7} | {n30}\nדיוק: {prec7} | {prec30}\nסף היברידי (n ≥ 100 ודיוק ≥ 97%): {gate7} | {gate30}",
     "helpLabel": "/label - תיוג שורות צל כמכירה או לא מכירה",
     "helpStats": "/stats - נתוני מסווג הצל",
-    "takeDownButton": "🚫 Take down",
+    "takeDownButton": "🚫 הסר מהשוק",
     "takeDownDone": "הפוסט הוסר.",
     "takeDownAlready": "הפוסט כבר לא פעיל.",
     "takeDownNotice": "מנהל הסיר את הפוסט \"{title}\" שלך.",
