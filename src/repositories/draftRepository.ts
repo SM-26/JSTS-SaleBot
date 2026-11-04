@@ -8,6 +8,22 @@ export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes:
     return timeOutMinutes > 0 && draft.updatedAt.getTime() + timeOutMinutes * 60_000 < now;
 }
 
+const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1 };
+
+export type CaptureDraftInput = {
+    userId: string;
+    chatId: number;
+    locale: string;
+    step: DraftStep;
+    promptMessageId: number;
+    captureId: string;
+    title?: string;
+    description?: string;
+    price?: string;
+    location?: string;
+    media: IMediaItem[];
+};
+
 class DraftRepository {
     findByUserId(userId: string) {
         return Draft.findOne({ userId }).exec();
@@ -20,8 +36,21 @@ class DraftRepository {
             { userId },
             {
                 $set: { chatId, locale, step: "title", media: [], promptMessageId, startedAt: now, updatedAt: now },
-                $unset: { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1 },
+                $unset: DRAFT_FIELDS,
             },
+            { upsert: true, returnDocument: "after" }
+        ).exec();
+    }
+
+    // Replaces any existing draft with one prefilled from a captured group message.
+    startFromCapture(input: CaptureDraftInput) {
+        const now = new Date();
+        const { userId, ...rest } = input;
+        const fields = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+        const $unset = Object.fromEntries(Object.keys(DRAFT_FIELDS).filter(k => !(k in fields)).map(k => [k, 1]));
+        return Draft.findOneAndUpdate(
+            { userId },
+            { $set: { ...fields, startedAt: now, updatedAt: now }, ...(Object.keys($unset).length ? { $unset } : {}) },
             { upsert: true, returnDocument: "after" }
         ).exec();
     }

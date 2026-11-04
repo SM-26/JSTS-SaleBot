@@ -33,7 +33,7 @@ export interface ICapture extends Document {
     tier?: Tier;
     rules?: string[];
     parsed?: Parsed;
-    note?: { ephemeralMessageId: number; sentAt: Date };
+    note?: { ephemeralMessageId: number; sentAt: Date; kind: "ask" | "refresh" };
     listingId?: string;
 }
 
@@ -65,7 +65,7 @@ const captureSchema = new Schema<ICapture>({
     tier: { type: String, enum: ["wtb", "strict", "ask", "none"] },
     rules: { type: [String], default: undefined },
     parsed: { type: Schema.Types.Mixed },
-    note: { type: new Schema({ ephemeralMessageId: Number, sentAt: Date }, { _id: false }) },
+    note: { type: new Schema({ ephemeralMessageId: Number, sentAt: Date, kind: { type: String, enum: ["ask", "refresh"] } }, { _id: false }) },
     listingId: { type: String },
 }, { collection: "captures", timestamps: false });
 
