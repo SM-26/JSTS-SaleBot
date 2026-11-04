@@ -141,5 +141,10 @@
     "helpLabel": "/label - Разметить теневые строки: продажа или нет",
     "helpStats": "/stats - Цифры теневого классификатора",
     "takeDownButton": "🚫 Take down",
+    "takeDownDone": "Пост снят.",
+    "takeDownAlready": "Этот пост уже не активен.",
+    "takeDownNotice": "Модератор снял ваш пост «{title}».",
+    "statusTakenDown": "🚫 Снято",
+    "postTakenDown": "Модератор снял этот пост. Его нельзя поднять или отметить проданным.",
     "trustedPublishedLabel": "Опубликовано (проверенный продавец)"
 }

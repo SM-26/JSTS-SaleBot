@@ -141,5 +141,10 @@
     "helpLabel": "/label - תיוג שורות צל כמכירה או לא מכירה",
     "helpStats": "/stats - נתוני מסווג הצל",
     "takeDownButton": "🚫 Take down",
+    "takeDownDone": "הפוסט הוסר.",
+    "takeDownAlready": "הפוסט כבר לא פעיל.",
+    "takeDownNotice": "מנהל הסיר את הפוסט \"{title}\" שלך.",
+    "statusTakenDown": "🚫 הוסר",
+    "postTakenDown": "מנהל הסיר את הפוסט הזה. אי אפשר להקפיץ אותו או לסמן אותו כנמכר.",
     "trustedPublishedLabel": "פורסם (מוכר מהימן)"
 }

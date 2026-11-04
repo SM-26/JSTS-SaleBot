@@ -628,7 +628,7 @@ async function run() {
             h.calls.length = 0;
             await h.pressButton(keyboard(preview)[0].callback_data, { userId: u, messageId: messageId(preview) });
             await settle();
-            const post = (await Post.findOne({ userId: String(u), title: { $ne: "Old" } }))!;
+            const post = (await Post.findOne({ userId: String(u), title }))!;
             postIds.push(String(post._id));
             return post;
         };
@@ -761,6 +761,138 @@ async function run() {
                 postRepository.setApprovedMessageId = real;
             }
             console.log("  [OK] (q5) a failure after the group message keeps the post approved.");
+        }
+
+        // Task 5: moderator take-down (td_). Labels (r)..(r8) stand for the brief's (p)..(p8): (p)..(q5) are taken above.
+        const tdPress = (h: H, who: number, listingId: string, cardId: number) =>
+            h.pressButton(`td_${listingId}`, { userId: who, chatId: MOD_GROUP, chatType: "supergroup", messageId: cardId });
+        const answers = (h: H) => h.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => String(c.params.text));
+        const deletes = (h: H) => h.calls.filter((c) => c.method === "deleteMessage");
+        const publishTrusted = async (h: H, title = "Bike") => {
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u, { title });
+            const listing = (await Listing.findOne({ postId: String(post._id) }))!;
+            const cardId = messageId(richTo(h, MOD_GROUP)[0]);
+            return { u, post, listing, cardId, listingId: String(listing._id) };
+        };
+
+        // (r) + (r2) + (r5) + (r4): one published post, taken down, pressed again, bumped and sold, resubmitted
+        {
+            const { h } = boot();
+            const { u, post, cardId, listingId } = await publishTrusted(h);
+            const oldMessageId = post.approvedMessageId!;
+            assert.ok(oldMessageId);
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            const after = (await Listing.findById(listingId))!;
+            assert.strictEqual(after.status, "taken_down");
+            assert.strictEqual(after.endedBy, "moderator");
+            const del = deletes(h);
+            assert.strictEqual(del.length, 1);
+            assert.strictEqual(Number(del[0].params.chat_id), APPROVED_GROUP);
+            assert.strictEqual(Number(del[0].params.message_id), oldMessageId);
+            const reloaded = (await Post.findById(post._id))!;
+            assert.strictEqual(reloaded.status, "approved");
+            assert.strictEqual(reloaded.approvedMessageId ?? null, null);
+            assert.deepStrictEqual(toAuthor(h, u), [T("takeDownNotice").replace("{title}", "Bike")]);
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === cardId)!;
+            assert.strictEqual(text(edit), T("statusTakenDown"));
+            assert.ok(!(edit.params.reply_markup as Keyboard | undefined)?.inline_keyboard.length, "the button is gone");
+            console.log("  [OK] (r) a moderator takes a post down: group message deleted, seller told, card closed.");
+
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual(deletes(h).length, 0);
+            assert.deepStrictEqual(toAuthor(h, u), []);
+            console.log("  [OK] (r2) a second press says already, with no second delete or DM.");
+
+            for (const data of [`bump_${post._id}`, `sold_${post._id}`]) {
+                h.calls.length = 0;
+                await h.pressButton(data, { userId: u, messageId: 900 });
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("postTakenDown")], data);
+                assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0, data);
+                const p = (await Post.findById(post._id))!;
+                assert.strictEqual(p.status, "approved", data);
+                assert.strictEqual(p.approvedMessageId ?? null, null, data);
+            }
+            console.log("  [OK] (r5) the seller's Bump and Sold are refused on a taken-down post.");
+
+            h.calls.length = 0;
+            const next = await confirmWizard(h, u, { title: "Bike2" });
+            assert.strictEqual(next.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(next._id)));
+            console.log("  [OK] (r4) a taken-down seller is no longer trusted.");
+        }
+
+        // (r3) a plain user and the seller cannot take down
+        {
+            const { h } = boot();
+            const { u, listingId, cardId } = await publishTrusted(h);
+            const stranger = user();
+            for (const who of [stranger, u]) {
+                h.calls.length = 0;
+                await tdPress(h, who, listingId, cardId);
+                await settle();
+                assert.deepStrictEqual(answers(h), [T("notAdmin")]);
+                assert.strictEqual((await Listing.findById(listingId))!.status, "live");
+                assert.strictEqual(deletes(h).length, 0);
+                assert.deepStrictEqual(toAuthor(h, u), []);
+            }
+            console.log("  [OK] (r3) td_ from a non-moderator is refused and changes nothing.");
+        }
+
+        // (r6) the group message is already gone
+        {
+            const { h } = boot({ responses: { deleteMessage: { ok: false, error_code: 400, description: "Bad Request: message to delete not found" } } });
+            const { u, listingId, cardId } = await publishTrusted(h);
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            assert.strictEqual(toAuthor(h, u).length, 1);
+            console.log("  [OK] (r6) a group message already gone still counts as taken down.");
+        }
+
+        // (r7) the seller blocked the bot
+        {
+            let block = false;
+            let n = 6000;
+            const { h } = boot({ responses: {
+                sendMessage: (p: Record<string, unknown>) => block && Number(p.chat_id) !== MOD_GROUP
+                    ? { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }
+                    : { message_id: n++, chat: { id: Number(p.chat_id), type: "private" }, date: 1 },
+            } });
+            const { listingId, cardId } = await publishTrusted(h);
+            block = true;
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.strictEqual((await Listing.findById(listingId))!.status, "taken_down");
+            assert.strictEqual(deletes(h).length, 1);
+            assert.deepStrictEqual(answers(h), [T("takeDownDone")]);
+            console.log("  [OK] (r7) a seller who blocked the bot does not stop the take-down.");
+        }
+
+        // (r8) a sold listing cannot be taken down
+        {
+            const { h } = boot();
+            const { listingId, cardId } = await publishTrusted(h);
+            await listingRepository.markSold(listingId, new Date());
+            h.calls.length = 0;
+            await tdPress(h, mod, listingId, cardId);
+            await settle();
+            assert.deepStrictEqual(answers(h), [T("takeDownAlready")]);
+            assert.strictEqual((await Listing.findById(listingId))!.status, "sold");
+            assert.strictEqual(deletes(h).length, 0);
+            console.log("  [OK] (r8) td_ on a sold listing says already and changes nothing.");
         }
 
         console.log("[OK] persistent flows.");

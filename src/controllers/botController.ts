@@ -21,6 +21,7 @@ import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
 import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
+import { TakeDownService } from "../services/takeDownService";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -58,6 +59,7 @@ export class BotController {
     private broadcastUsersService: BroadcastUsersService;
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
+    private takeDownService: TakeDownService;
 
     constructor(api: Api) {
         this.api = api;
@@ -70,6 +72,7 @@ export class BotController {
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
+        this.takeDownService = new TakeDownService(api, this.config);
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
         this.paymentService = new PaymentService(api, this.config);
@@ -326,6 +329,11 @@ export class BotController {
 
         if (route.action === "bump") {
             await this.myPostsService.handleBumpCallback(query);
+            return;
+        }
+
+        if (route.action === "takeDown") {
+            await this.takeDownService.handleCallback(query, route.arg);
             return;
         }
 

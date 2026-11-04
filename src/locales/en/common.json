@@ -141,5 +141,10 @@
     "helpLabel": "/label - Label shadow rows as sale or not a sale",
     "helpStats": "/stats - Shadow classifier numbers",
     "takeDownButton": "🚫 Take down",
+    "takeDownDone": "Post taken down.",
+    "takeDownAlready": "This post is already off the market.",
+    "takeDownNotice": "A moderator took down your post \"{title}\".",
+    "statusTakenDown": "🚫 Taken down",
+    "postTakenDown": "A moderator took this post down. It can't be bumped or marked sold.",
     "trustedPublishedLabel": "Published (trusted seller)"
 }
