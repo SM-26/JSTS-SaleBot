@@ -43,6 +43,8 @@ The group stays the shop window. The bot is the market's memory: what is for sal
 - AI extraction. The design runs on rules alone; section 10 marks where the AI plugs in later.
 - Ratings, verified badges, auto-translate, weekly digests, price-drop alerts (all dropped in #104).
 - Moving listings to a separate topic. Listings stay in the sale topic.
+- Seller-deleted approved posts (never: Sold is the way out). Editing an approved post's price, text or media is a
+  possible later feature, not 3.0 (owner).
 
 **Anti-goals: 3.0 has failed, even if it works, if**
 
@@ -131,7 +133,7 @@ invisible to 2.0.1.
              │                        30 days since refreshedAt
              │                                     ▼
              ├── seller: Sold ─────────────► sold
-             ├── seller: Remove ───────────► removed
+             ├── seller: Remove (group only) ► removed
              ├── moderator: Take down ─────► taken_down
              └── 30 days, no refresh ──────► expired ──seller: Relist──► live
 ```
@@ -141,8 +143,12 @@ see 6.3). `nudged` is not a status: it's `nudgedAt` set on a live listing.
 
 For a `bot` listing the post moves too, using operations 2.0.1 already does: Sold sets `post.status = "sold"` and
 edits the group message (existing `markSoldInGroup`). Expired, removed and taken-down change only the listing; the
-post stays `approved` (2.0.1 then shows it as approved, which is the safe direction). Removed and taken-down also
-delete the bot's own group message (the bot has the delete right).
+post stays `approved` (2.0.1 then shows it as approved, which is the safe direction). Taken-down also deletes the
+bot's own group message (the bot has the delete right).
+
+**Sellers can't remove an approved bot post (owner).** It ends only by Sold, expiry or a moderator's take-down, so a
+`bot` listing never offers Remove. Remove exists only for `group` listings, where it takes the item out of the
+market and never touches the member's own group message.
 
 ### 5.3 New collections (all additive)
 
@@ -417,17 +423,14 @@ The draft is the existing `drafts` document. New optional fields only: `quick: t
 |---|---|
 | `sell` | "Send photos with a caption: what, price, where." Then 8.1. Used in the pinned post, the group description and Rose's join message (set by the owner, outside the bot). |
 | `c_<captureId>` | Completes a captured post: a draft prefilled from the capture, first missing step, then Publish creates a `group` listing (not a bot post). If the capture has expired: say so and offer `sell`. |
-| `l_<listingId>` | The seller's listing card in DM with Sold / Bump / Remove (the durable twin of the note). |
+| `l_<listingId>` | The seller's listing card in DM with Sold / Bump, and Remove for `group` listings (the durable twin of the note). |
 | `s_<shadowId>` | Save-search flow (7.2). |
 
 Unknown or foreign payloads fall back to the greeting.
 
 ### 8.3 `/myposts`
 
-Lists both sources. Bot posts render as today (existing `sold_`/`bump_` buttons) plus a new 🗑 Remove button: it
-sets the post's listing `removed` and deletes the bot's group message. Today a seller has no way to remove an
-approved post (`/myposts` can only clear rejected and sold ones), so a duplicate or a mistaken post stays up: one
-seller asked for exactly that, and both copies of his post are still live. Group listings render
+Lists both sources. Bot posts render exactly as today (existing `sold_`/`bump_` buttons). Group listings render
 as one line each with a link and `ls_` buttons. Ended listings are grouped under a collapsed "ended" line with
 Relist for `expired`. A settings row toggles `askMode`.
 
@@ -487,7 +490,7 @@ Nothing in 3.0 waits for it, and no interface is built for it ahead of time.
 ### 11.1 Nudge and expiry
 
 - **Day 7** after `refreshedAt`, live listing, not on hold, no `nudgedAt`, `nudges` on → nudge once:
-  - bot users get a DM card "עדיין למכירה?" [✅ עדיין למכירה] [🤝 נמכר] [🗑 הסר];
+  - bot users get a DM card "עדיין למכירה?" [✅ עדיין למכירה] [🤝 נמכר], plus [🗑 הסר] for a `group` listing only;
   - group-only sellers get the same as a private note in the sale topic. Because a note sent to someone offline
     likely never arrives, a group-only seller's nudge is held until their next message in the group (the sweeper
     sends it then), and it falls back to plain expiry if they don't post again.
@@ -534,16 +537,16 @@ me only)", slice 3). It lives in the locale files. The draft below only fixes th
 > 1. {title} · {price} (מ־{date})
 > 2. …
 > מה המצב? לחיצה אחת לכל מודעה:
-> [1 ✅ עדיין למכירה] [1 🤝 נמכר] [1 🗑 הסר]
-> [2 ✅ עדיין למכירה] [2 🤝 נמכר] [2 🗑 הסר]
+> [1 ✅ עדיין למכירה] [1 🤝 נמכר]
+> [2 ✅ עדיין למכירה] [2 🤝 נמכר]
 > זו הודעה חד־פעמית. מודעה בלי תשובה תוסר מהשוק בעוד 7 ימים. ההודעה בקבוצה נשארת כמו שהיא.
 
 (Gloss: "Hi {name}, this is the sales group's bot. We're tidying the market, and you have listings marked active for
 over a month: … What's the status? One tap per listing. This is a one-time message. A listing with no answer leaves
 the market in 7 days. The group message stays as it is.")
 
-- Answers: ✅ = refresh, 🤝 = Sold (also `post.status = "sold"` and the existing group re-render), 🗑 = removed (and
-  the bot's group message deleted).
+- Answers: ✅ = refresh, 🤝 = Sold (also `post.status = "sold"` and the existing group re-render). No Remove: these
+  are approved bot posts (5.2). A duplicate is marked Sold.
 - No answer in 7 days → `expired` (listing only).
 - A 403 (blocked) → `expired` at once.
 
@@ -655,13 +658,11 @@ contain no member names, phone numbers or copied posts.
 
 ### Slice 3: listings that end + the 14 stale sellers
 
-- **Scope:** 11.1–11.4, Relist, Remove for bot posts in `/myposts` (8.3), the trust line on new cards,
-  `/stalecheck` (dry run, then confirm).
+- **Scope:** 11.1–11.4, Relist, the trust line on new cards, `/stalecheck` (dry run, then confirm).
 - **Checks:**
   - `check-market`, with a fake clock: nudge at day 7 exactly once, refresh clears it, expiry at day 30, held nudge
     sent on the next group message; `bot` Sold also sets post `sold`; reconcile after a simulated 2.0.1 sell;
-    Remove on a bot post deletes its group message and ends the listing, and a foreign user's press is refused.
-  - `check-callbacks`: the Remove button's format pinned.
+    no card for a `bot` listing offers Remove.
   - `check-rich`: the old golden is unchanged; a new golden with the trust line.
 - **/test:** "Age my test listing 7 days", "Age 30 days", "Stale-check dry run (to me only)".
 - **Synthetic:** the stale DM sent to the owner only, from a seeded test DB.
@@ -730,7 +731,6 @@ contain no member names, phone numbers or copied posts.
   `buyerMatches` and `nudges`, plus `rulesUrl`.
 - The rules link is a button on the author's reject notice, not on the moderator's reason prompt.
 - `/stalecheck` can send to a pilot list of user ids first (11.4). The pilot's ids stay out of this public repo.
-- Bot posts get a Remove button in `/myposts` (8.3), in slice 3.
 - The 28 legacy listings stay on hold (no nudge, no expiry, not in matches) until `/stalecheck` sends.
 - A member deleting their own group post is invisible to the bot: Telegram sends no update. In 3.0 such a listing
   stays live until Sold, the day-7 nudge or the day-30 expiry. Buyer notes and alerts show the post date so an old
