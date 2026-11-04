@@ -239,9 +239,16 @@ A plain substring blacklist on Hebrew text, the same kind the group's Rose bot e
 the meaning: `נשק` blocks anything that contains it, so it catches "לנשק" as "for a gun" and also blocks "לנשק" as
 "to kiss". That false positive is accepted on purpose, for simplicity. Other languages are not checked.
 
-- **The list:** one repo file, `src/config/blockedWords.json`, starting as `["נשק"]`. The owner will add Rose's list
-  later. Matching is `text.includes(word)` on the text as written. (My call: a file rather than a config key,
-  because it changes rarely and `/config` has no list type.)
+- **The list:** one repo file, `src/config/blockedWords.json`, shaped `{ "substring": [...], "words": [...] }`. (My
+  call: a file rather than a config key, because it changes rarely and `/config` has no list type.)
+  - `substring`: `["נשק"]`, matched with `text.includes()`, as the owner decided. It covers נשקים, הנשק and לנשק too.
+  - `words`: Rose's blocklist (66 entries, exported 2026-11-04), matched as whole words, the way Rose matches them.
+    A term matches only when it isn't part of a longer word, so "רובה" doesn't block "קרובה" (near), "גרס" doesn't
+    block "גרסה" (version), and "זין" doesn't block "מזין". Spam links and handles are matched as whole tokens. A
+    trailing `*` (Rose's wildcard, e.g. `https://cutt.ly/*`) is a prefix match. Rose's `forward:` entries are
+    dropped: they block forwards, and capture ignores forwards already. (My call, from Rose's own semantics: pure
+    substring matching on the whole list would block common words.)
+  - `findBlockedWord(text)` checks both lists and returns the first hit.
 - **Bot text:** `check-locals` fails if any `he` string contains a blocked word.
 - **What the bot publishes for a user** (wizard and one-message DM listing, 8.1): a title, description, price or
   location containing a blocked word stops at the preview. The bot names the word and asks for that field again
@@ -797,12 +804,13 @@ slot in, and the owner's open choices are in the inbox (`C:\Users\or_ga\Document
 
 ### 17.1 Seller badges
 
-Two marks, either or both. Both extend the trust line in 11.3:
+Both marks are built (my reading of the owner's answer, which gave the numbers but didn't pick one). Each shows as its
+emoji only, with no word (owner). Both extend the trust line in 11.3:
 
 - **Top seller 🏅 (automatic).** It is earned when sold ÷ ended listings is at least X%, with at least N ended listings,
   where ended = `sold` + `expired` + `removed` (live listings don't count against a seller who is still selling).
-  Proposed: X = 60%, N = 5. The market-wide baseline is 28%, and N stops one lucky sale from earning it. Both are
-  constants, set by the owner. Marking Sold without a sale can game it. That is accepted, as it is today.
+  X = 60%, N = 3 (owner). The market-wide baseline is 28%, and N stops one lucky sale from earning it. Both are
+  constants in code. Marking Sold without a sale can game it. That is accepted, as it is today.
 - **Verified by the group ✅ (hand-picked).** ADMIN `/verify <userId>` and `/unverify <userId>`. It is stored as
   `members.verifiedAt` and `verifiedBy` (members is a new collection, so this is additive, and the doc is upserted
   for bot users who have none yet).
@@ -817,9 +825,11 @@ at the meeting point", and buyers can filter on it:
 
 - An optional `meetup: boolean` on listings, drafts and posts. These are new optional fields, so 2.0.1 ignores them,
   and rollback is safe.
-- **Listing:** the wizard's location step and the DM preview get a toggle button [📍 גם בבית דגן]. In captured text,
+- **Listing:** the wizard's location step and the DM preview get a toggle button [📍 בית דגן] (owner's text). Wherever the meeting point shows, a "where is it?" button opens
+the FAQ entry for it (`faq.json` node `1`): in DM with the existing `faq_1` callback, and on group posts with a URL
+deep link `start=faq_1`, a new payload that opens that FAQ node in DM (owner: yes). In captured text,
   "בית דגן" parses as the location, and a listing whose location is בית דגן counts as `meetup`.
-- **Shown** as "📍 {location} · גם בבית דגן" on the post and the cards.
+- **Shown** as "📍 {location} · בית דגן" on the post and the cards.
 - **Buyers:** a wanted-to-buy post or saved search that names "בית דגן" only matches `meetup` listings, or listings
   located there.
 - **Slots:** the toggle goes in slice 5 (the DM preview's field buttons), and the filter goes in slice 4 (matching).
