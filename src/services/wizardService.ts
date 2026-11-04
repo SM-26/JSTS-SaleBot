@@ -10,6 +10,7 @@ import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
 import type { PublishService } from "./publishService";
+import { findBlockedField, BlockedFieldName } from "./blockedWords";
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
@@ -22,6 +23,7 @@ const PROMPTS: Record<TextStep | "media", { key: string; index: number }> = {
     location: { key: "enterLocation", index: 4 },
     media: { key: "enterMedia", index: 5 },
 };
+const FIELD_LABEL: Record<BlockedFieldName, string> = { title: "fieldTitle", description: "fieldDescription", price: "fieldPrice", location: "fieldLocation" };
 const NEXT_STEP: Record<TextStep, DraftStep> = { title: "description", description: "price", price: "location", location: "media" };
 
 // Buttons already sent to Telegram keep their callback_data forever: these
@@ -114,6 +116,23 @@ export class WizardService {
         return sent.message_id;
     }
 
+    // The gate before the preview: a field with a blocked word is asked for again (the notice names the
+    // word), and the answer comes straight back here. Trusted sellers are no exception.
+    private async previewOrFix(draft: IDraft, from: TelegramUser): Promise<void> {
+        const hit = findBlockedField(draft);
+        if (hit) {
+            await this.api.sendMessage({
+                chat_id: draft.chatId,
+                text: localeService.t(draft.locale, "blockedWordNotice", { field: this.t(draft.locale, FIELD_LABEL[hit.field]), word: hit.word }),
+            });
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field }, from);
+            await draftRepository.update(draft.userId, { step: hit.field, promptMessageId: messageId, fixing: true });
+            return;
+        }
+        const messageId = await this.sendPreview(draft, from);
+        await draftRepository.update(draft.userId, { step: "confirm", promptMessageId: messageId, fixing: undefined });
+    }
+
     private postData(draft: IDraft, from: TelegramUser): PostData {
         return {
             title: draft.title ?? "",
@@ -204,6 +223,14 @@ export class WizardService {
                 return true;
             }
 
+            if (draft.fixing) {
+                const fields: DraftFields = { [draft.step]: msg.text };
+                if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
+                const updated = await draftRepository.update(draft.userId, fields);
+                if (updated) await this.previewOrFix(updated, msg.from);
+                return true;
+            }
+
             const next = NEXT_STEP[draft.step];
             const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next }, msg.from);
             const fields: DraftFields = { step: next, promptMessageId: messageId };
@@ -248,8 +275,7 @@ export class WizardService {
                         await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "notEnoughMedia") });
                         return true;
                     }
-                    const messageId = await this.sendPreview(draft, query.from);
-                    await draftRepository.update(draft.userId, { step: "confirm", promptMessageId: messageId });
+                    await this.previewOrFix(draft, query.from);
                     return true;
                 }
                 case "confirm": {

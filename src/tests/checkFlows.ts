@@ -633,6 +633,22 @@ async function run() {
             postIds.push(String(post._id));
             return post;
         };
+        // A draft saved at "confirm" (as before the blocked-word preview gate existed), then its Confirm button.
+        const confirmSavedDraft = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
+            const now = new Date();
+            const promptMessageId = 9000 + (u % 1000);
+            await Draft.create({
+                userId: String(u), chatId: u, locale: cfg.lang, step: "confirm", title, description, price, location,
+                media: [{ fileId: "f0", type: "photo" }, { fileId: "f1", type: "photo" }], promptMessageId, startedAt: now, updatedAt: now,
+            });
+            h.calls.length = 0;
+            await h.pressButton(`confirm_${u}_1`, { userId: u, messageId: promptMessageId });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u), title }))!;
+            postIds.push(String(post._id));
+            return post;
+        };
         const richTo = (h: H, chat: number) => h.calls.filter((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === chat);
         const seedPostFor = async (u: number, status: "approved" | "rejected" | "pending") => {
             const p = await Post.create({ userId: String(u), title: "Old", description: "d", price: "10", location: "l", media: [], status });
@@ -717,6 +733,7 @@ async function run() {
         }
 
         // (q4) Decision 7: a blocked word in any saved field keeps even a trusted seller in moderation.
+        // The wizard stops these at the preview now (Task 7), so the draft is saved straight at "confirm".
         {
             const { findBlockedWord } = await import("../services/blockedWords");
             const bad = "https://t.me/vipemployment_bot";
@@ -728,7 +745,7 @@ async function run() {
                     const { h } = boot();
                     const u = user();
                     await seedPostFor(u, "approved");
-                    const post = await confirmWizard(h, u, { [field]: `x ${bad}` });
+                    const post = await confirmSavedDraft(h, u, { [field]: `x ${bad}` });
                     assert.strictEqual(post.status, "pending", field);
                     assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0, field);
                     assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)), field);
@@ -1148,6 +1165,153 @@ async function run() {
             assert.strictEqual(text(h.calls.find((c) => c.method === "sendMessage")!), T("greeting"));
             assert.strictEqual(await draftOf(v), null);
             console.log("  [OK] (s7) /start sell opens the wizard; plain /start greets.");
+        }
+
+        // Task 7: blocked words at the preview. Labels (t)..(t7) stand for the brief's (r)..(r7): (r)..(r8) are taken above.
+        const BAD = "מחזיק לנשק";
+        const noticeFor = (field: string, word: string) => localeService.t(cfg.lang, "blockedWordNotice", { field: T(field), word });
+        // Wizard answers + two photos + Done; leaves h.calls holding what Done caused.
+        const toDone = async (h: H, u: number, fields: { title?: string; description?: string; price?: string; location?: string } = {}) => {
+            const { title = "Bike", description = "Blue mountain bike", price = "1,500", location = "Tel Aviv" } = fields;
+            await h.sendText("/newpost", { userId: u });
+            for (const answer of [title, description, price, location]) await h.sendText(answer, { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+        };
+        const dmTo = (h: H, u: number) => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === u).map(text);
+
+        // (t) a blocked title stops at the preview
+        {
+            const { h } = boot();
+            const u = user();
+            await toDone(h, u, { title: BAD });
+            assert.strictEqual(richTo(h, u).length, 0, "no preview");
+            const msgs = dmTo(h, u);
+            assert.strictEqual(msgs.length, 2, JSON.stringify(msgs));
+            assert.strictEqual(msgs[0], noticeFor("fieldTitle", "לנשק"));
+            assert.ok(msgs[1].startsWith(T("welcome")), "then the title prompt");
+            const d = (await draftOf(u))!;
+            assert.strictEqual(d.step, "title");
+            assert.strictEqual(d.fixing, true);
+            assert.strictEqual(await Post.countDocuments({ userId: String(u) }), 0);
+            console.log("  [OK] (t) a blocked title stops at the preview and asks for the title again.");
+
+            // (t2) still blocked
+            h.calls.length = 0;
+            await h.sendText("נשק למכירה", { userId: u });
+            await settle();
+            const again = dmTo(h, u);
+            assert.strictEqual(again[0], noticeFor("fieldTitle", "נשק"));
+            assert.ok(again[1].startsWith(T("welcome")));
+            const d2 = (await draftOf(u))!;
+            assert.strictEqual(d2.step, "title");
+            assert.strictEqual(d2.fixing, true);
+            assert.strictEqual(richTo(h, u).length, 0);
+            console.log("  [OK] (t2) still-blocked text asks again.");
+
+            // (t7) restart while fixing: Continue re-sends the title prompt, still fixing
+            const { h: h2 } = boot();
+            await h2.sendText("/newpost", { userId: u });
+            await settle();
+            assert.ok(dmTo(h2, u).includes(T("draftInProgress")), "Continue / Start over was offered");
+            const offered = (await draftOf(u))!;
+            h2.calls.length = 0;
+            await h2.pressButton(`draft_continue_${u}`, { userId: u, messageId: offered.promptMessageId });
+            await settle();
+            assert.ok(dmTo(h2, u).some((m) => m.startsWith(T("welcome"))), "the title prompt is re-sent");
+            const d7 = (await draftOf(u))!;
+            assert.strictEqual(d7.step, "title");
+            assert.strictEqual(d7.fixing, true);
+            console.log("  [OK] (t7) a restart while fixing keeps the draft on the title, fixing.");
+
+            // (t3) clean text goes straight back to the preview
+            h2.calls.length = 0;
+            await h2.sendText("מחזיק", { userId: u });
+            await settle();
+            const preview = richTo(h2, u);
+            assert.strictEqual(preview.length, 1, "the preview comes back");
+            assert.deepStrictEqual(keyboard(preview[0]).map((b) => b.callback_data.split("_")[0]), ["confirm", "cancel"]);
+            const d3 = (await draftOf(u))!;
+            assert.strictEqual(d3.step, "confirm");
+            assert.strictEqual(d3.fixing, undefined);
+            assert.strictEqual(d3.promptMessageId, messageId(preview[0]));
+            assert.deepStrictEqual([d3.title, d3.description, d3.price, d3.location], ["מחזיק", "Blue mountain bike", "1,500", "Tel Aviv"]);
+            h2.calls.length = 0;
+            await h2.pressButton(keyboard(preview[0])[0].callback_data, { userId: u, messageId: messageId(preview[0]) });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u) }))!;
+            postIds.push(String(post._id));
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(post.title, "מחזיק");
+            assert.ok(isModCard(richTo(h2, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (t3) fixed text returns to the preview; Confirm then creates the post.");
+        }
+
+        // (t4) each field stops at the preview and asks for its own step
+        {
+            const wasValidate = cfg.validatePrice;
+            cfg.validatePrice = false; // so the price field can carry a blocked word
+            try {
+                const cases = [
+                    { field: "description", label: "fieldDescription", prompt: "enterDescription" },
+                    { field: "price", label: "fieldPrice", prompt: "enterPrice" },
+                    { field: "location", label: "fieldLocation", prompt: "enterLocation" },
+                ] as const;
+                for (const { field, label, prompt } of cases) {
+                    const { h } = boot();
+                    const u = user();
+                    await toDone(h, u, { [field]: "כולל נשק" });
+                    assert.strictEqual(richTo(h, u).length, 0, field);
+                    const msgs = dmTo(h, u);
+                    assert.strictEqual(msgs[0], noticeFor(label, "נשק"), field);
+                    assert.ok(msgs[1].startsWith(T(prompt)), field);
+                    const d = (await draftOf(u))!;
+                    assert.strictEqual(d.step, field);
+                    assert.strictEqual(d.fixing, true);
+                    // clean text replaces it and the preview returns
+                    h.calls.length = 0;
+                    await h.sendText("100", { userId: u });
+                    await settle();
+                    assert.strictEqual(richTo(h, u).length, 1, field);
+                    assert.strictEqual((await draftOf(u))!.step, "confirm");
+                }
+            } finally {
+                cfg.validatePrice = wasValidate;
+            }
+            console.log("  [OK] (t4) a blocked description, price and location each re-ask their own step.");
+        }
+
+        // (t5) a trusted seller is stopped at the preview too
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            await toDone(h, u, { description: "כולל נשק" });
+            assert.strictEqual(richTo(h, u).length, 0);
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.strictEqual(richTo(h, MOD_GROUP).length, 0);
+            assert.strictEqual((await draftOf(u))!.step, "description");
+            assert.strictEqual(await Post.countDocuments({ userId: String(u), title: "Bike" }), 0);
+            console.log("  [OK] (t5) a trusted seller with a blocked word is stopped at the preview.");
+        }
+
+        // (t6) a draft saved before the release: the submitPost guard still sends it to moderation
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmSavedDraft(h, u, { title: BAD });
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            console.log("  [OK] (t6) a pre-release draft with a blocked title still goes to moderation.");
         }
 
         console.log("[OK] persistent flows.");
