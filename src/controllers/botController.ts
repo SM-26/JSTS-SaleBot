@@ -67,7 +67,7 @@ export class BotController {
         this.postService = new PostService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
         this.adminService = new AdminService(api, this.config);

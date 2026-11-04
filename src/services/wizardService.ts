@@ -9,6 +9,7 @@ import { BotConfig, MediaItem, Post } from "../types";
 import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
+import type { PublishService } from "./publishService";
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
@@ -51,7 +52,8 @@ export class WizardService {
         private api: Api,
         private config: BotConfig,
         private inputService: InputService,
-        private postService: PostService
+        private postService: PostService,
+        private publishService: PublishService
     ) { }
 
     private t(locale: string, key: string): string {
@@ -298,12 +300,11 @@ export class WizardService {
             createdAt: new Date(),
         });
 
-        const modMsgId = await this.postService.sendToModeration(String(post._id), postData);
-        if (modMsgId) {
-            await postRepository.setModerationMessageId(String(post._id), modMsgId);
+        // A published post already got its postApproved DM from PublishService.
+        const outcome = await this.publishService.submitPost(post, postData);
+        if (outcome === "moderation") {
+            await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCreated") });
         }
-
-        await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCreated") });
-        console.info("[INFO - WizardService.createPost] post created", { userId: from.id, postId: String(post._id) });
+        console.info("[INFO - WizardService.createPost] post created", { userId: from.id, postId: String(post._id), outcome });
     }
 }

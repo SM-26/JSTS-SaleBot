@@ -140,5 +140,6 @@
     "statsBody": "{title}\n\nWindow: 7 days | 30 days\nSale posts (strict+ask): {sale7} | {sale30}\nWanted: {wtb7} | {wtb30}\nWould list: {list7} | {list30}\nReposts merged: {merge7} | {merge30}\nListings: {status7} | {status30}\nLegacy on hold: {held}\nLabeled: {n7} | {n30}\nPrecision: {prec7} | {prec30}\nHybrid gate (n ≥ 100 and precision ≥ 97%): {gate7} | {gate30}",
     "helpLabel": "/label - Label shadow rows as sale or not a sale",
     "helpStats": "/stats - Shadow classifier numbers",
-    "takeDownButton": "🚫 Take down"
+    "takeDownButton": "🚫 Take down",
+    "trustedPublishedLabel": "Published (trusted seller)"
 }

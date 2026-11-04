@@ -4,7 +4,7 @@ import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Listing from "../models/Listing";
-import { createHarness, BOT_USERNAME, RecordedCall } from "./harness";
+import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
 // Persistent flows (issue #84, phase 5): the /newpost wizard, the reject-reason
@@ -44,8 +44,8 @@ async function run() {
     let counter = 0;
     const newId = () => base + counter++;
 
-    const boot = () => {
-        const h = createHarness();
+    const boot = (options: HarnessOptions = {}) => {
+        const h = createHarness(options);
         const ctrl = new BotController(h.bot.api);
         ctrl.registerRoutes(h.bot, BOT_USERNAME);
         return { h, ctrl };
@@ -607,6 +607,126 @@ async function run() {
             assert.strictEqual(text(card), T("statusApproved"));
             assert.ok(!card.params.reply_markup, "no Take down without a listing");
             console.log("  [OK] (n) a failed listing still tells the author and leaves the card without Take down.");
+        }
+
+        // Task 4: submitPost. (p) new seller / (q) trusted / (q2) publish failure / (q3) pending+rejected / (q4) blocked word.
+        // Labels differ from the brief's (n)/(o): (n) already exists above.
+        const confirmWizard = async (h: H, u: number, title = "Bike") => {
+            await h.sendText("/newpost", { userId: u });
+            await h.sendText(title, { userId: u });
+            await h.sendText("Blue mountain bike", { userId: u });
+            await h.sendText("1,500", { userId: u });
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            for (let i = 0; i < 2; i++) await h.sendPhoto(`file${i}`, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            const preview = h.calls.find((c) => c.method === "sendRichMessage")!;
+            h.calls.length = 0;
+            await h.pressButton(keyboard(preview)[0].callback_data, { userId: u, messageId: messageId(preview) });
+            await settle();
+            const post = (await Post.findOne({ userId: String(u), title }))!;
+            postIds.push(String(post._id));
+            return post;
+        };
+        const richTo = (h: H, chat: number) => h.calls.filter((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === chat);
+        const seedPostFor = async (u: number, status: "approved" | "rejected" | "pending") => {
+            const p = await Post.create({ userId: String(u), title: "Old", description: "d", price: "10", location: "l", media: [], status });
+            postIds.push(String(p._id));
+        };
+        const isModCard = (c: RecordedCall, id: string) =>
+            JSON.stringify(keyboard(c).map((b) => b.callback_data)) === JSON.stringify([`approve_${id}`, `reject_${id}`]);
+        const toAuthor = (h: H, u: number) => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === u).map(text);
+
+        // (p)
+        {
+            const { h } = boot();
+            const u = user();
+            const post = await confirmWizard(h, u);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(await Listing.countDocuments({ postId: String(post._id) }), 0);
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            console.log("  [OK] (p) a new seller's post goes to the moderation card.");
+        }
+
+        // (q)
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "approved");
+            assert.ok(post.approvedMessageId);
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 1);
+            const listing = (await Listing.findOne({ postId: String(post._id) }))!;
+            assert.ok(listing && listing.origin === "dm" && listing.status === "live");
+            assert.ok(toAuthor(h, u).includes(T("postApproved")));
+            assert.ok(!toAuthor(h, u).includes(T("postCreated")));
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(JSON.stringify(cards[0].params.rich_message).includes(T("trustedPublishedLabel")));
+            const kb = keyboard(cards[0]);
+            assert.strictEqual(kb.length, 1);
+            assert.ok(/^td_[0-9a-f]{24}$/.test(kb[0].callback_data));
+            assert.strictEqual(kb[0].callback_data, `td_${listing._id}`);
+            assert.strictEqual(kb[0].text, T("takeDownButton"));
+            assert.strictEqual(post.moderationMessageId, messageId(cards[0]));
+            console.log("  [OK] (q) a trusted seller publishes at once; the review card carries Take down.");
+        }
+
+        // (q2)
+        {
+            let n = 5000;
+            const { h } = boot({ responses: {
+                sendRichMessage: (p: Record<string, unknown>) => Number(p.chat_id) === APPROVED_GROUP
+                    ? { ok: false, error_code: 500, description: "boom" }
+                    : { message_id: n++, chat: { id: Number(p.chat_id), type: "private" }, date: 1 },
+            } });
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "pending");
+            assert.ok(!post.approvedMessageId);
+            const cards = richTo(h, MOD_GROUP);
+            assert.strictEqual(cards.length, 1);
+            assert.ok(isModCard(cards[0], String(post._id)));
+            assert.ok(toAuthor(h, u).includes(T("postCreated")));
+            assert.ok(!toAuthor(h, u).includes(T("postApproved")));
+            assert.strictEqual(await Listing.countDocuments({ postId: String(post._id) }), 0);
+            console.log("  [OK] (q2) a failed publish falls back to the moderation card.");
+        }
+
+        // (q3)
+        {
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "rejected");
+            await seedPostFor(u, "pending");
+            const post = await confirmWizard(h, u);
+            assert.strictEqual(post.status, "pending");
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (q3) pending and rejected posts don't make a seller trusted.");
+        }
+
+        // (q4) Decision 7: a blocked word keeps even a trusted seller in moderation.
+        {
+            const { findBlockedWord } = await import("../services/blockedWords");
+            const title = "Bike https://t.me/vipemployment_bot";
+            assert.ok(findBlockedWord(title), "the probe title must be on the blocklist");
+            const { h } = boot();
+            const u = user();
+            await seedPostFor(u, "approved");
+            const post = await confirmWizard(h, u, title);
+            assert.strictEqual(post.status, "pending");
+            assert.strictEqual(richTo(h, APPROVED_GROUP).length, 0);
+            assert.ok(isModCard(richTo(h, MOD_GROUP)[0], String(post._id)));
+            console.log("  [OK] (q4) a blocked word keeps a trusted seller in moderation.");
         }
 
         console.log("[OK] persistent flows.");
