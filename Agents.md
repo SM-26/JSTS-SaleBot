@@ -42,6 +42,7 @@
 │   │   ├── userService.ts        # Ensures user record exists in DB on first interaction
 │   │   ├── paymentService.ts     # Donation invoice creation & payment event handling
 │   │   ├── classifier.ts         # Pure classifier: tier (strict/ask/wtb/none), rules, parsed title/price, text hash
+│   │   ├── classifierData.json   # Classifier word lists and aliases (data only)
 │   │   ├── blockedWords.ts       # Blocked-word matcher, re-read from disk within ~60 s
 │   │   ├── captureService.ts     # Records sale-topic messages into capture windows (silent)
 │   │   ├── shadowService.ts      # tick(): close windows, classify, write shadow_log rows
@@ -118,8 +119,8 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `minimumPhotos`     | number  | Minimum number of photos/videos required per post (0 = optional) |
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
-| `captureMode`       | string  | `"off"` (default) or `"shadow"`: record and classify sale-topic messages, send nothing |
-| `buyerMatches`      | string  | `"off"` or `"shadow"`: log the listings a "wanted" message would match |
+| `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`      | string  | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`            | boolean | Reserved for a later slice; nothing reads it yet          |
 | `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); reserved for a later slice |
 
@@ -219,6 +220,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
 | `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
+| `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
 

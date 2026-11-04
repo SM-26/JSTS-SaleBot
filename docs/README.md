@@ -218,6 +218,7 @@ pnpm run test
 src/
 ├── bot.ts                    # Entry point — connects DB, starts polling
 ├── config/
+│   ├── blockedWords.json     # Built-in blocked-word list (editable on the host, see Deploying below)
 │   ├── db.ts                 # MongoDB connection
 │   └── pollingErrors.ts      # Classifies and de-duplicates polling errors for the log
 ├── controllers/
@@ -255,6 +256,7 @@ src/
 │   ├── paymentService.ts     # Donation invoice creation & payment event handling
 │   ├── userService.ts        # User registration
 │   ├── classifier.ts         # Pure message classifier: tier, rules, parsed title/price, text hash, token overlap
+│   ├── classifierData.json   # Classifier word lists and aliases (data only)
 │   ├── blockedWords.ts       # Hot-reloaded blocked-word matcher (`src/config/blockedWords.json`)
 │   ├── captureService.ts     # Records sale-topic messages into windows (silent)
 │   ├── shadowService.ts      # Closes windows, classifies, writes `shadow_log` rows
@@ -346,6 +348,8 @@ docker compose -f compose.prod.yaml logs -f bot
 
 > **The blocked-word list is editable on the host.** `compose.prod.yaml` bind-mounts the host folder `./blocklist` at `/app/blocklist` (read-only) and sets `BLOCKED_WORDS_PATH=/app/blocklist/blockedWords.json`. **Before the first deploy**, create `./blocklist/` next to `config.json` and copy `src/config/blockedWords.json` from the repo into it. Edit it with any editor; the bot re-reads it within about 60 s, no restart. (It is a folder and not a single file on purpose: editors that save by rename give a file a new identity, and a single-file mount would keep showing the old one.) If the folder or file is missing, the bot logs `[ERROR - blockedWords]` and uses the list built into the image. A broken edit (invalid JSON, not an array of strings, or an entry that is blank or only `*`) is logged the same way and the last good list stays active.
 
+> **Deploying slice 0 (market core + shadow classifier).** The new collections are additive; the 2.0.1 image still runs against the same database. (1) Create `./blocklist/` and copy `src/config/blockedWords.json` into it (see above). (2) The production `config.json` predates the `captureMode` and `buyerMatches` keys, so capture starts **off**. Turn it on as an admin with `/config captureMode shadow` and `/config buyerMatches shadow`; both only record, nothing is sent to the group. (3) Confirm `LEGACY_CUTOFF` (`2026-11-04`, in `src/services/marketService.ts`): posts created before it become held legacy listings, posts after it become normal ones.
+
 > **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
 
 **Switching an existing host from the dev compose file.** The project name is the same, so the `jsts-salebot_mongodb_data` volume with all posts and users is reused:
@@ -430,8 +434,8 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `donationsEnabled`   | boolean | Enable/Disable the /donate command                |
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
-| `captureMode`        | enum | `"off"` or `"shadow"`: record and classify sale-topic messages without sending anything |
-| `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match |
+| `captureMode`        | enum | `"off"` or `"shadow"`: record and classify sale-topic messages without sending anything. Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); reserved for a later slice |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
