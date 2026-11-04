@@ -17,11 +17,15 @@ export async function processOneClosed(config: BotConfig, now: Date): Promise<bo
 
     const { tier, rules, parsed } = classify(cap.text, cap.media.length > 0);
 
-    const hash = textHash(cap.text);
-    const capTokens = tokens(cap.text);
-    const recent = await listingRepository.findSellerRecent(cap.senderId, new Date(now.getTime() - REPOST_MS));
-    const repost = recent.find(l => l.textHash === hash || tokenOverlap(capTokens, tokens(l.text ?? "")) >= REPOST_OVERLAP);
-    const mergeWith = repost ? String(repost._id) : undefined;
+    // only a sale post (strict or ask) can repeat the seller's listing
+    let mergeWith: string | undefined;
+    if (tier === "strict" || tier === "ask") {
+        const hash = textHash(cap.text);
+        const capTokens = tokens(cap.text);
+        const recent = await listingRepository.findSellerRecent(cap.senderId, new Date(now.getTime() - REPOST_MS));
+        const repost = recent.find(l => l.textHash === hash || tokenOverlap(capTokens, tokens(l.text ?? "")) >= REPOST_OVERLAP);
+        mergeWith = repost ? String(repost._id) : undefined;
+    }
 
     const matches = tier === "wtb" && config.buyerMatches === "shadow"
         ? rankMatches(cap.text, await listingRepository.findLiveForMatching())

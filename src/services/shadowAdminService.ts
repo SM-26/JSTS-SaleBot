@@ -11,6 +11,10 @@ const DAY_MS = 24 * 3600 * 1000;
 const GATE_MIN_LABELED = 100;
 const GATE_MIN_PRECISION = 0.97;
 
+const pct = (num: number, den: number) => den > 0 ? `${Math.round(100 * num / den)}%` : "—";
+// Reposts merged out of the sale posts (strict + ask) that could have been one.
+export const mergedPct = (s: ShadowStats) => pct(s.merges, s.byTier.strict + s.byTier.ask);
+
 // Admin tools for the shadow classifier: /label (hand-label would-list rows)
 // and /stats (the numbers behind the go/no-go on automatic capture).
 export class ShadowAdminService {
@@ -106,7 +110,6 @@ export class ShadowAdminService {
             const [l7, l30] = await Promise.all([7, 30].map(d => listingRepository.countByStatus(new Date(now - d * DAY_MS))));
             const held = await listingRepository.countHeld();
             const sale = (s: ShadowStats) => s.byTier.strict + s.byTier.ask;
-            const pct = (num: number, den: number) => den > 0 ? `${Math.round(100 * num / den)}%` : "—";
             const precision = (s: ShadowStats) => s.sale + s.notSale > 0 ? s.sale / (s.sale + s.notSale) : undefined;
             const gate = (s: ShadowStats) => s.labeled >= GATE_MIN_LABELED && (precision(s) ?? 0) >= GATE_MIN_PRECISION ? "yes" : "no";
             const statuses = (c: Record<string, number>) => Object.entries(c).map(([k, v]) => `${k} ${v}`).join(", ") || "—";
@@ -115,7 +118,7 @@ export class ShadowAdminService {
                 sale7: sale(s7), sale30: sale(s30),
                 wtb7: s7.byTier.wtb, wtb30: s30.byTier.wtb,
                 list7: s7.wouldList, list30: s30.wouldList,
-                merge7: pct(s7.merges, s7.wouldList), merge30: pct(s30.merges, s30.wouldList),
+                merge7: mergedPct(s7), merge30: mergedPct(s30),
                 status7: statuses(l7), status30: statuses(l30),
                 held,
                 n7: s7.labeled, n30: s30.labeled,

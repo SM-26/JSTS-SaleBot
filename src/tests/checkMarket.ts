@@ -363,6 +363,16 @@ async function run() {
         assert.strictEqual(wtb?.wouldList, false);
         assert.ok(wtb?.matches?.includes(String(gl._id)), "the live listing matches");
         assert.ok(!wtb?.matches?.includes(String(held._id)), "a held listing is never matched");
+        // a wanted post is never a repost, even when it repeats the sender's own listing text
+        await listingRepository.createForPost(mkPost("wtbself-1", "מחפש glock 17", "", "100"), "dm", false, at(0));
+        await say("wtbself", "מחפש glock 17", false);
+        await tick(cfg, at(31));
+        const wtbSelf = await rowOf("wtbself");
+        assert.ok(wtbSelf?.tier === "wtb" && wtbSelf.mergeWith === undefined, "a wtb capture never merges");
+        // merged % = merges / (strict + ask), "—" when there are none
+        const { mergedPct } = await import("../services/shadowAdminService");
+        const stat = (strict: number, ask: number, merges: number) => ({ byTier: { strict, ask, wtb: 9, none: 9 }, merges, wouldList: 99 }) as Parameters<typeof mergedPct>[0];
+        assert.deepStrictEqual([mergedPct(stat(3, 1, 1)), mergedPct(stat(0, 0, 0)), mergedPct(stat(1, 0, 1))], ["25%", "—", "100%"], "merged % is over strict + ask");
         await say("wtboff", "מחפש glock 17", false);
         await tick({ ...cfg, buyerMatches: "off" }, at(62));
         assert.strictEqual((await rowOf("wtboff"))?.matches, undefined, "no matches unless buyerMatches is shadow");
