@@ -4,16 +4,16 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased - Dependency update, and the market core in shadow mode (slice 0 of 3.0.0).
+2.1.0 - Dependency update, and the market core in shadow mode (slice 0 of "the market", #104).
   - **Market core, shadow mode only: nothing is sent to the group or to any member.** `captureMode: "shadow"` records messages in the sale topic (`approvedTopicId`) into per-sender windows (90 s; closed after 30 s of quiet), classifies each as `strict`, `ask`, `wtb` or `none` with a pure Hebrew-aware classifier, and logs what automatic capture would have done. `buyerMatches: "shadow"` also logs up to 5 live listings a "wanted" message would match. Both keys accept only `off` or `shadow` in this slice. New keys `nudges` and `rulesUrl` are accepted by `/config` but unused until a later slice.
-  - New `/label` (admin, private chat) shows a random would-list row with its link and parsed title and price, to mark it sale / not sale / skip. New `/stats` (moderator, private chat) shows the numbers behind the go/no-go on automatic capture: rows per tier, would-list and merge counts, label precision.
+  - New `/label` (admin, private chat) shows a random would-list row with its link, tier and parsed price (as a number; no member text is stored), to mark it sale / not sale / skip. New `/stats` (moderator, private chat) shows the numbers behind the go/no-go on automatic capture: rows per tier, would-list and merge counts, label precision.
   - Blocked words: a message containing an entry of `src/config/blockedWords.json` is classified `none`.
   - Existing approved bot posts get a matching `listings` row at startup and then hourly (idempotent). Posts made before `LEGACY_CUTOFF` (2026-11-04, confirm at deploy) are legacy: held out of matching.
   - Data: **new, additive collections** `listings`, `captures` (7-day TTL), `shadow_log` (120-day TTL) and `members`. No existing collection or field changed, and rolling back to 2.0.1 leaves them as harmless leftovers.
   - Tests: `pnpm test` gained `check-config`, `check-classifier` and `check-market` (the last needs `MONGO_URI`); `check-callbacks` and `check-routes` cover the new buttons and commands. `/test` gained "Classify fixtures" and "Shadow: last 5 rows". `src/tests/syntheticCapture.ts` (manual, TEST bot and group only) feeds 20 messages through the real controller and checks the tiers.
   - The blocked-word list (`src/config/blockedWords.json`) is read from disk and re-read within about 60 s of a change, so the owner can edit it on the server with no rebuild or restart. `compose.prod.yaml` mounts a host folder (`./blocklist`) and points `BLOCKED_WORDS_PATH` into it, falling back to the built-in list when the file is missing; see the deploy note in `docs/README.md`. A bad edit keeps the last good list. `/config` now treats `constructor`, `toString` and other `Object.prototype` names as unknown keys.
   - Upgraded `node-telegram-bot-api` 2.2.0 → 2.3.0 (pinned exactly). No code changes were needed and nothing the user sees changes. Notable library changes: a graceful stop (`SIGINT`/`SIGTERM`) now confirms the update being handled, so a deploy no longer redelivers it; `bot.init()` calls `getMe()` once at startup. The bot's own command matcher is unchanged.
-  - `pnpm-workspace.yaml` exempts `node-telegram-bot-api@2.3.0` from pnpm's `minimumReleaseAge` (the release was under 24 hours old). It can be removed after 2026-11-05.
+  - `pnpm-workspace.yaml` exempts `node-telegram-bot-api@2.3.0` from pnpm's `minimumReleaseAge` (the release was under 24 hours old). It can be removed after 2026-11-05. The Docker build now copies `pnpm-workspace.yaml` too, so image builds honour the same pnpm settings as CI.
 
 2.0.1 - UX fixes found while testing 2.0.0.
   - `/lang`: picking a language removes the menu's buttons, so it can't keep switching (#97).

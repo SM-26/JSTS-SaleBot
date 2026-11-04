@@ -1,6 +1,6 @@
 {
   "name": "sales-bot",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "packageManager": "pnpm@11.13.1",
   "main": "dist/bot.js",
   "description": "JSTS-SaleBot implementation",
