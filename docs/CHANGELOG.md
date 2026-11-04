@@ -27,7 +27,8 @@ All notable changes to this project will be documented in this file.
       If you roll back after take-downs, treat these as known.
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
     - Deploys need the owner's go-ahead.
-    - After deploy the owner sets `/config rulesUrl https://t.me/airsoft_yad2/54833/115880` (empty until then, so the rules button is hidden).
+    - `rulesUrl` (`https://t.me/airsoft_yad2/54833/115880`) is already set in prod by the owner; with it empty the rules button is hidden.
+    - Security: Dependabot alert #21 (GHSA-g3hv-75wg-m249, minimatch globparts DoS). Dev-only (nodemon, eslint, typescript-eslint); production installs with `--prod` and was not affected. No newer nodemon, eslint or typescript-eslint depends on a patched minimatch, so `pnpm-workspace.yaml` now overrides `minimatch` to `^11.0.4`. Lint, build and tests are unchanged.
 
 2.1.0 - Dependency update, and the market core in shadow mode (slice 0 of "the market", #104).
   - **Market core, shadow mode only: nothing is sent to the group or to any member.** `captureMode: "shadow"` records messages in the sale topic (`approvedTopicId`) into per-sender windows (90 s; closed after 30 s of quiet), classifies each as `strict`, `ask`, `wtb` or `none` with a pure Hebrew-aware classifier, and logs what automatic capture would have done. `buyerMatches: "shadow"` also logs up to 5 live listings a "wanted" message would match. Both keys accept only `off` or `shadow` in this slice. New keys `nudges` and `rulesUrl` are accepted by `/config` but unused until a later slice.
