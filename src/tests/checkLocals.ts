@@ -1,5 +1,7 @@
 import fs from "fs";
 import path from "path";
+import assert from "assert";
+import { findBlockedWord } from "../services/blockedWords";
 
 // Paths relative to src/tests/
 const LOCALES_DIR = path.join(__dirname, "../locales");
@@ -176,6 +178,23 @@ function runCheck() {
         console.warn(`  [WARN] Potentially unused keys (${unusedKeys.length}):\n     - ${unusedKeys.join("\n     - ")}`);
     } else {
         console.log("  [SUCCESS] All keys appear to be used.");
+    }
+
+    // 7. Blocked words: the Hebrew locale must never say them (replicas are not weapons)
+    console.log("[INFO] Checking he strings for blocked words...");
+    assert.strictEqual(findBlockedWord("מוכר נשק"), "נשק");
+    assert.strictEqual(findBlockedWord("לנשק"), "נשק", "accepted false positive: substring on purpose");
+    assert.strictEqual(findBlockedWord("M4 למכירה"), null);
+    assert.strictEqual(findBlockedWord(undefined), null);
+    const heStrings: [string, string][] = [];
+    if (localeData.he) heStrings.push(...Object.entries(localeData.he).map(([k, v]): [string, string] => [`he/common.json:${k}`, v]));
+    if (faqDataMap.he) heStrings.push(...Object.entries(faqDataMap.he).map(([k, v]): [string, string] => [`he/faq.json:${k}`, v]));
+    for (const [where, value] of heStrings) {
+        const hit = findBlockedWord(value);
+        if (hit) {
+            console.error(`  [ERROR] Blocked word "${hit}" in ${where}`);
+            hasError = true;
+        }
     }
 
     if (hasError) process.exit(1);
