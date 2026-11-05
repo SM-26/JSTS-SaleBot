@@ -2181,6 +2181,290 @@ async function run() {
             }
         })();
 
+        // Slice 2, Task 7: deep links c_ and l_. Labels (y1)..(y10).
+        await Capture.deleteMany({ chatId: APPROVED_GROUP });
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        await (async () => { // its own function: run() is at the compiler's flow-analysis depth limit
+            const { tick } = await import("../services/shadowService");
+            const SALE = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const BARE = "1300 מרכז";
+            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const NOTE_ID = 5300;
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            let msgSeq = 4_000_000 + (Date.now() % 1_000_000);
+            type Ctrl = ReturnType<typeof boot>["ctrl"];
+            const seed = (seller: number, body: string, state: "asked" | "added" | "declined" = "asked") => seedCapture({
+                senderId: String(seller), chatId: APPROVED_GROUP, messageIds: [msgSeq++], text: body, state,
+                media: [{ type: "photo", fileId: "cap1" }],
+                note: { ephemeralMessageId: NOTE_ID, sentAt: new Date(), kind: "ask" },
+            });
+            const addListing = async (ctrl: Ctrl, seller: number) => {
+                const capture = await seed(seller, SALE);
+                const result = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS, new Date(Date.now() - 3_600_000));
+                if (result.kind !== "added") throw new Error("addToMarket failed");
+                return String(result.listing._id);
+            };
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const dms = (h: H, u: number) => callsTo(h, "sendMessage").filter((c) => Number(c.params.chat_id) === u);
+            const buttons = (c: RecordedCall) => (c.params.reply_markup as { inline_keyboard: { callback_data?: string; url?: string }[][] }).inline_keyboard.flat();
+            const link = (h: H, u: number, payload: string) => h.sendText(`/start ${payload}`, { userId: u });
+            const lsRow = (id: string, surface: string) => [`ls_${id}_s_${surface}`, `ls_${id}_f_${surface}`, `ls_${id}_r_${surface}`];
+            const UNKNOWN = "0123456789abcdef01234567";
+
+            // (y1) an incomplete note -> deep link -> prefilled wizard -> group listing
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await h.sendPhoto("f1", { ...GROUP, userId: u, caption: BARE });
+                await settle();
+                await tick(cfg, new Date(Date.now() + 31_000), (e, n) => ctrl.captureNotes.onClassified(e, n));
+                await settle();
+                const cap = (await Capture.findOne({ senderId: String(u) }))!;
+                const note = callsTo(h, "sendMessage").find((c) => c.params.ephemeral_message_parameters)!;
+                assert.strictEqual(buttons(note)[0].url, `https://t.me/${BOT_USERNAME}?start=c_${cap._id}`);
+                const noteId = cap.note!.ephemeralMessageId;
+                const parsedPrice = cap.parsed!.price!;
+                h.calls.length = 0;
+
+                await link(h, u, `c_${cap._id}`);
+                await settle();
+                const d = (await draftOf(u))!;
+                assert.deepStrictEqual([d.captureId, d.step, d.price, d.location, d.media.length, d.title], [String(cap._id), "title", parsedPrice, "מרכז", 1, undefined]);
+                const prompts = dms(h, u);
+                assert.deepStrictEqual(prompts.map(text), [T("welcome")], "the title prompt, no step indicator");
+                assert.strictEqual(d.promptMessageId, messageId(prompts[0]));
+
+                h.calls.length = 0;
+                await h.sendText("אופניים", { userId: u });
+                await settle();
+                const d2 = (await draftOf(u))!;
+                assert.deepStrictEqual([d2.step, d2.title, d2.description], ["confirm", "אופניים", undefined]);
+                const preview = richTo(h, u);
+                assert.strictEqual(preview.length, 1);
+
+                h.calls.length = 0;
+                await h.pressButton(keyboard(preview[0])[0].callback_data, { userId: u, messageId: messageId(preview[0]) });
+                await settle();
+                const listings = await Listing.find({ sellerId: String(u) });
+                assert.deepStrictEqual([listings.length, listings[0].source, listings[0].title], [1, "group", "אופניים"]);
+                const id = String(listings[0]._id);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "added");
+                assert.strictEqual(await Post.countDocuments({ userId: String(u) }), 0);
+                assert.strictEqual(await draftOf(u), null);
+                const toMod = h.calls.filter((c) => ["sendMessage", "sendRichMessage"].includes(c.method) && Number(c.params.chat_id) === MOD_GROUP);
+                assert.strictEqual(toMod.length, 1, "only the first-seller card");
+                assert.deepStrictEqual(buttons(toMod[0]).map((b) => b.callback_data), [`td_${id}`]);
+                const mine = dms(h, u);
+                assert.ok(mine.some((c) => text(c) === T("capturePublished")), "capturePublished");
+                const card = mine.find((c) => c.params.reply_markup)!;
+                assert.deepStrictEqual(buttons(card).map((b) => b.callback_data), lsRow(id, "c"));
+                const edit = callsTo(h, "editEphemeralMessageText");
+                assert.strictEqual(edit.length, 1);
+                assert.strictEqual(Number(edit[0].params.ephemeral_message_id), noteId);
+                assert.deepStrictEqual(buttons(edit[0]).map((b) => b.callback_data).slice(0, 3), lsRow(id, "n"));
+                console.log("  [OK] (y1) incomplete note -> c_ link -> prefilled wizard -> group listing.");
+            }
+
+            // (y2) a complete capture goes straight to the preview
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, SALE);
+                await link(h, u, `c_${cap._id}`);
+                await settle();
+                const d = (await draftOf(u))!;
+                assert.deepStrictEqual([d.captureId, d.step, d.title, d.price], [String(cap._id), "confirm", cap.parsed!.title, cap.parsed!.price]);
+                const preview = richTo(h, u);
+                assert.strictEqual(preview.length, 1);
+                assert.strictEqual(d.promptMessageId, messageId(preview[0]));
+                console.log("  [OK] (y2) a complete capture goes straight to the preview.");
+
+                // a title without a price asks for the price only
+                const u2 = user();
+                const noPrice = await seed(u2, "אופניים הרים למכירה במצב מעולה");
+                assert.ok(noPrice.parsed?.title && !noPrice.parsed.price, JSON.stringify(noPrice.parsed));
+                h.calls.length = 0;
+                await link(h, u2, `c_${noPrice._id}`);
+                await settle();
+                assert.deepStrictEqual(dms(h, u2).map(text), [T("enterPrice")]);
+                assert.strictEqual((await draftOf(u2))!.step, "price");
+                h.calls.length = 0;
+                await h.sendText("500", { userId: u2 });
+                await settle();
+                assert.deepStrictEqual([(await draftOf(u2))!.step, richTo(h, u2).length], ["confirm", 1]);
+                console.log("  [OK] (y2) a captured title without a price asks for the price, then previews.");
+            }
+
+            // (y3) expired, unknown, foreign, already added
+            {
+                const { h } = boot();
+                const u = user();
+                const other = user();
+                const gone = await seed(u, SALE);
+                await Capture.deleteOne({ _id: gone._id });
+                const foreign = await seed(other, SALE);
+                const added = await seed(u, SALE, "added");
+                const declined = await seed(u, SALE, "declined");
+                for (const [id, expected] of [
+                    [String(gone._id), T("captureExpired")], [UNKNOWN, T("captureExpired")], [String(foreign._id), T("captureExpired")],
+                    [String(declined._id), T("captureExpired")], [String(added._id), T("captureAlreadyAdded")],
+                ] as const) {
+                    h.calls.length = 0;
+                    await link(h, u, `c_${id}`);
+                    await settle();
+                    assert.deepStrictEqual(dms(h, u).map(text), [expected], id);
+                    assert.strictEqual(await draftOf(u), null);
+                }
+                assert.strictEqual((await Capture.findById(foreign._id))!.state, "asked");
+                console.log("  [OK] (y3) expired, unknown, foreign and added captures answer without a draft.");
+            }
+
+            // (y4) a live draft is never overwritten; an expired one is replaced
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, BARE);
+                await h.sendText("/newpost", { userId: u });
+                await settle();
+                const before = (await draftOf(u))!;
+                h.calls.length = 0;
+                await link(h, u, `c_${cap._id}`);
+                await settle();
+                assert.deepStrictEqual(dms(h, u).map(text), [T("captureDraftBusy")]);
+                const after = (await draftOf(u))!;
+                assert.deepStrictEqual([after.captureId, after.step, after.promptMessageId, after.updatedAt.getTime()], [undefined, "title", before.promptMessageId, before.updatedAt.getTime()]);
+
+                await Draft.updateOne({ userId: String(u) }, { $set: { updatedAt: new Date(Date.now() - 2 * 3_600_000) } });
+                h.calls.length = 0;
+                await link(h, u, `c_${cap._id}`);
+                await settle();
+                const replaced = (await draftOf(u))!;
+                assert.deepStrictEqual([replaced.captureId, replaced.step], [String(cap._id), "title"]);
+                console.log("  [OK] (y4) a live draft is kept, an expired one replaced.");
+            }
+
+            // (y5) the blocked-word gate still runs for a capture draft
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, BARE);
+                await link(h, u, `c_${cap._id}`);
+                await settle();
+                h.calls.length = 0;
+                await h.sendText(BAD, { userId: u });
+                await settle();
+                assert.strictEqual(richTo(h, u).length, 0, "no preview");
+                assert.deepStrictEqual(dms(h, u).map(text), [noticeFor("fieldTitle", "לנשק"), T("welcome")]);
+                const d = (await draftOf(u))!;
+                assert.deepStrictEqual([d.step, d.fixing, d.captureId], ["title", true, String(cap._id)]);
+                h.calls.length = 0;
+                await h.sendText("מחזיק", { userId: u });
+                await settle();
+                assert.strictEqual(richTo(h, u).length, 1, "the clean title reaches the preview");
+                const d2 = (await draftOf(u))!;
+                assert.deepStrictEqual([d2.step, d2.fixing], ["confirm", undefined]);
+                console.log("  [OK] (y5) a capture draft honours the blocked word.");
+
+                // (y6) a cancelled capture draft leaves no captureId behind: /newpost is the full wizard
+                await h.sendText("/cancel", { userId: u });
+                await settle();
+                assert.strictEqual(await draftOf(u), null);
+                h.calls.length = 0;
+                await h.sendText("/newpost", { userId: u });
+                await h.sendText("Bike", { userId: u });
+                await settle();
+                const fresh = (await draftOf(u))!;
+                assert.deepStrictEqual([fresh.captureId, fresh.step, fresh.price, fresh.location], [undefined, "description", undefined, undefined]);
+                assert.ok(dms(h, u).map(text).some((m) => m.startsWith(T("enterDescription"))), "description is asked");
+                console.log("  [OK] (y6) a normal wizard after a cancelled capture draft is unchanged.");
+            }
+
+            // (y7) l_ opens for a user with no users row yet
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                assert.strictEqual(await User.findOne({ userId: String(u) }), null);
+                const id = await addListing(ctrl, u);
+                await link(h, u, `l_${id}`);
+                await settle();
+                assert.ok(await User.findOne({ userId: String(u) }), "ensureUser ran");
+                const sent = dms(h, u);
+                assert.strictEqual(sent.length, 1);
+                assert.deepStrictEqual(buttons(sent[0]).map((b) => b.callback_data), lsRow(id, "c"));
+                assert.strictEqual(text(sent[0]), localeService.t(cfg.lang, "listingCard", { title: FIELDS.title, price: FIELDS.price }));
+                console.log("  [OK] (y7) l_ opens the management card for a fresh user.");
+
+                // (y8) another user and an unknown id are refused
+                const other = user();
+                for (const [who, target] of [[other, id], [u, UNKNOWN]] as const) {
+                    h.calls.length = 0;
+                    await link(h, who, `l_${target}`);
+                    await settle();
+                    const refused = dms(h, who);
+                    assert.deepStrictEqual(refused.map(text), [T("postNotFound")]);
+                    assert.strictEqual(refused[0].params.reply_markup, undefined);
+                }
+                console.log("  [OK] (y8) l_ refuses a foreign user and an unknown id.");
+
+                // (y10) the DM card buttons
+                const msgId = 77;
+                h.calls.length = 0;
+                await h.pressButton(`ls_${id}_f_c`, { userId: u, messageId: msgId });
+                await settle();
+                const refresh = callsTo(h, "editMessageText");
+                assert.deepStrictEqual([refresh.length, Number(refresh[0].params.chat_id), Number(refresh[0].params.message_id)], [1, u, msgId]);
+                assert.deepStrictEqual(buttons(refresh[0]).map((b) => b.callback_data), lsRow(id, "c"));
+                assert.strictEqual(callsTo(h, "editEphemeralMessageText").length, 1, "the group note follows");
+                h.calls.length = 0;
+                await h.pressButton(`ls_${id}_s_c`, { userId: u, messageId: msgId });
+                await settle();
+                assert.strictEqual((await Listing.findById(id))!.status, "sold");
+                const sold = callsTo(h, "editMessageText");
+                assert.deepStrictEqual([sold.length, (sold[0].params.reply_markup as { inline_keyboard: unknown[] }).inline_keyboard.length], [1, 0]);
+
+                const id2 = await addListing(ctrl, u);
+                h.calls.length = 0;
+                await h.pressButton(`ls_${id2}_r_c`, { userId: u, messageId: msgId });
+                await settle();
+                assert.strictEqual((await Listing.findById(id2))!.status, "removed");
+                const removed = callsTo(h, "editMessageText");
+                assert.deepStrictEqual([removed.length, text(removed[0])], [1, T("listingRemovedNote")]);
+                assert.strictEqual((removed[0].params.reply_markup as { inline_keyboard: unknown[] }).inline_keyboard.length, 0);
+                // an ended listing opened again shows the ended card, no buttons
+                h.calls.length = 0;
+                await link(h, u, `l_${id2}`);
+                await settle();
+                const ended = dms(h, u);
+                assert.deepStrictEqual(ended.map(text), [T("listingRemovedNote")]);
+                assert.ok(!ended[0].params.reply_markup || buttons(ended[0]).length === 0);
+                console.log("  [OK] (y10) the DM card buttons edit the card and the note.");
+            }
+
+            // (y9) l_ on a bot listing: the post card, never ls_ or Remove
+            {
+                const { h } = boot();
+                const u = user();
+                const post = await Post.create({ userId: String(u), title: "Bot post", description: "d", price: "10", location: "l", media: [], status: "approved" });
+                postIds.push(String(post._id));
+                const listing = await listingRepository.createForPost(post.toObject() as never, "dm", false, new Date());
+                await link(h, u, `l_${listing._id}`);
+                await settle();
+                const card = richTo(h, u);
+                assert.strictEqual(card.length, 1);
+                assert.deepStrictEqual(keyboard(card[0]).map((b) => b.callback_data), [`sold_${post._id}`, `bump_${post._id}`]);
+                assert.strictEqual(dms(h, u).length, 0);
+
+                await Post.updateOne({ _id: post._id }, { $set: { status: "pending" } });
+                h.calls.length = 0;
+                await link(h, u, `l_${listing._id}`);
+                await settle();
+                assert.strictEqual(richTo(h, u).length, 0);
+                assert.ok(dms(h, u).every((c) => !c.params.reply_markup || buttons(c).every((b) => !b.callback_data?.startsWith("ls_"))));
+                console.log("  [OK] (y9) l_ on a bot listing shows the post card without ls_ or Remove.");
+            }
+        })();
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);

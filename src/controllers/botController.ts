@@ -24,6 +24,7 @@ import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { GroupListingService } from "../services/groupListingService";
+import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -75,7 +76,7 @@ export class BotController {
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService);
         this.takeDownService = new TakeDownService(api, this.config);
@@ -130,7 +131,11 @@ export class BotController {
         }
     }
 
-    async HandleStart(msg: Message): Promise<void> {
+    async HandleStart(msg: Message, args = ""): Promise<void> {
+        // Deep links from capture notes; slices 4-6 add s_ and k_ here.
+        const payload = parseStartPayload(args);
+        if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
@@ -499,7 +504,7 @@ export class BotController {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
             if (args === "sell") return this.wizardService.handleNewPost(msg);
-            return this.HandleStart(msg);
+            return this.HandleStart(msg, args);
         }));
         bot.use(cmd("newpost", (msg) => {
             if (!isPrivate(msg)) return;

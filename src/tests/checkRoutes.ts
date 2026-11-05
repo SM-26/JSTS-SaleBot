@@ -86,7 +86,16 @@ async function run() {
             await expectCalls(text, () => h.sendText(text, { userId }));
         }
 
-        await expectSilence("/start@someotherbot", () => h.sendText("/start@someotherbot", { userId }));
+        // A payload that is not ours answers the plain greeting.
+        const greetingOf = async (text: string) => {
+            await expectCalls(text, () => h.sendText(text, { userId }));
+            return String(h.calls.find((c) => c.method === "sendMessage")?.params.text);
+        };
+        const plainGreeting = await greetingOf("/start");
+        assert.strictEqual(await greetingOf("/start garbage"), plainGreeting, "/start garbage answers the greeting");
+        assert.strictEqual(await greetingOf("/start c_xyz"), plainGreeting, "/start c_xyz answers the greeting");
+
+        await expectSilence("/start@someotherbot",() => h.sendText("/start@someotherbot", { userId }));
         await expectSilence("a URL", () => h.sendText("see http://x.com/test", { userId }));
 
         // A group message in the approved group that replies to nothing is not ours to answer.

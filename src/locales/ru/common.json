@@ -181,5 +181,8 @@
     "listingSoldToast": "Отмечено как проданное",
     "listingRefreshedToast": "Обновлено",
     "listingRemovedToast": "Удалено с рынка",
-    "captureModCard": "Первое объявление нового продавца: {name}\n{title} · {price}\n{link}"
+    "captureModCard": "Первое объявление нового продавца: {name}\n{title} · {price}\n{link}",
+    "captureExpired": "Это объявление больше недоступно. Чтобы выставить что-то, отправьте /newpost.",
+    "captureDraftBusy": "У вас есть неоконченный пост. Завершите его или отправьте /cancel, затем откройте ссылку снова.",
+    "capturePublished": "Добавлено на рынок."
 }

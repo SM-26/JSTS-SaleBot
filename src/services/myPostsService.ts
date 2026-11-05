@@ -5,6 +5,7 @@ import userRepository from "../repositories/userRepository";
 import listingRepository from "../repositories/listingRepository";
 import { PostService } from "./postService";
 import { localeService } from "./localeService";
+import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
 
@@ -84,7 +85,34 @@ export class MyPostsService {
         }
     }
 
-    private async sendApprovedPostDetail(chatId: number, post: Post, user: User | null, locale: string): Promise<void> {
+    /** /start l_<listingId>: the seller's own card for one listing (no Remove on a bot post). */
+    async showListingCard(msg: Message, listingId: string): Promise<void> {
+        const userId = String(msg.from!.id);
+        const user: User | null = await userRepository.findByUserId(userId);
+        const locale = localeService.resolveUserLocale(user);
+        const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
+        const sendCard = (card: Card) => this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text: card.text,
+            ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}),
+        });
+
+        const listing = /^[0-9a-f]{24}$/.test(listingId) ? await listingRepository.findById(listingId) : null;
+        if (!listing || listing.sellerId !== userId) {
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: t("postNotFound") });
+            return;
+        }
+        const active = listing.status === "live" || listing.status === "expired";
+        if (listing.source === "group") {
+            await sendCard(active ? buildManagementCard(t, listing, { surface: "c" }) : buildEndedCard(t, listing));
+            return;
+        }
+        const post = listing.status === "live" && listing.postId ? await postRepository.findById(listing.postId) : null;
+        if (post?.status === "approved") await this.sendApprovedPostDetail(msg.chat.id, post, user, locale);
+        else await sendCard(buildEndedCard(t, listing));
+    }
+
+    async sendApprovedPostDetail(chatId: number, post: Post, user: User | null, locale: string): Promise<void> {
         // One Rich Message with the sold/bump buttons attached — no separate
         // follow-up message, so no button delay.
         const richMessage = this.postService.formatPostRichMessage({
