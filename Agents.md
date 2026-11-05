@@ -236,10 +236,10 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
+| `pnpm run check-cards` | Listing and note card builders, `mk_`/`ls_` callback_data and `start=c_`/`l_` payload formats | no |
 | `pnpm run check-platform` | Command matcher and middleware (offline harness) | no |
 | `pnpm run check-store` | `MongoSessionStore` (TTL, expiry on read) | yes |
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
-| `pnpm run check-cards` | Listing and note card builders, `mk_`/`ls_` callback_data and `start=c_`/`l_` payload formats | no |
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
 | `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
 | `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
@@ -275,8 +275,8 @@ Never run the bot, or a check, against the production token or database.
 - **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
-- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: the first listing of a seller sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too.
+- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (a seller with no bot post or listing yet) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
