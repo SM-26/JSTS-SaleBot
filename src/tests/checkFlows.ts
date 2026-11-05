@@ -1967,7 +1967,9 @@ async function run() {
                 const cap = (await lastCapture(u))!;
                 assert.deepStrictEqual([cap.state, cap.note], ["classified", undefined]);
                 assert.strictEqual(ephemerals(h).length, 1);
-                console.log("  [OK] (w14) a missing ephemeral id is a failed send.");
+                const stray = callsTo(h, "deleteMessage"); // M3: a note that came out public is deleted at once
+                assert.deepStrictEqual(stray.map((c) => [Number(c.params.chat_id), Number(c.params.message_id)]), [[APPROVED_GROUP, 1]]);
+                console.log("  [OK] (w14) a missing ephemeral id is a failed send, and the public message is deleted.");
             }
 
             // (w15) a hidden blocked URL gets no note; another chat is never noted
@@ -2463,6 +2465,216 @@ async function run() {
                 assert.ok(dms(h, u).every((c) => !c.params.reply_markup || buttons(c).every((b) => !b.callback_data?.startsWith("ls_"))));
                 console.log("  [OK] (y9) l_ on a bot listing shows the post card without ls_ or Remove.");
             }
+        })();
+
+        // Slice 2, final fix wave. Labels (f1)..(f9).
+        await Capture.deleteMany({ chatId: APPROVED_GROUP });
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        await (async () => { // its own function: run() is at the compiler's flow-analysis depth limit
+            const { tick } = await import("../services/shadowService");
+            const { textHash } = await import("../services/classifier");
+            const { default: memberRepository } = await import("../repositories/memberRepository");
+            const { default: captureRepository } = await import("../repositories/captureRepository");
+            const { default: ShadowLog } = await import("../models/ShadowLog");
+            const GA = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const GA_CHEAPER = "גלוק 17 למכירה\nבמצב מעולה\n1,100₪ מרכז";
+            const G19 = "גלוק 19 למכירה\nבמצב מעולה\n1,300₪ מרכז";
+            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const NOTE_ID = 5400;
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            let msgSeq = 9_000_000 + (Date.now() % 1_000_000);
+            type Ctrl = ReturnType<typeof boot>["ctrl"];
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const toasts = (h: H) => callsTo(h, "answerCallbackQuery").map((c) => c.params.text);
+            const ephemerals = (h: H) => callsTo(h, "sendMessage").filter((c) => c.params.ephemeral_message_parameters);
+            const seed = (seller: number, body: string, state: "asked" | "classified" = "asked") => seedCapture({
+                senderId: String(seller), chatId: APPROVED_GROUP, messageIds: [msgSeq++], text: body, state,
+                media: [{ type: "photo", fileId: "f1" }],
+                ...(state === "asked" ? { note: { ephemeralMessageId: NOTE_ID, sentAt: new Date(), kind: "ask" as const } } : {}),
+            });
+            const post = async (h: H, userId: number, caption: string) => {
+                await h.sendPhoto("f1", { ...GROUP, userId, caption });
+                await settle();
+            };
+            const closeAndNote = async (ctrl: Ctrl) => {
+                await tick(cfg, new Date(Date.now() + 31_000), (e, n) => ctrl.captureNotes.onClassified(e, n));
+                await settle();
+            };
+            const addListing = async (ctrl: Ctrl, seller: number, body = GA) => {
+                const capture = await seed(seller, body);
+                const result = await ctrl.groupListings.addToMarket(String(capture._id), FIELDS, new Date(Date.now() - 3_600_000));
+                if (result.kind !== "added") throw new Error("addToMarket failed");
+                return String(result.listing._id);
+            };
+            const newest = (u: number) => Capture.findOne({ senderId: String(u) }).sort({ _id: -1 }).exec();
+
+            // (f1) I1: Don't ask again sticks even when the memory write fails
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, GA);
+                const original = memberRepository.rememberAsked;
+                memberRepository.rememberAsked = () => Promise.reject(new Error("boom"));
+                try {
+                    await h.pressButton(`mk_${cap._id}_x`, { userId: u, ...GROUP });
+                    await settle();
+                } finally {
+                    memberRepository.rememberAsked = original;
+                }
+                assert.strictEqual((await Member.findOne({ userId: String(u) }))?.askMode, "never");
+                console.log("  [OK] (f1) Don't ask again sticks when the memory write fails.");
+            }
+
+            // (f2) I2: a sent note stays asked when the bookkeeping after it fails
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const original = captureRepository.setNote;
+                captureRepository.setNote = () => Promise.reject(new Error("boom"));
+                try {
+                    await post(h, u, GA);
+                    await closeAndNote(ctrl);
+                } finally {
+                    captureRepository.setNote = original;
+                }
+                assert.strictEqual(ephemerals(h).length, 1);
+                assert.strictEqual((await newest(u))!.state, "asked");
+                assert.strictEqual(await memberRepository.wasAskedRecently(String(u), textHash(GA), new Date()), true, "the text is still remembered");
+                console.log("  [OK] (f2) a sent note stays asked when setNote fails.");
+            }
+
+            // (f3) I3: a failure after the Add claim rolls the capture back; pressing again works
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, GA);
+                const original = listingRepository.countBySeller;
+                listingRepository.countBySeller = () => Promise.reject(new Error("boom"));
+                try {
+                    await h.pressButton(`mk_${cap._id}_a`, { userId: u, ...GROUP });
+                    await settle();
+                } finally {
+                    listingRepository.countBySeller = original;
+                }
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "asked");
+                h.calls.length = 0;
+                await h.pressButton(`mk_${cap._id}_a`, { userId: u, ...GROUP });
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 1);
+                assert.deepStrictEqual(toasts(h), [localeService.t(cfg.lang, "captureAddedToast")]);
+                // setListing failing after the listing exists leaves no orphan and no stuck capture
+                const cap2 = await seed(u, G19);
+                const originalSet = captureRepository.setListing;
+                captureRepository.setListing = () => Promise.reject(new Error("boom"));
+                try {
+                    await h.pressButton(`mk_${cap2._id}_a`, { userId: u, ...GROUP });
+                    await settle();
+                } finally {
+                    captureRepository.setListing = originalSet;
+                }
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 1);
+                assert.strictEqual((await Capture.findById(cap2._id))!.state, "asked");
+                console.log("  [OK] (f3) a failed Add rolls the capture back and can be pressed again.");
+            }
+
+            // (f4) I4: a cheaper repost of the same item refreshes it with the new price and text
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                const before = (await Listing.findById(id))!;
+                h.calls.length = 0;
+                await post(h, u, GA_CHEAPER);
+                await closeAndNote(ctrl);
+                const cap = (await newest(u))!;
+                const l = (await Listing.findById(id))!;
+                assert.deepStrictEqual([cap.state, cap.listingId], ["ignored", id]);
+                assert.deepStrictEqual([l.price, l.priceValue, l.text, l.textHash], ["1,100₪", 1100, GA_CHEAPER, textHash(GA_CHEAPER)]);
+                assert.deepStrictEqual([...l.messageIds], [...cap.messageIds]);
+                assert.ok(l.refreshedAt.getTime() > before.refreshedAt.getTime());
+                console.log("  [OK] (f4) a repost of the same item refreshes it with the new price.");
+            }
+
+            // (f5) I4: a different item (Glock 19) is asked about and leaves the old listing alone
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                const before = (await Listing.findById(id))!;
+                h.calls.length = 0;
+                await post(h, u, G19);
+                await closeAndNote(ctrl);
+                assert.strictEqual((await newest(u))!.state, "asked");
+                assert.strictEqual(ephemerals(h).length, 1);
+                const l = (await Listing.findById(id))!;
+                assert.deepStrictEqual([l.price, l.text, l.refreshedAt.getTime(), [...l.messageIds]], [before.price, before.text, before.refreshedAt.getTime(), [...before.messageIds]]);
+                assert.strictEqual(await memberRepository.wasAskedRecently(String(u), textHash(G19), new Date()), true);
+                console.log("  [OK] (f5) a different item gets its own note and the old listing is untouched.");
+            }
+
+            // (f6) M1: a want-to-buy capture can never be added
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const wtb = await seed(u, "מחפש גלוק 17 עד 800₪", "classified");
+                assert.strictEqual(wtb.tier, "wtb");
+                assert.deepStrictEqual(await ctrl.groupListings.addToMarket(String(wtb._id), FIELDS), { kind: "gone" });
+                await h.pressButton(`mk_${wtb._id}_a`, { userId: u, ...GROUP });
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0);
+                assert.strictEqual((await Capture.findById(wtb._id))!.state, "classified");
+                console.log("  [OK] (f6) a wtb capture cannot be added.");
+            }
+
+            // (f7) M2: an edit of the member's message also updates the private note
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                const listing = (await Listing.findById(id))!;
+                h.calls.length = 0;
+                await h.sendEdit(listing.messageIds[0], GA_CHEAPER, { userId: u, ...GROUP });
+                await settle();
+                const e = callsTo(h, "editEphemeralMessageText");
+                assert.strictEqual(e.length, 1);
+                assert.ok(String(e[0].params.text).includes("1,100₪"));
+                console.log("  [OK] (f7) an edit syncs the private note.");
+            }
+
+            // (f8) M7: a forged _c/_l press from a group never edits that message
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                h.calls.length = 0;
+                await h.pressButton(`ls_${id}_f_c`, { userId: u, ...GROUP, messageId: 4242 });
+                await h.pressButton(`ls_${id}_f_l`, { userId: u, ...GROUP, messageId: 4243 });
+                await settle();
+                assert.strictEqual(callsTo(h, "editMessageText").length, 0);
+                assert.deepStrictEqual(toasts(h), [localeService.t(cfg.lang, "listingRefreshedToast"), localeService.t(cfg.lang, "listingRefreshedToast")]);
+                console.log("  [OK] (f8) a group press on a _c/_l button edits nothing.");
+            }
+
+            // (f9) M4: a capture draft without a price is refused, not listed
+            {
+                const { h } = boot();
+                const u = user();
+                const cap = await seed(u, "אופניים הרים למכירה במצב מעולה");
+                await h.sendText(`/start c_${cap._id}`, { userId: u });
+                await settle();
+                assert.strictEqual((await draftOf(u))!.captureId, String(cap._id));
+                await draftRepository.update(String(u), { step: "confirm", promptMessageId: 8800 });
+                h.calls.length = 0;
+                await h.pressButton(`confirm_${u}_1`, { userId: u, messageId: 8800 });
+                await settle();
+                assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0);
+                assert.strictEqual((await Capture.findById(cap._id))!.state, "asked");
+                assert.ok(callsTo(h, "sendMessage").some((c) => Number(c.params.chat_id) === u && String(c.params.text) === T("generalError")));
+                console.log("  [OK] (f9) a capture draft without a price is refused.");
+            }
+            await ShadowLog.deleteMany({ senderId: { $in: userIds.map(String) } });
         })();
 
         // Slice 2, Task 8: /myposts with group listings and the settings row. Labels (z1)..(z6).

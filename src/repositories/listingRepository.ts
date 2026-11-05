@@ -23,6 +23,17 @@ export type NewGroupListing = {
     note?: { ephemeralMessageId: number; sentAt: Date };
 };
 
+export type RepostPatch = {
+    messageIds: number[];
+    text: string;
+    media?: IMediaItem[];
+    isBundle: boolean;
+    title?: string;
+    price?: string;
+    priceValue?: number;
+    location?: string;
+};
+
 class ListingRepository {
     findByPostId(postId: string): Promise<IListing | null> {
         return Listing.findOne({ source: "bot", postId }).exec();
@@ -95,13 +106,24 @@ class ListingRepository {
         return Listing.countDocuments({ sellerId }).exec();
     }
 
-    // live|expired -> live, with a fresh clock; `messageIds` replaced when the member reposted.
-    refresh(id: string, now: Date, messageIds?: number[]): Promise<IListing | null> {
+    // live|expired -> live, with a fresh clock. A repost of the same item also brings the newest
+    // message ids, text, media and parsed fields (fields left undefined are not touched).
+    refresh(id: string, now: Date, repost?: RepostPatch): Promise<IListing | null> {
+        const $set: Record<string, unknown> = { status: "live", refreshedAt: now };
+        if (repost) {
+            $set.textHash = textHash(repost.text);
+            for (const [key, value] of Object.entries(repost)) if (value !== undefined) $set[key] = value;
+        }
         return Listing.findOneAndUpdate(
             { _id: id, status: { $in: ["live", "expired"] } },
-            { $set: { status: "live", refreshedAt: now, ...(messageIds ? { messageIds } : {}) }, $unset: { nudgedAt: "", endedAt: "", endedBy: "" } },
+            { $set, $unset: { nudgedAt: "", endedAt: "", endedBy: "" } },
             { returnDocument: "after" }
         ).exec();
+    }
+
+    // Only to undo a listing whose capture bookkeeping failed right after it was created.
+    async deleteById(id: string): Promise<void> {
+        await Listing.deleteOne({ _id: id }).exec();
     }
 
     // The member removes their own group listing; the content goes, as for takeDown.

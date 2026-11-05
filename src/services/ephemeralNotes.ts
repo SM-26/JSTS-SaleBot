@@ -19,6 +19,11 @@ export async function sendNote(api: Api, config: BotConfig, receiverUserId: numb
         });
         if (typeof sent.ephemeral_message_id === "number") return sent.ephemeral_message_id;
         console.error("[ERROR - ephemeralNotes.send]", "no ephemeral_message_id in the response");
+        if (typeof sent.message_id === "number") { // it came out as a public message: take it down at once
+            console.error("[ERROR - ephemeralNotes.public]", "deleting the public message", sent.message_id);
+            await api.deleteMessage({ chat_id: config.approvedGroupId, message_id: sent.message_id })
+                .catch((err: unknown) => console.error("[ERROR - ephemeralNotes.public]", "delete failed:", describe(err)));
+        }
         return null;
     } catch (err) {
         console.error("[ERROR - ephemeralNotes.send]", describe(err));

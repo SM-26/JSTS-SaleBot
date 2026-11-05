@@ -409,15 +409,24 @@ export class WizardService {
         const t = (key: string, params?: Record<string, string | number | boolean>) => this.t(draft.locale, key, params);
         const say = (text: string, keyboard?: InlineKeyboardMarkup["inline_keyboard"]) =>
             this.api.sendMessage({ chat_id: draft.chatId, text, ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}) });
-        const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price ?? "", location: draft.location || undefined });
-        if (result.kind === "gone") await say(t("captureExpired"));
-        else if (result.kind === "already") await say(t("captureAlreadyAdded"));
-        else {
-            await say(t("capturePublished"));
-            const card = buildManagementCard(t, result.listing, { surface: "c" });
-            await say(card.text, card.keyboard);
-            await this.groupListings.syncNote(result.listing);
+        if (!draft.price) { // the wizard always asks for it: only a hand-edited draft gets here
+            await say(t("generalError"));
+            return;
         }
-        console.info("[INFO - WizardService.finishCapture]", { userId: draft.userId, captureId, outcome: result.kind });
+        try {
+            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined });
+            if (result.kind === "gone") await say(t("captureExpired"));
+            else if (result.kind === "already") await say(t("captureAlreadyAdded"));
+            else {
+                await say(t("capturePublished"));
+                const card = buildManagementCard(t, result.listing, { surface: "c" });
+                await say(card.text, card.keyboard);
+                await this.groupListings.syncNote(result.listing);
+            }
+            console.info("[INFO - WizardService.finishCapture]", { userId: draft.userId, captureId, outcome: result.kind });
+        } catch (err) {
+            console.error("[ERROR - WizardService.finishCapture]", { userId: draft.userId, captureId }, (err as Error).message);
+            throw err; // safe() tells the user; the capture was rolled back, so the button still works
+        }
     }
 }

@@ -539,9 +539,10 @@ async function run() {
         console.log("[OK] findLiveByMessage, findGroupBySeller, countBySeller.");
 
         const ex = await mkListing("ex", { status: "expired", nudgedAt: S2, endedAt: S2, endedBy: "system", messageIds: [1] });
-        const refreshed = await listingRepository.refresh(String(ex._id), at(50), [7, 8]);
+        const refreshed = await listingRepository.refresh(String(ex._id), at(50), { messageIds: [7, 8], text: "new text", media: [], isBundle: false, price: "90₪", priceValue: 90 });
         assert.ok(refreshed?.status === "live" && refreshed.refreshedAt.getTime() === at(50).getTime(), "refresh from expired");
         assert.deepStrictEqual(refreshed.messageIds, [7, 8], "messageIds replaced when given");
+        assert.deepStrictEqual([refreshed.text, refreshed.price, refreshed.priceValue, refreshed.title], ["new text", "90₪", 90, ex.title], "a repost brings text and price; an undefined title keeps the old one");
         const exRaw = await Listing.collection.findOne({ _id: ex._id });
         assert.ok(exRaw && !("nudgedAt" in exRaw) && !("endedAt" in exRaw) && !("endedBy" in exRaw), "nudgedAt, endedAt and endedBy are unset");
         const kept = await listingRepository.refresh(String(ex._id), at(51));

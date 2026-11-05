@@ -198,6 +198,16 @@ async function run() {
                 await seedCapture({ senderId: optinSenders[0], text: "bike 100", state: "added", note: ask });
                 await seedCapture({ senderId: optinSenders[1], text: "bike 100", state: "asked", note: ask });
                 assert.ok((await statsText()).includes(optinLine(base.notes + 2, base.added + 1)), "/stats shows the 7-day opt-in rate");
+                // M6: a noteStats failure drops the opt-in line, not the whole /stats answer
+                controller.config.captureMode = "optin";
+                const realNoteStats = captureRepository.noteStats;
+                captureRepository.noteStats = () => Promise.reject(new Error("boom"));
+                try {
+                    const degraded = await statsText();
+                    assert.ok(/\d+\.\d%/.test(degraded) && !degraded.includes(optinKey), "/stats survives a noteStats failure");
+                } finally {
+                    captureRepository.noteStats = realNoteStats;
+                }
             } finally {
                 controller.config.captureMode = savedMode;
                 await Capture.deleteMany({ senderId: { $in: optinSenders } });

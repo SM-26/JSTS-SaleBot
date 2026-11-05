@@ -128,10 +128,15 @@ export class ShadowAdminService {
                 gate7: gate(s7), gate30: gate(s30),
             });
             // captures expire after 7 days, so there is no 30-day opt-in figure
-            const o = await captureRepository.noteStats(new Date(now - 7 * DAY_MS));
-            const optin = this.config.captureMode === "optin" || o.notes > 0
-                ? `\n${localeService.t(locale, "statsOptin", { notes: o.notes, added: o.added, rate: pct(o.added, o.notes) })}`
-                : "";
+            let optin = "";
+            try {
+                const o = await captureRepository.noteStats(new Date(now - 7 * DAY_MS));
+                if (this.config.captureMode === "optin" || o.notes > 0) {
+                    optin = `\n${localeService.t(locale, "statsOptin", { notes: o.notes, added: o.added, rate: pct(o.added, o.notes) })}`;
+                }
+            } catch (err) {
+                console.error("[ERROR - stats.notes]", (err as Error).message);
+            }
             await this.api.sendMessage({ chat_id: msg.chat.id, text: text + optin });
         } catch (err) {
             console.error("[ERROR - shadowAdmin.handleStats]", (err as Error).message);

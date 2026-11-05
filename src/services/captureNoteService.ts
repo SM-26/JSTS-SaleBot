@@ -10,7 +10,7 @@ import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { textHash, type Parsed } from "./classifier";
 import { deleteNote, editNote, sendNote } from "./ephemeralNotes";
-import type { GroupListingService } from "./groupListingService";
+import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildAskNote, buildManagementCard, buildNeverNote, parseCaptureArg, type Translate } from "./listingCards";
 import { localeService } from "./localeService";
 import type { ClassifiedEvent } from "./shadowService";
@@ -53,12 +53,19 @@ export class CaptureNoteService {
 
             if (mergeWith) {
                 const listing = await listingRepository.findById(mergeWith);
-                const refreshed = listing?.source === "group" ? await this.groupListings.refreshFromRepost(listing, capture, now) : null;
-                await ignore(); // a missing or bot listing, or a lost race, stays silent
-                if (!refreshed) return;
-                await captureRepository.setListing(id, String(refreshed._id));
-                if (!never && await this.underDailyCap(capture.senderId, now)) await this.sendRefreshNote(refreshed, capture, now);
-                return;
+                if (!listing) {
+                    await ignore();
+                    return;
+                }
+                if (isSameItem(listing, capture.text, result.parsed)) {
+                    const refreshed = listing.source === "group" ? await this.groupListings.refreshFromRepost(listing, capture, result.parsed, now) : null;
+                    await ignore(); // a bot listing, or a lost race, stays silent
+                    if (!refreshed) return;
+                    await captureRepository.setListing(id, String(refreshed._id));
+                    if (!never && await this.underDailyCap(capture.senderId, now)) await this.sendRefreshNote(refreshed, capture, now);
+                    return;
+                }
+                // another item that merely reads alike: it gets its own note below
             }
 
             if (never) {
@@ -89,10 +96,19 @@ export class CaptureNoteService {
                 await captureRepository.transition(id, ["asked"], "classified");
                 return false;
             }
-            await captureRepository.setNote(id, { ephemeralMessageId, sentAt: now, kind: "ask" });
-            await memberRepository.rememberAsked(capture.senderId, textHash(capture.text), now);
+            // The note is out: from here the capture stays `asked` whatever the bookkeeping does.
+            try {
+                await captureRepository.setNote(id, { ephemeralMessageId, sentAt: now, kind: "ask" });
+            } catch (err) {
+                console.error("[ERROR - captureNote.record]", { captureId: id }, "setNote:", (err as Error).message);
+            }
+            try {
+                await memberRepository.rememberAsked(capture.senderId, textHash(capture.text), now);
+            } catch (err) {
+                console.error("[ERROR - captureNote.record]", { captureId: id }, "rememberAsked:", (err as Error).message);
+            }
             return true;
-        } catch (err) {
+        } catch (err) { // the note was never sent
             console.error("[ERROR - CaptureNoteService.sendAskNote]", (err as Error).message);
             await captureRepository.transition(id, ["asked"], "classified");
             return false;
@@ -151,6 +167,7 @@ export class CaptureNoteService {
 
             // Only an unanswered note can be declined: a stale press never overwrites a management card.
             if (!(await captureRepository.transition(parsed.captureId, ["asked"], "declined"))) return await answer("staleButton");
+            if (parsed.action === "x") await memberRepository.setAskMode(from, "never", now); // first: the choice must stick even if the rest fails
             const hash = textHash(capture.text);
             // R1: the text was remembered when the note went out; this only covers a memory that lapsed since.
             if (!(await memberRepository.wasAskedRecently(from, hash, now))) await memberRepository.rememberAsked(from, hash, now);
@@ -158,7 +175,6 @@ export class CaptureNoteService {
             if (parsed.action === "n") {
                 if (noteId !== undefined) await deleteNote(this.api, capture.chatId, Number(from), noteId);
             } else {
-                await memberRepository.setAskMode(from, "never", now);
                 const t: Translate = (key, params) => localeService.t(locale, key, params);
                 if (noteId !== undefined) await editNote(this.api, capture.chatId, Number(from), noteId, buildNeverNote(t, this.botUsername()));
             }

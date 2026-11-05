@@ -1,6 +1,7 @@
 import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api/types";
 import { isApiError } from "../config/telegramErrors";
+import type { ICapture } from "../models/Capture";
 import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
@@ -8,7 +9,7 @@ import memberRepository from "../repositories/memberRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
-import { classify } from "./classifier";
+import { classify, textHash, type Parsed } from "./classifier";
 import { groupMessageLink } from "./deepLinks";
 import { editNote } from "./ephemeralNotes";
 import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
@@ -18,6 +19,16 @@ export type AddResult =
     | { kind: "added"; listing: IListing }
     | { kind: "already"; listing: IListing | null }
     | { kind: "gone" };
+
+const normTitle = (title?: string): string => (title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+// A repost refreshes a listing only for the same item: the same text, or the same title (the
+// caller already knows the texts overlap). "Glock 19" after "Glock 17" is another item.
+export function isSameItem(listing: IListing, text: string, parsed: Parsed): boolean {
+    if (listing.textHash === textHash(text)) return true;
+    const title = normTitle(parsed.title);
+    return title !== "" && title === normTitle(classify(listing.text ?? "", listing.media.length > 0).parsed.title);
+}
 
 const SECTION_MAX = 15;
 const TOASTS = { s: "listingSoldToast", f: "listingRefreshedToast", r: "listingRemovedToast" } as const;
@@ -31,6 +42,12 @@ export class GroupListingService {
     constructor(private api: Api, private config: BotConfig, private getBotUsername: () => string) { }
 
     async addToMarket(captureId: string, fields: { title: string; price: string; location?: string }, now = new Date()): Promise<AddResult> {
+        const peek = await captureRepository.findById(captureId);
+        // only a sale post can be listed (a forged button on a want-to-buy must not)
+        if (!peek || (peek.tier !== "strict" && peek.tier !== "ask")) return { kind: "gone" };
+        const previous = peek.state === "classified" ? "classified" : "asked";
+        const firstForSeller = (await listingRepository.countBySeller(peek.senderId)) === 0; // before the claim: a failure here leaves the capture alone
+
         // The atomic claim: a double press has exactly one winner.
         const capture = await captureRepository.transition(captureId, ["classified", "asked"], "added");
         if (!capture) {
@@ -40,8 +57,7 @@ export class GroupListingService {
             return { kind: "already", listing: existing.listingId ? await listingRepository.findById(existing.listingId) : null };
         }
 
-        const firstForSeller = (await listingRepository.countBySeller(capture.senderId)) === 0;
-        let listing: IListing;
+        let listing: IListing | undefined;
         try {
             listing = await listingRepository.createFromCapture({
                 chatId: capture.chatId,
@@ -54,11 +70,14 @@ export class GroupListingService {
                 isBundle: capture.parsed?.isBundle ?? false,
                 note: capture.note && { ephemeralMessageId: capture.note.ephemeralMessageId, sentAt: capture.note.sentAt },
             }, now);
+            await captureRepository.setListing(captureId, String(listing._id));
         } catch (err) {
-            await captureRepository.transition(captureId, ["added"], "asked"); // the button works again
+            console.error("[ERROR - GroupListingService.addToMarket]", { captureId, userId: capture.senderId }, (err as Error).message);
+            // undo, so the button works again and a second press cannot double-list
+            if (listing) await listingRepository.deleteById(String(listing._id)).catch((e: Error) => console.error("[ERROR - GroupListingService.addToMarket]", "undo failed:", e.message));
+            await captureRepository.transition(captureId, ["added"], previous);
             throw err;
         }
-        await captureRepository.setListing(captureId, String(listing._id));
         if (firstForSeller) await this.notifyNewSeller(listing);
         return { kind: "added", listing };
     }
@@ -141,10 +160,12 @@ export class GroupListingService {
 
             const refreshed = parsed.action === "f" && current.status === "live";
             await this.syncNote(current, refreshed);
-            if (parsed.surface === "c" && query.message) {
+            // the card and the list live in the member's private chat: a press from anywhere else (a forged _c/_l) edits nothing
+            const inPrivate = query.message?.chat.type === "private";
+            if (parsed.surface === "c" && query.message && inPrivate) {
                 await this.editCard(query.message.chat.id, query.message.message_id, current, refreshed, locale);
             }
-            if (parsed.surface === "l" && query.message) {
+            if (parsed.surface === "l" && query.message && inPrivate) {
                 await this.editSection(query.message.chat.id, query.message.message_id, from, locale);
             }
         } catch (err) {
@@ -232,9 +253,19 @@ export class GroupListingService {
         }
     }
 
-    // The member reposted the same text: the old listing gets a fresh clock and the new message ids.
-    refreshFromRepost(listing: IListing, capture: { messageIds: number[] }, now: Date): Promise<IListing | null> {
-        return listingRepository.refresh(String(listing._id), now, capture.messageIds);
+    // The member reposted the same item: the old listing gets a fresh clock and follows the newest
+    // repost (message ids, text, media, price...).
+    refreshFromRepost(listing: IListing, capture: Pick<ICapture, "messageIds" | "text" | "media">, parsed: Parsed, now: Date): Promise<IListing | null> {
+        return listingRepository.refresh(String(listing._id), now, {
+            messageIds: capture.messageIds,
+            text: capture.text,
+            ...(capture.media.length ? { media: capture.media } : {}),
+            isBundle: parsed.isBundle,
+            title: parsed.title,
+            price: parsed.price,
+            priceValue: parsed.priceValue,
+            location: parsed.location,
+        });
     }
 
     // An edit of the member's message keeps the listing in step; a blocked word ends it (never a take-down).
@@ -251,7 +282,7 @@ export class GroupListingService {
                 return;
             }
             const { parsed } = classify(text, listing.media.length > 0);
-            await listingRepository.applyEdit(id, {
+            const updated = await listingRepository.applyEdit(id, {
                 text,
                 isBundle: parsed.isBundle,
                 title: parsed.title,
@@ -259,6 +290,7 @@ export class GroupListingService {
                 priceValue: parsed.priceValue,
                 location: parsed.location,
             });
+            if (updated) await this.syncNote(updated);
         } catch (err) {
             console.error("[ERROR - GroupListingService.handleEdit]", (err as Error).message);
         }
