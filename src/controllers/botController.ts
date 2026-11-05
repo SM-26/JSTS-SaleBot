@@ -78,7 +78,7 @@ export class BotController {
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(api, this.config, this.postService);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
         this.takeDownService = new TakeDownService(api, this.config);
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
@@ -354,7 +354,9 @@ export class BotController {
         }
 
         if (route.action === "capture") {
-            await this.captureNotes.handleCallback(query, route.arg);
+            // set_ask / set_never are the /myposts settings row; the capture parser rejects them.
+            if (route.arg.startsWith("set_")) await this.myPostsService.handleAskToggle(query, route.arg);
+            else await this.captureNotes.handleCallback(query, route.arg);
             return;
         }
 

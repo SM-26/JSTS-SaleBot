@@ -2465,6 +2465,155 @@ async function run() {
             }
         })();
 
+        // Slice 2, Task 8: /myposts with group listings and the settings row. Labels (z1)..(z6).
+        cfg.approvedTopicId = 1;
+        await (async () => { // its own function: run() is at the compiler's flow-analysis depth limit
+            const callsTo = (h: H, method: string) => h.calls.filter((c) => c.method === method);
+            const buttons = (c: RecordedCall) => (c.params.reply_markup as { inline_keyboard: { callback_data?: string }[][] }).inline_keyboard
+                .map((row) => row.map((b) => b.callback_data));
+            const sent = (h: H, u: number) => h.calls.filter((c) => ["sendMessage", "sendRichMessage"].includes(c.method) && Number(c.params.chat_id) === u);
+            let seq = 7_000_000 + (Date.now() % 1_000_000);
+            const group = (seller: number, title: string, ageHours: number, status: "live" | "sold" = "live") => {
+                const at = new Date(Date.now() - ageHours * 3_600_000);
+                return Listing.create({
+                    source: "group", origin: "capture", chatId: APPROVED_GROUP, messageIds: [seq++], sellerId: String(seller),
+                    title, price: "100₪", media: [], status, hold: false, isBundle: false, createdAt: at, refreshedAt: at,
+                });
+            };
+            const approvedPost = async (u: number) => {
+                const id = await seedPost(u, "Bike");
+                await Post.updateOne({ _id: id }, { $set: { status: "approved" } });
+                return id;
+            };
+
+            // (z1) captureMode shadow: the pre-slice output, nothing more
+            {
+                cfg.captureMode = "shadow";
+                const { h } = boot();
+                const u = user();
+                const postId = await approvedPost(u);
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: u });
+                await settle();
+                const out = sent(h, u);
+                assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage"]);
+                assert.ok(text(out[0]).includes(T("myPostsTitle")));
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                console.log("  [OK] (z1) /myposts with captureMode shadow is unchanged.");
+            }
+
+            // (z2) optin: summary, bot post, then the group section
+            cfg.captureMode = "optin";
+            {
+                const { h } = boot();
+                const u = user();
+                const postId = await approvedPost(u);
+                const A = await group(u, "Alpha", 1);
+                const B = await group(u, "Beta", 2);
+                await group(u, "Gamma", 3, "sold");
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: u });
+                await settle();
+                const out = sent(h, u);
+                assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage", "sendMessage"]);
+                assert.ok(text(out[0]).includes(T("myPostsTitle")));
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                const section = out[2];
+                assert.strictEqual(section.params.parse_mode, "HTML");
+                assert.deepStrictEqual(section.params.link_preview_options, { is_disabled: true });
+                const lines = text(section).split("\n");
+                assert.strictEqual(lines[0], T("myPostsGroupTitle"));
+                assert.ok(/^1\. <a href="[^"]+">Alpha<\/a> · 100₪$/.test(lines[1]), lines[1]);
+                assert.ok(/^2\. <a href="[^"]+">Beta<\/a> · 100₪$/.test(lines[2]), lines[2]);
+                assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
+                assert.ok(text(section).endsWith(T("myPostsAskOn")));
+                const [a, b] = [String(A._id), String(B._id)];
+                assert.deepStrictEqual(buttons(section), [[`ls_${a}_s_l`, `ls_${a}_f_l`, `ls_${a}_r_l`], [`ls_${b}_s_l`, `ls_${b}_f_l`, `ls_${b}_r_l`], ["mk_set_never"]]);
+                console.log("  [OK] (z2) /myposts lists bot posts, then the group section.");
+            }
+
+            // (z3) a section row button acts and re-renders the pressed message
+            {
+                const { h } = boot();
+                const u = user();
+                const A = await group(u, "Alpha", 1);
+                await group(u, "Beta", 2);
+                h.calls.length = 0;
+                await h.pressButton(`ls_${A._id}_s_l`, { userId: u, messageId: 77 });
+                await settle();
+                assert.strictEqual((await Listing.findById(A._id))!.status, "sold");
+                const edit = callsTo(h, "editMessageText");
+                assert.strictEqual(edit.length, 1);
+                assert.strictEqual(Number(edit[0].params.message_id), 77);
+                assert.strictEqual(edit[0].params.parse_mode, "HTML");
+                assert.ok(!text(edit[0]).includes("Alpha") && text(edit[0]).includes("Beta"));
+                assert.ok(text(edit[0]).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
+                assert.ok(!buttons(edit[0]).flat().some((d) => d?.startsWith(`ls_${A._id}`)));
+                console.log("  [OK] (z3) a section button acts and the message is re-rendered.");
+            }
+
+            // (z4) the settings toggle
+            {
+                const { h } = boot();
+                const u = user();
+                await group(u, "Alpha", 1);
+                h.calls.length = 0;
+                await h.pressButton("mk_set_never", { userId: u, messageId: 78 });
+                await settle();
+                assert.strictEqual((await Member.findOne({ userId: String(u) }))!.askMode, "never");
+                let edit = callsTo(h, "editMessageText");
+                assert.strictEqual(edit.length, 1);
+                assert.ok(text(edit[0]).endsWith(T("myPostsAskOff")));
+                assert.deepStrictEqual(buttons(edit[0]).at(-1), ["mk_set_ask"]);
+                h.calls.length = 0;
+                await h.pressButton("mk_set_ask", { userId: u, messageId: 78 });
+                await settle();
+                assert.strictEqual((await Member.findOne({ userId: String(u) }))!.askMode, "ask");
+                edit = callsTo(h, "editMessageText");
+                assert.deepStrictEqual(buttons(edit[0]).at(-1), ["mk_set_never"]);
+                h.calls.length = 0;
+                await h.pressButton("mk_set_bogus", { userId: u, messageId: 78 });
+                await settle();
+                assert.deepStrictEqual(callsTo(h, "answerCallbackQuery").map((c) => String(c.params.text)), [T("staleButton")]);
+                assert.strictEqual(callsTo(h, "editMessageText").length, 0);
+                console.log("  [OK] (z4) the toggle flips askMode and re-renders; a bad arg is stale.");
+            }
+
+            // (z5) no posts: the empty text, with the settings row only when optin is on
+            {
+                const { h } = boot();
+                const u = user();
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: u });
+                await settle();
+                let out = sent(h, u);
+                assert.strictEqual(out.length, 1);
+                assert.strictEqual(text(out[0]), T("myPostsEmpty"));
+                assert.deepStrictEqual(buttons(out[0]), [["mk_set_never"]]);
+                cfg.captureMode = "shadow";
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: u });
+                await settle();
+                out = sent(h, u);
+                assert.strictEqual(text(out[0]), T("myPostsEmpty"));
+                assert.ok(!out[0].params.reply_markup);
+                cfg.captureMode = "optin";
+                console.log("  [OK] (z5) no posts: empty text, plus the settings row when optin is on.");
+            }
+
+            // (z6) titles are HTML-escaped
+            {
+                const { h } = boot();
+                const u = user();
+                await group(u, "a<b>&c", 1);
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: u });
+                await settle();
+                assert.ok(text(sent(h, u)[0]).includes(">a&lt;b&gt;&amp;c</a>"));
+                console.log("  [OK] (z6) listing titles are HTML-escaped.");
+            }
+        })();
+
         console.log("[OK] persistent flows.");
     } finally {
         Object.assign(cfg, original);

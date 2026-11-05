@@ -3,7 +3,9 @@ import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import listingRepository from "../repositories/listingRepository";
+import memberRepository from "../repositories/memberRepository";
 import { PostService } from "./postService";
+import { GroupListingService } from "./groupListingService";
 import { localeService } from "./localeService";
 import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
 import { isApiError } from "../config/telegramErrors";
@@ -13,7 +15,8 @@ export class MyPostsService {
     constructor(
         private api: Api,
         private config: BotConfig,
-        private postService: PostService
+        private postService: PostService,
+        private groupListings: GroupListingService
     ) { }
 
     private get lang() {
@@ -63,8 +66,23 @@ export class MyPostsService {
         const locale = localeService.resolveUserLocale(user); //
         const posts: Post[] = await postRepository.findByUserId(userId);
 
+        const section = await this.groupListings.renderGroupSection(userId, locale);
+        const sectionExtra = section ? {
+            parse_mode: "HTML" as const,
+            link_preview_options: { is_disabled: true },
+            reply_markup: { inline_keyboard: section.card.keyboard },
+        } : undefined;
+
         if (!posts || posts.length === 0) {
-            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'myPostsEmpty') });
+            if (section?.hasListings) {
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: section.card.text, ...sectionExtra });
+            } else {
+                await this.api.sendMessage({
+                    chat_id: msg.chat.id,
+                    text: localeService.t(locale, 'myPostsEmpty'),
+                    ...(section ? { reply_markup: sectionExtra!.reply_markup } : {}),
+                });
+            }
             return;
         }
 
@@ -83,6 +101,22 @@ export class MyPostsService {
                 await this.sendApprovedPostDetail(msg.chat.id, post, user, locale);
             }
         }
+
+        if (section) await this.api.sendMessage({ chat_id: msg.chat.id, text: section.card.text, ...sectionExtra });
+    }
+
+    /** mk_set_ask / mk_set_never: flips the capture-note setting and re-renders the pressed message. */
+    async handleAskToggle(query: CallbackQuery, arg: string, now = new Date()): Promise<void> {
+        const userId = String(query.from.id);
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        const mode = arg === "set_ask" ? "ask" : arg === "set_never" ? "never" : null;
+        if (!mode) {
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'staleButton') });
+            return;
+        }
+        await memberRepository.setAskMode(userId, mode, now);
+        await this.api.answerCallbackQuery({ callback_query_id: query.id });
+        if (query.message) await this.groupListings.editSection(query.message.chat.id, query.message.message_id, userId, locale);
     }
 
     /** /start l_<listingId>: the seller's own card for one listing (no Remove on a bot post). */

@@ -1,16 +1,17 @@
 import type { Api } from "node-telegram-bot-api";
-import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
+import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api/types";
 import { isApiError } from "../config/telegramErrors";
 import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
+import memberRepository from "../repositories/memberRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { classify } from "./classifier";
 import { groupMessageLink } from "./deepLinks";
 import { editNote } from "./ephemeralNotes";
-import { buildEndedCard, buildManagementCard, parseListingArg, Card } from "./listingCards";
+import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
 import { localeService } from "./localeService";
 
 export type AddResult =
@@ -18,6 +19,7 @@ export type AddResult =
     | { kind: "already"; listing: IListing | null }
     | { kind: "gone" };
 
+const SECTION_MAX = 15;
 const TOASTS = { s: "listingSoldToast", f: "listingRefreshedToast", r: "listingRemovedToast" } as const;
 
 // A member's own group message, once they said yes: Add, then Sold / Refresh /
@@ -142,9 +144,64 @@ export class GroupListingService {
             if (parsed.surface === "c" && query.message) {
                 await this.editCard(query.message.chat.id, query.message.message_id, current, refreshed, locale);
             }
+            if (parsed.surface === "l" && query.message) {
+                await this.editSection(query.message.chat.id, query.message.message_id, from, locale);
+            }
         } catch (err) {
             console.error("[ERROR - GroupListingService.handleListingCallback]", (err as Error).message);
             await answer("staleButton");
+        }
+    }
+
+    // The /myposts group section: live and expired listings with their buttons, then the settings row.
+    async renderGroupSection(userId: string, locale: string): Promise<{ card: Card; hasListings: boolean } | null> {
+        const listings = await listingRepository.findGroupBySeller(userId);
+        const hasListings = listings.length > 0;
+        if (!hasListings && this.config.captureMode !== "optin") return null;
+        const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
+        const active = listings.filter((l) => l.status === "live" || l.status === "expired");
+        const shown = active.slice(0, SECTION_MAX);
+        const ended = listings.length - active.length;
+
+        const lines: string[] = [];
+        if (hasListings) {
+            lines.push(t("myPostsGroupTitle"));
+            for (const [i, l] of shown.entries()) {
+                lines.push(`${i + 1}. <a href="${await this.groupLink(l.messageIds[0])}">${escapeHtml(l.title ?? "")}</a> · ${escapeHtml(l.price ?? "")}`);
+            }
+            if (active.length > shown.length) lines.push(`+${active.length - shown.length}`);
+            if (ended > 0) lines.push(t("myPostsGroupEnded", { n: ended }));
+        }
+        const never = (await memberRepository.findByUserId(userId))?.askMode === "never";
+        const text = [...lines, ...(lines.length ? [""] : []), t(never ? "myPostsAskOff" : "myPostsAskOn")].join("\n");
+
+        const keyboard: InlineKeyboardButton[][] = shown.map((l, i) => {
+            const id = String(l._id);
+            return [
+                { text: `🤝 ${i + 1}`, callback_data: listingActionData(id, "s", "l") },
+                { text: `🔄 ${i + 1}`, callback_data: listingActionData(id, "f", "l") },
+                { text: `🗑 ${i + 1}`, callback_data: listingActionData(id, "r", "l") },
+            ];
+        });
+        keyboard.push([never
+            ? { text: t("myPostsAskResumeButton"), callback_data: "mk_set_ask" }
+            : { text: t("myPostsAskStopButton"), callback_data: "mk_set_never" }]);
+        return { card: { text, keyboard }, hasListings };
+    }
+
+    // Re-renders a pressed /myposts section message.
+    async editSection(chatId: number, messageId: number, userId: string, locale: string): Promise<void> {
+        const section = await this.renderGroupSection(userId, locale);
+        if (!section) return;
+        try {
+            await this.api.editMessageText({
+                chat_id: chatId, message_id: messageId, text: section.card.text, parse_mode: "HTML",
+                link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: section.card.keyboard },
+            });
+        } catch (err) {
+            if (!isApiError(err, 400, "message is not modified")) {
+                console.error("[ERROR - GroupListingService.editSection]", (err as Error).message);
+            }
         }
     }
 
