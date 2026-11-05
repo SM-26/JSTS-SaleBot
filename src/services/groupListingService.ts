@@ -75,7 +75,7 @@ export class GroupListingService {
             console.error("[ERROR - GroupListingService.addToMarket]", { captureId, userId: capture.senderId }, (err as Error).message);
             // undo, so the button works again and a second press cannot double-list
             if (listing) await listingRepository.deleteById(String(listing._id)).catch((e: Error) => console.error("[ERROR - GroupListingService.addToMarket]", "undo failed:", e.message));
-            await captureRepository.transition(captureId, ["added"], previous);
+            await captureRepository.transition(captureId, ["added"], previous).catch((e: Error) => console.error("[ERROR - GroupListingService.addToMarket]", "rollback failed:", e.message));
             throw err;
         }
         if (firstForSeller) await this.notifyNewSeller(listing);
