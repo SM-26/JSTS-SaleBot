@@ -33,6 +33,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Forum Topics** — Moderation and approved posts target specific group topics
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
 - **Shadow Classifier (market groundwork)** — With `captureMode: "shadow"` the bot records messages in the sale topic into per-sender posting windows (90 s, closed after 30 s of quiet), classifies each (`strict`, `ask`, `wtb`, `none`) and logs what automatic capture *would* have done (`shadow_log`, 120 days). It **sends nothing** to the group or to members. Captured text lives 7 days. `buyerMatches: "shadow"` also logs which live listings a "wanted" message would match
+- **Opt-in Capture Notes** — With `captureMode: "optin"`, a member who posts a sale message in the sale topic gets a **private note** (an ephemeral message only they see, nothing public) asking whether to add it to the market: **Add**, **Not now** or **Don't ask again**. Add makes a *group listing* that points at their own message; the member can mark it **Sold**, **Refresh** or **Remove** from the note, from `/myposts` or from a bot card, and editing the message keeps the listing in step. Reposting the same text refreshes the listing. The bot never touches the member's message and a seller can never remove an approved bot post. At most 3 notes per seller per 24 h; a text a note was already sent for is not asked again for 30 days. A seller's first captured listing gets a **Take down** card in the moderation topic (group listings are post-moderated)
+- **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group listing
 - **`/label` and `/stats`** — Admins hand-label would-list rows as sale / not sale (`/label`); moderators see tier counts, merge counts and label precision against the go/no-go gate (`/stats`)
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
 - **Role-Based Access Control (RBAC)** — Granular authorization with User, Moderator, and Admin roles, replacing simple `isAdmin` flags.
@@ -72,7 +74,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/start` | Show a welcome greeting. |
 | `/newPost` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). With a draft in progress it offers Continue or Start over. |
 | `/cancel` | Cancel your post in progress. |
-| `/myposts` | View your active posts, bump them to the top, or mark them as sold. |
+| `/myposts` | View your active posts, bump them to the top, or mark them as sold. Also lists your group listings (Sold / Refresh / Remove) and the capture-note setting (stop or resume asking). |
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
 | `/donate` | Support the bot by donating Telegram Stars. |
@@ -85,7 +87,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/clearpending` | Bulk expire (reject) all currently pending posts. |
 | `/auth` | View a user's authorization level and role (supports self, ID, username, or reply). |
 | `/cancel` | In the moderation group: forget your pending reject-reason prompts. |
-| `/stats` | Shadow classifier numbers: rows per tier, would-list and merge counts, label precision. |
+| `/stats` | Shadow classifier numbers: rows per tier, would-list and merge counts, label precision, and (once notes are sent) the opt-in line: notes, added, rate. |
 
 ### 📝 For moderators
 
@@ -269,6 +271,11 @@ src/
 │   ├── marketService.ts      # Reconciles bot posts into listings
 │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
 │   ├── shadowAdminService.ts # /label and /stats
+│   ├── captureNoteService.ts # Private opt-in capture notes: ask, refresh, Add / Not now / Don't ask again (mk_)
+│   ├── groupListingService.ts # Group listings: Add, Sold / Refresh / Remove (ls_), edit sync, /myposts section
+│   ├── listingCards.ts       # Pure card builders (ask note, management card) and callback_data helpers
+│   ├── ephemeralNotes.ts     # The only caller of the ephemeral Bot API methods (send, edit, delete a note)
+│   ├── deepLinks.ts          # `start=c_` / `start=l_` payloads and group message links
 │   ├── localeService.ts      # User-specific localization & FAQ loading
 │   └── faqService.ts         # FAQ command handler with locale-specific content
 ├── locales/
@@ -280,6 +287,9 @@ src/
 │   ├── checkClassifier.ts    # Classifier fixtures
 │   ├── checkMarket.ts        # Market collections, capture windows, sweeper, shadow pipeline (needs MONGO_URI)
 │   ├── syntheticCapture.ts   # Manual: 20 messages through the controller on the TEST bot/group; sends nothing
+│   ├── syntheticOptin.ts     # Manual: one real private note + one moderation card on the TEST bot/groups, cleaned up after
+│   ├── checkListingCards.ts  # Card builders, callback_data and start payload formats (`pnpm run check-cards`)
+│   ├── fixtures.ts           # `seedCapture`: a classified capture straight through the model
 │   ├── checkCallbackData.ts  # Golden test pinning callback_data formats
 │   ├── checkPlatform.ts      # Offline checks: command matcher, middleware
 │   ├── checkSessionStore.ts  # Session store (needs MONGO_URI)
@@ -354,6 +364,8 @@ docker compose -f compose.prod.yaml logs -f bot
 > **The blocked-word list is editable on the host.** `compose.prod.yaml` bind-mounts the host folder `./blocklist` at `/app/blocklist` (read-only) and sets `BLOCKED_WORDS_PATH=/app/blocklist/blockedWords.json`. **Before the first deploy**, create `./blocklist/` next to `config.json` and copy `src/config/blockedWords.json` from the repo into it. Edit it with any editor; the bot re-reads it within about 60 s, no restart. (It is a folder and not a single file on purpose: editors that save by rename give a file a new identity, and a single-file mount would keep showing the old one.) If the folder or file is missing, the bot logs `[ERROR - blockedWords]` and uses the list built into the image. A broken edit (invalid JSON, not an array of strings, or an entry that is blank or only `*`) is logged the same way and the last good list stays active.
 
 > **Deploying slice 0 (market core + shadow classifier).** The new collections are additive; the 2.0.1 image still runs against the same database. (1) Create `./blocklist/` and copy `src/config/blockedWords.json` into it (see above). (2) The production `config.json` predates the `captureMode` and `buyerMatches` keys, so capture starts **off**. Turn it on as an admin with `/config captureMode shadow` and `/config buyerMatches shadow`; both only record, nothing is sent to the group. (3) Confirm `LEGACY_CUTOFF` (`2026-11-04`, in `src/services/marketService.ts`): posts created before it become held legacy listings, posts after it become normal ones.
+
+> **Deploying 3.1.0 (opt-in capture notes).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. Deploy with `captureMode: shadow` (no behaviour change); set `/config captureMode optin` only after a second account (not the poster, not an admin) has confirmed in the test group that other members do not see the note. `/config captureMode shadow` stops the notes at once.
 
 > **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
 
@@ -439,7 +451,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `donationsEnabled`   | boolean | Enable/Disable the /donate command                |
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
-| `captureMode`        | enum | `"off"` or `"shadow"`: record and classify sale-topic messages without sending anything. Code default `off`; `config.json.example` ships `shadow` |
+| `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |

@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
+  - Added:
+    - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of a listed text refreshes the listing and sends a short refresh note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
+    - **Group listings.** Sold, Refresh and Remove (`ls_<listingId>_<s|f|r>_<n|c|l>`) from the note, from a bot card or from `/myposts`; editing the member's message keeps the listing in step (a blocked word ends it). The member's message is never touched, and a seller can never remove an approved bot post (every `ls_` button is refused on one). The first group listing of a seller sends a **Take down** card (`td_`) to the moderation topic: group listings are post-moderated.
+    - **Deep links.** `?start=c_<captureId>` opens a draft prefilled from a captured message (refused while another draft is open); `?start=l_<listingId>` opens a listing's management card.
+    - `/myposts` lists group listings with Sold / Refresh / Remove and a stop/resume-asking toggle. `/stats` gained an opt-in line (notes, added, rate).
+    - `captureMode` accepts `optin` besides `off` and `shadow`. `config.json.example` stays `shadow`; `/config captureMode shadow` is the kill switch (notes stop at once, existing listings stay manageable in every mode).
+    - Tests: `check-cards` (new, in `pnpm test`), plus coverage in `check-callbacks`, `check-routes`, `check-flows` and `check-market`. `/test` gained "Send me a capture note" (test bot only). `src/tests/syntheticOptin.ts` (manual, TEST bot and groups only) sends one real note and one moderation card through the real controller and cleans both up.
+  - Notes:
+    - Data: additive only. `captures.note.kind`, `members.declined` (hashes of the texts a note was sent for, 30 days, 20 max) and `drafts.captureId` are new optional fields; `listings` gained nothing, `posts` and `users` are unchanged.
+    - **Rollback caveat:** an older image's wizard would post a draft that has `captureId` as a bot post, so `/start c_` refuses to overwrite a live draft and nothing else creates capture drafts. After a rollback the `mk_` and `ls_` buttons do nothing (no route) and `/myposts` does not show group listings. Listings the members added stay in the database.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
+    - Deploys need the owner's go-ahead.
+    - Deploy with `captureMode: shadow` (no behaviour change). Turn on `optin` only on the owner's go-ahead, and only after a second account (not the poster, not an admin) confirmed in the test group that other members do not see the note (#104).
+
 3.0.0 - Trust-based moderation (slice 1 of "the market", #104).
   - Added:
     - **Trusted sellers publish at once.** A seller with an approved or sold bot post and no moderator take-down in the last 90 days is trusted: their new post goes straight to the sales group, and the moderation group gets a "Published (trusted seller)" card to review afterwards. Everyone else still goes through moderation. Captured group listings never grant trust.
