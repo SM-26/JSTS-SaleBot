@@ -2,6 +2,7 @@ import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
 import shadowLogRepository, { ShadowStats } from "../repositories/shadowLogRepository";
 import listingRepository from "../repositories/listingRepository";
+import captureRepository from "../repositories/captureRepository";
 import userRepository from "../repositories/userRepository";
 import type { IShadowLog } from "../models/ShadowLog";
 import { AuthLevel, BotConfig } from "../types";
@@ -126,7 +127,12 @@ export class ShadowAdminService {
                 prec7: pct(s7.sale, s7.sale + s7.notSale, 1), prec30: pct(s30.sale, s30.sale + s30.notSale, 1),
                 gate7: gate(s7), gate30: gate(s30),
             });
-            await this.api.sendMessage({ chat_id: msg.chat.id, text });
+            // captures expire after 7 days, so there is no 30-day opt-in figure
+            const o = await captureRepository.noteStats(new Date(now - 7 * DAY_MS));
+            const optin = this.config.captureMode === "optin" || o.notes > 0
+                ? `\n${localeService.t(locale, "statsOptin", { notes: o.notes, added: o.added, rate: pct(o.added, o.notes) })}`
+                : "";
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: text + optin });
         } catch (err) {
             console.error("[ERROR - shadowAdmin.handleStats]", (err as Error).message);
         }
