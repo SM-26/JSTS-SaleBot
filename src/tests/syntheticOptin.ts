@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { inspect } from "util";
 import mongoose from "mongoose";
 import { Bot } from "node-telegram-bot-api";
 import type { Update } from "node-telegram-bot-api/types";
@@ -38,7 +39,6 @@ async function main(): Promise<number> {
         console.error('[FAIL] MONGO_URI must name a throwaway database (the db path must contain "test"); refusing to connect.');
         return 1;
     }
-    await mongoose.connect(uri!);
 
     // config.json is read at import time, so load the controller after the checks above.
     const { BotController } = await import("../controllers/botController");
@@ -52,9 +52,15 @@ async function main(): Promise<number> {
     const calls: Call[] = [];
     const violations: string[] = [];
     const logged: string[] = []; // console.warn / console.error lines, to catch [WARN - ephemeralNotes.edit]
+    // a Telegram error can carry the request URL, which contains the token
+    const scrub = (text: string): string => token ? text.replaceAll(token, "<token>") : text;
     for (const level of ["warn", "error"] as const) {
         const original = console[level].bind(console);
-        console[level] = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); original(...args); };
+        console[level] = (...args: unknown[]) => {
+            const clean = args.map(a => scrub(typeof a === "string" ? a : inspect(a)));
+            logged.push(clean.join(" "));
+            original(...clean);
+        };
     }
 
     const wrappedFetch: typeof fetch = async (input, init) => {
@@ -86,14 +92,16 @@ async function main(): Promise<number> {
     };
 
     const bot = new Bot(token, { fetch: wrappedFetch });
-    const me = await bot.api.getMe();
     const controller = new BotController(bot.api);
     const cfg = controller.config;
+    // before any network call or database connection
     if (cfg.approvedGroupId !== APPROVED || Number(cfg.approvedTopicId) !== APPROVED_TOPIC ||
         cfg.moderationGroupId !== MOD || Number(cfg.moderationTopicId) !== MOD_TOPIC) {
         console.error("[FAIL] config.json is not the test-group config (approved/moderation group and topic); refusing to run.");
         return 1;
     }
+    await mongoose.connect(uri!);
+    const me = await bot.api.getMe();
     cfg.captureMode = "optin";
     cfg.buyerMatches = "off";
     controller.registerRoutes(bot, me.username!);
@@ -180,6 +188,9 @@ async function main(): Promise<number> {
         // 5. clean up, also after a failure
         let cleaned = true;
         const detail: string[] = [];
+        // ids from what Telegram answered, so a throw before they were stored still cleans up
+        noteId ??= (calls.find(c => c.method === "sendMessage" && c.chat === APPROVED)?.result as { ephemeral_message_id?: number } | undefined)?.ephemeral_message_id;
+        modCardId ??= (calls.find(c => c.method === "sendMessage" && c.chat === MOD)?.result as { message_id?: number } | undefined)?.message_id;
         if (typeof noteId === "number") {
             try {
                 const ok = await bot.api.deleteEphemeralMessage({ chat_id: APPROVED, receiver_user_id: OWNER, ephemeral_message_id: noteId });
@@ -203,10 +214,11 @@ async function main(): Promise<number> {
         await wipe();
         const left = (await Capture.countDocuments({ senderId: sender })) + (await Listing.countDocuments({ sellerId: sender }));
         step(5, "cleanup: note, card and Mongo rows removed", cleaned && left === 0, detail.join(", "));
+        // on every exit path, early returns included
+        for (const c of calls) console.log(`sent ${c.method} chat ${c.chat ?? "-"} topic ${c.topic ?? "-"} ${c.ok ? "ok" : "FAILED"}`);
+        if (violations.length) console.log(`[FAIL] blocked: ${violations.join(", ")}`);
     }
 
-    for (const c of calls) console.log(`sent ${c.method} chat ${c.chat ?? "-"} topic ${c.topic ?? "-"} ${c.ok ? "ok" : "FAILED"}`);
-    if (violations.length) console.log(`[FAIL] blocked: ${violations.join(", ")}`);
     return failed || violations.length ? 1 : 0;
 }
 
