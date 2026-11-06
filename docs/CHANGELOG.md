@@ -12,7 +12,11 @@ All notable changes to this project will be documented in this file.
     - `/myposts` lists group listings with Sold / Refresh / Remove and a stop/resume-asking toggle. `/stats` gained an opt-in line (notes, added, rate).
     - `captureMode` accepts `optin` besides `off` and `shadow`. `config.json.example` stays `shadow`; `/config captureMode shadow` is the kill switch (notes stop at once, existing listings stay manageable in every mode).
     - Tests: `check-cards` (new, in `pnpm test`), plus coverage in `check-callbacks`, `check-routes`, `check-flows` and `check-market`. `/test` gained "Send me a capture note" (test bot only). `src/tests/syntheticOptin.ts` (manual, TEST bot and groups only) sends one real note and one moderation card through the real controller and cleans both up.
+  - Fixed:
+    - The bot now always names the update types it polls for (`allowedUpdates`). Without the list, Telegram reuses the last one set for the token; on the test bot that dropped every button press.
+    - A moderator take-down closes the seller's private note.
   - Notes:
+    - Private notes are best effort: they reach only apps online when sent, silently in the background and not at all to a closed app (tested on Telegram Desktop 7.4 and Android 13.2.0). `/myposts` stays the durable path.
     - Data: additive only. `captures.note.kind`, `members.declined` (hashes of the texts a note was sent for, 30 days, 20 max) and `drafts.captureId` are new optional fields; `listings` gained nothing, `posts` and `users` are unchanged.
     - **Rollback caveat:** an older image's wizard would post a draft that has `captureId` as a bot post, so `/start c_` refuses to overwrite a live draft and nothing else creates capture drafts. After a rollback the `mk_` and `ls_` buttons do nothing (no route) and `/myposts` does not show group listings. Listings the members added stay in the database.
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
