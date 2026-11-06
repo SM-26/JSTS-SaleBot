@@ -97,6 +97,15 @@ class PostRepository {
         return Post.find({ status: { $in: ["approved", "sold"] } }).exec();
     }
 
+    findByIds(ids: string[]): Promise<IPost[]> {
+        return Post.find({ _id: { $in: ids } }).exec();
+    }
+
+    async firstCreatedAt(userId: string): Promise<Date | null> {
+        const p = await Post.findOne({ userId }).sort({ createdAt: 1 }).select("createdAt").exec();
+        return p?.createdAt ?? null;
+    }
+
     distinctUserIdsByStatus(status: IPost["status"]): Promise<string[]> {
         return Post.distinct("userId", { status });
     }

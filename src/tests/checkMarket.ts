@@ -8,7 +8,8 @@ import PostModel from "../models/Post";
 import ShadowLog from "../models/ShadowLog";
 import captureRepository from "../repositories/captureRepository";
 import draftRepository from "../repositories/draftRepository";
-import listingRepository, { priceValueOf } from "../repositories/listingRepository";
+import postRepository from "../repositories/postRepository";
+import listingRepository,{ priceValueOf } from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { textHash } from "../services/classifier";
@@ -583,6 +584,136 @@ async function run() {
         assert.ok(d3 && d3.captureId === undefined && d3.step === "title", "start over a capture draft leaves no captureId");
         assert.ok(!("captureId" in (await Draft.collection.findOne({ userId: du }))!), "captureId is gone from the document");
         console.log("[OK] draft startFromCapture.");
+
+        // slice 3: lifecycle clock fields and atomic claims (fake clock, nothing calls new Date())
+        {
+            const T0 = new Date("2026-12-01T10:00:00Z");
+            const L = (n: number) => new Date(T0.getTime() + n * 24 * 3600 * 1000);
+            const HR = 3600 * 1000;
+            const P = `${RUN}-s3`;
+            const mk = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: T0, refreshedAt: T0, ...extra,
+            });
+            const mine = <T extends { sellerId: string }>(rows: T[]) => rows.filter(r => r.sellerId.startsWith(P));
+            const id = (l: { _id: unknown }) => String(l._id);
+
+            const n1 = await mk("n1");
+            assert.strictEqual(await listingRepository.claimNudge(id(n1), new Date(L(7).getTime() - 1)), null, "claimNudge one ms early");
+            const claimed = await listingRepository.claimNudge(id(n1), L(7));
+            assert.ok(claimed && claimed.nudgedAt?.getTime() === L(7).getTime(), "claimNudge at day 7 sets nudgedAt");
+            assert.strictEqual(await listingRepository.claimNudge(id(n1), L(7)), null, "claimNudge only once");
+            await listingRepository.holdNudge(id(n1));
+            await listingRepository.releaseNudgeClaim(id(n1));
+            const rel = await Listing.collection.findOne({ _id: n1._id });
+            assert.ok(rel && !("nudgedAt" in rel) && !("nudgeHeld" in rel), "releaseNudgeClaim unsets both");
+            console.log("[OK] claimNudge.");
+
+            await mk("c-hold", { refreshedAt: L(23), hold: true });
+            await mk("c-nudged", { refreshedAt: L(23), nudgedAt: L(30) });
+            await mk("c-sold", { refreshedAt: L(23), status: "sold" });
+            await mk("c-old", { refreshedAt: L(0) });
+            const okL = await mk("c-ok", { refreshedAt: L(23) });
+            const found = mine(await listingRepository.findNudgeCandidates(L(31), 500)).filter(r => r.sellerId.startsWith(`${P}-c-`));
+            assert.deepStrictEqual(found.map(id), [id(okL)], "only the 8-day-old live unheld un-nudged listing");
+            console.log("[OK] nudge candidates filter.");
+
+            const r1 = await mk("r1", { nudgedAt: L(1), nudgeHeld: true, staleSentAt: L(1), hold: true, endedAt: L(2), endedBy: "system" });
+            assert.ok(await listingRepository.refresh(id(r1), L(3)), "refresh returns the listing");
+            const r1raw = await Listing.collection.findOne({ _id: r1._id });
+            assert.ok(r1raw && r1raw.hold === false && r1raw.status === "live" && +r1raw.refreshedAt === +L(3), "refresh sets clock, hold false");
+            for (const f of ["nudgedAt", "nudgeHeld", "staleSentAt", "endedAt", "endedBy"]) assert.ok(!(f in r1raw), `refresh unsets ${f}`);
+            const r2 = await mk("r2", { status: "expired", endedAt: L(1), endedBy: "system" });
+            assert.strictEqual((await listingRepository.refresh(id(r2), L(3)))?.status, "live", "expired -> live");
+            const r3 = await mk("r3", { status: "sold" });
+            assert.strictEqual(await listingRepository.refresh(id(r3), L(3)), null, "sold stays sold");
+            assert.strictEqual((await listingRepository.findById(id(r3)))?.status, "sold");
+            console.log("[OK] refresh clears everything.");
+
+            const e1 = await mk("e1");
+            const e2 = await mk("e2", { hold: true });
+            const e3 = await mk("e3", { status: "sold" });
+            assert.deepStrictEqual(mine(await listingRepository.expireDue(new Date(L(30).getTime() - 1))), [], "nothing expires at day 30 minus 1 ms");
+            assert.ok(mine(await listingRepository.expireDue(L(30))).some(r => id(r) === id(e1)), "expireDue returns e1");
+            const e1raw = await Listing.collection.findOne({ _id: e1._id });
+            assert.ok(e1raw?.status === "expired" && e1raw.endedBy === "system" && +e1raw.endedAt === +L(30), "expired by system at now");
+            assert.strictEqual((await listingRepository.findById(id(e2)))?.status, "live", "hold untouched");
+            assert.strictEqual((await listingRepository.findById(id(e3)))?.status, "sold", "sold untouched");
+            console.log("[OK] expireDue.");
+
+            const s1 = await mk("s1", { staleSentAt: T0, refreshedAt: L(5) });
+            const s2 = await mk("s2", { nudgedAt: T0, refreshedAt: L(5) });
+            assert.deepStrictEqual(mine(await listingRepository.expireStaleUnanswered(new Date(L(7).getTime() - 1))), [], "stale window not over");
+            assert.deepStrictEqual(mine(await listingRepository.expireStaleUnanswered(L(7))).map(id), [id(s1)], "expired exactly at 7 days");
+            assert.strictEqual((await listingRepository.findById(id(s1)))?.endedBy, "system");
+            assert.strictEqual((await listingRepository.findById(id(s2)))?.status, "live", "nudged without staleSentAt untouched");
+            console.log("[OK] expireStaleUnanswered.");
+
+            const st = await mk("st", { origin: "legacy", hold: true, source: "bot", chatId: undefined });
+            const stId = id(st);
+            assert.ok(mine(await listingRepository.findStaleEligible([`${P}-st`])).some(r => id(r) === stId), "eligible for its seller");
+            assert.ok(!mine(await listingRepository.findStaleEligible([`${P}-other`])).some(r => id(r) === stId), "not for another seller");
+            assert.ok(mine(await listingRepository.findStaleEligible(null)).some(r => id(r) === stId), "null = everyone");
+            const both = await Promise.all([listingRepository.claimStale(stId, L(2)), listingRepository.claimStale(stId, L(2))]);
+            assert.strictEqual(both.filter(Boolean).length, 1, "exactly one claimStale wins");
+            const stRaw = await Listing.collection.findOne({ _id: st._id });
+            assert.ok(stRaw && stRaw.hold === false && +stRaw.nudgedAt === +L(2) && +stRaw.staleSentAt === +L(2) && +stRaw.refreshedAt === +L(2), "claimStale sets all three clocks");
+            await listingRepository.unclaimStale(stId);
+            const stBack = await Listing.collection.findOne({ _id: st._id });
+            assert.ok(stBack && stBack.hold === true && !("nudgedAt" in stBack) && !("staleSentAt" in stBack), "unclaimStale restores");
+            console.log("[OK] claimStale once.");
+
+            const h = await mk("h1");
+            await listingRepository.holdNudge(id(h));
+            assert.ok(mine(await listingRepository.findHeldNudges()).some(r => id(r) === id(h)), "findHeldNudges");
+            const rels = await Promise.all([listingRepository.claimHeldRelease(id(h)), listingRepository.claimHeldRelease(id(h))]);
+            assert.strictEqual(rels.filter(Boolean).length, 1, "exactly one release wins");
+            console.log("[OK] claimHeldRelease once.");
+
+            const m1 = await mk("m1");
+            const sys = await listingRepository.markSold(id(m1), L(1), "system");
+            assert.ok(sys?.status === "sold" && sys.endedBy === "system", "markSold by system");
+            const m2 = await mk("m2");
+            assert.strictEqual((await listingRepository.markSold(id(m2), L(1)))?.endedBy, "seller", "markSold defaults to seller");
+            const m3 = await mk("m3");
+            const ex = await listingRepository.markExpired(id(m3), L(2));
+            assert.ok(ex?.status === "expired" && ex.endedBy === "system" && +ex.endedAt! === +L(2), "markExpired");
+            assert.strictEqual(await listingRepository.markExpired(id(m3), L(3)), null, "markExpired only from live");
+            assert.strictEqual(await listingRepository.markExpired(id(m1), L(3)), null, "markExpired not from sold");
+            assert.strictEqual(await listingRepository.countSold(`${P}-m1`), 1, "countSold");
+            assert.strictEqual(await listingRepository.countSold(`${P}-m3`), 0);
+            const x1 = await mk("xp", { source: "bot", status: "expired", endedAt: L(4) });
+            const x2 = await mk("xp", { source: "bot", status: "expired", endedAt: L(6) });
+            await mk("xp", { source: "group", status: "expired", endedAt: L(8) });
+            await mk("xp", { source: "bot", status: "live" });
+            assert.deepStrictEqual((await listingRepository.findSellerExpired(`${P}-xp`, 10)).map(id), [id(x2), id(x1)], "bot expired only, newest endedAt first");
+            assert.strictEqual((await listingRepository.findSellerExpired(`${P}-xp`, 1)).length, 1, "limit");
+            const ck = await mk("ck");
+            await listingRepository.setClockForTest(id(ck), L(9));
+            assert.strictEqual(+(await listingRepository.findById(id(ck)))!.refreshedAt, +L(9), "setClockForTest");
+            console.log("[OK] markSold by, markExpired, countSold, findSellerExpired, setClockForTest.");
+
+            const pu = `${P}-pu`;
+            const mkPost = (title: string, createdAt: Date) => PostModel.create({ userId: pu, title, description: "d", price: "1", location: "l", media: [], status: "approved", createdAt });
+            const pA = await mkPost("a", L(3));
+            const pB = await mkPost("b", L(1));
+            assert.strictEqual((await postRepository.findByIds([String(pA._id), String(pB._id)])).length, 2, "findByIds");
+            assert.deepStrictEqual(await postRepository.findByIds([]), [], "findByIds empty");
+            assert.strictEqual(+(await postRepository.firstCreatedAt(pu))!, +L(1), "firstCreatedAt is the oldest");
+            assert.strictEqual(await postRepository.firstCreatedAt(`${P}-nobody`), null, "firstCreatedAt none");
+            console.log("[OK] postRepository.findByIds, firstCreatedAt.");
+
+            const cs = `${P}-cap`;
+            const base = { chatId: CHAT, senderId: cs, senderName: "s", messageIds: [1], parts: [], text: "x", media: [], mediaGroupIds: [], firstAt: T0 };
+            await Capture.collection.insertOne({ ...base, state: "classified", lastAt: new Date(T0.getTime() + HR) });
+            await Capture.collection.insertOne({ ...base, state: "open", lastAt: new Date(T0.getTime() + HR) });
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + 2 * HR)), true, "settled capture inside range");
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + HR / 2)), false, "settledBefore too early");
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, `${P}-cap2`, T0, new Date(T0.getTime() + 2 * HR)), false, "other sender");
+            await Capture.deleteMany({ senderId: cs, state: "classified" });
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + 2 * HR)), false, "an open capture does not count");
+            console.log("[OK] hasSettledSince.");
+        }
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
