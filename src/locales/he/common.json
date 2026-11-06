@@ -53,6 +53,7 @@
     "donationSuccess": "🙏 תודה רבה על תרומתך בסך {amount} כוכבים!",
     "doneMediaButton": "✅ סיימתי",
     "editTitleButton": "✏️ כותרת",
+    "editDescriptionButton": "✏️ תיאור",
     "editPriceButton": "✏️ מחיר",
     "editLocationButton": "✏️ מיקום",
     "faqNotAvailable": "מידע שאלות נפוצות לא זמין בשפה שלך.",

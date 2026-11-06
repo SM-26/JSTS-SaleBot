@@ -124,8 +124,8 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             const { h } = boot();
             const u = user();
             const preview = await toPreview(h, u);
-            assert.deepStrictEqual(rows(preview), [["confirm", "cancel"], ["draft_edit_title", "draft_edit_price"], ["draft_edit_location", "draft_meetup"]]);
-            assert.deepStrictEqual(labels(preview).slice(2), [T("editTitleButton"), T("editPriceButton"), T("editLocationButton"), `📍 ${PLACE}`]);
+            assert.deepStrictEqual(rows(preview), [["confirm", "cancel"], ["draft_edit_title", "draft_edit_description"], ["draft_edit_price", "draft_edit_location"], ["draft_meetup"]]);
+            assert.deepStrictEqual(labels(preview).slice(2), [T("editTitleButton"), T("editDescriptionButton"), T("editPriceButton"), T("editLocationButton"), `📍 ${PLACE}`]);
             const id = messageId(preview);
 
             await press(h, u, `draft_edit_price_${u}`, id);
@@ -213,7 +213,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.strictEqual(Number(edit.params.message_id), messageId(preview));
             assert.ok(JSON.stringify(edit.params.rich_message).includes("Tel Aviv · ") && JSON.stringify(edit.params.rich_message).includes(PLACE), "the preview shows the place");
             assert.deepStrictEqual(labels(edit).slice(-1), [`✅ 📍 ${PLACE}`]);
-            assert.deepStrictEqual(keyboard(edit).map((r) => r.length), [2, 2, 2]);
+            assert.deepStrictEqual(keyboard(edit).map((r) => r.length), [2, 2, 2, 1]);
             d = (await draftOf(u))!;
             assert.deepStrictEqual([d.step, d.meetup, d.promptMessageId], ["confirm", true, messageId(preview)]);
 
@@ -823,6 +823,21 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             for (const m of msgs) assert.ok(text(m).endsWith(FAQ_PADDING), text(m));
             assert.strictEqual(FAQ_PADDING, "\n" + "\u2800".repeat(30));
             console.log("  [OK] (k29) every FAQ message carries the width padding.");
+        }
+
+        // (k32) the preview's description button asks for it and comes back to the preview with the new text
+        {
+            const { h } = boot();
+            const u = user();
+            const preview = await toPreview(h, u);
+            await press(h, u, `draft_edit_description_${u}`, messageId(preview));
+            assert.strictEqual((await draftOf(u))!.step, "description");
+            assert.strictEqual((await draftOf(u))!.fixing, true);
+            await h.sendText("תיאור חדש לגמרי", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.description, d.fixing], ["confirm", "תיאור חדש לגמרי", undefined]);
+            console.log("  [OK] (k32) the preview can edit the description.");
         }
 
         // (k31) /pending: a refused photo falls back to text with the buttons, and the next post still goes

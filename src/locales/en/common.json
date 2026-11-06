@@ -53,6 +53,7 @@
     "donationSuccess": "🙏 Thank you for your donation of {amount} Stars!",
     "doneMediaButton": "✅ Done",
     "editTitleButton": "✏️ Title",
+    "editDescriptionButton": "✏️ Description",
     "editPriceButton": "✏️ Price",
     "editLocationButton": "✏️ Location",
     "faqNotAvailable": "FAQ information not available for your language.",

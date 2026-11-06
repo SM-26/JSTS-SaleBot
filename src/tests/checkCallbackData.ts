@@ -123,7 +123,7 @@ console.log("  [SUCCESS] start payloads and links.");
 
 // --- wizard field-edit buttons (quickListing) ---------------------------------------
 const UID = "7200000001";
-for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"]]) {
+for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_description_${UID}`, "editDescription"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"]]) {
     assert.deepStrictEqual(parseWizardCallback(data), { action, userId: UID }, data);
     assert.ok(Buffer.byteLength(data) <= 64, data);
     assert.strictEqual(routeCallback(data), null, data);

@@ -43,6 +43,7 @@
     "donationSuccess": "🙏 Спасибо за ваше пожертвование в размере {amount} Stars!",
     "doneMediaButton": "✅ Готово",
     "editTitleButton": "✏️ Название",
+    "editDescriptionButton": "✏️ Описание",
     "editPriceButton": "✏️ Цена",
     "editLocationButton": "✏️ Место",
     "faqNotAvailable": "Информация FAQ недоступна на вашем языке.",

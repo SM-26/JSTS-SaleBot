@@ -57,6 +57,7 @@ export interface LocaleStrings {
     enterMedia: string;
     doneMediaButton: string;
     editTitleButton: string;
+    editDescriptionButton: string;
     editPriceButton: string;
     editLocationButton: string;
     enterLocation: string;
