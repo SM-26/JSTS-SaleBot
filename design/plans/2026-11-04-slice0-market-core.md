@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, node-telegram-bot-api 2.3.0 (v2 middleware chain), mongoose 9, Node stdlib `crypto`. No new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-market-design.md` (sections 5, 6, 7.1, 12, 13 "Slice 0"). Read it before Task 1.
+**Spec:** `design/specs/2026-11-04-market-design.md` (sections 5, 6, 7.1, 12, 13 "Slice 0"). Read it before Task 1.
 
 ## Global Constraints
 

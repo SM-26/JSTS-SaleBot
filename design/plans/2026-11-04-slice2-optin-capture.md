@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, node-telegram-bot-api 2.3.0 (v2 middleware chain), mongoose 9, Node stdlib. No new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-market-design.md` (sections 5.1–5.6, 6.1–6.7, 8.2, 8.3, 9.2, 11.2, 13 "Slice 2", 15). Slice 0 plan: `docs/superpowers/plans/2026-11-04-slice0-market-core.md`. Slice 1 plan: `docs/superpowers/plans/2026-11-04-slice1-moderation.md` (provides `td_<listingId>` take-down; its handler is not changed here). Read all three before Task 1.
+**Spec:** `design/specs/2026-11-04-market-design.md` (sections 5.1–5.6, 6.1–6.7, 8.2, 8.3, 9.2, 11.2, 13 "Slice 2", 15). Slice 0 plan: `design/plans/2026-11-04-slice0-market-core.md`. Slice 1 plan: `design/plans/2026-11-04-slice1-moderation.md` (provides `td_<listingId>` take-down; its handler is not changed here). Read all three before Task 1.
 
 ## Global Constraints
 

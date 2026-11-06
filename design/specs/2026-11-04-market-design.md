@@ -2,7 +2,7 @@
 
 Status: approved by the owner on 2026-11-04, with a standing exception: the owner rewrites all user-facing text. Further
 notes, if any, will be minor. Source of every number: issue #104, log comments of 2026-11-03. Plans, one per slice:
-`docs/superpowers/plans/2026-11-04-slice*.md`.
+`design/plans/2026-11-04-slice*.md`.
 
 ## 1. Intent
 

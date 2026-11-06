@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, node-telegram-bot-api 2.3.0 (v2 middleware chain), mongoose 9. No new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-market-design.md` (sections 5.5, 9.1, 9.3, 9.4, 13 "Slice 1", 15; read 5.2–5.4, 5.6 and 6.6 too). **Slice 0 plan:** `docs/superpowers/plans/2026-11-04-slice0-market-core.md`. This slice consumes its interfaces by name: `listingRepository` (`findByPostId`, `createForPost`, `markSold`), `IListing` (`status`, `source`, `origin`, `sellerId`, `postId`, `endedAt`, `endedBy`, `hold`), `findBlockedWord`, `BotConfig.rulesUrl`, `LEGACY_CUTOFF`, `reconcileBotListings`.
+**Spec:** `design/specs/2026-11-04-market-design.md` (sections 5.5, 9.1, 9.3, 9.4, 13 "Slice 1", 15; read 5.2–5.4, 5.6 and 6.6 too). **Slice 0 plan:** `design/plans/2026-11-04-slice0-market-core.md`. This slice consumes its interfaces by name: `listingRepository` (`findByPostId`, `createForPost`, `markSold`), `IListing` (`status`, `source`, `origin`, `sellerId`, `postId`, `endedAt`, `endedBy`, `hold`), `findBlockedWord`, `BotConfig.rulesUrl`, `LEGACY_CUTOFF`, `reconcileBotListings`.
 
 ## Global Constraints
 
