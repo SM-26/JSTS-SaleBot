@@ -68,6 +68,7 @@ async function main() {
                     { name: "alerts", everyMs: 60_000, run: () => controller.alerts.tick(new Date()) },
                     { name: "reconcile", everyMs: 3_600_000, run: reconcile },
                     { name: "catchup-purge", everyMs: 3_600_000, run: async () => { const n = await memberRepository.dropExpiredCatchups(new Date()); if (n) console.log(`[INFO] catchup-purge: dropped ${n} expired offers`); } },
+                    { name: "catchup-held", everyMs: 10_000, run: async () => { await controller.catchupService.releaseHeld(new Date()); } },
                     ...controller.lifecycleJobs(),
                 ]);
             },

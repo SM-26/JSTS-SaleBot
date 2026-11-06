@@ -3213,7 +3213,7 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
 
                 // (cu12) one sale post gets one note: the catch-up note waits while a capture window is open
                 {
-                    const { h } = boot();
+                    const { h, ctrl } = boot();
                     const u = user();
                     await memberRepository.importCatchup(String(u), [item(91, "Glock", "Glock 17 100")], new Date());
                     await memberRepository.armCatchup(new Date());
@@ -3223,10 +3223,19 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await h.sendText("just chatting", { ...GROUP, userId: u });
                     await settle();
                     assert.strictEqual(ephemerals(h).length, 0, "still held while the window is open");
+                    const later = new Date(Date.now() + 300_000);
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "not while the window is open");
                     await Capture.updateMany({ senderId: String(u) }, { $set: { state: "closed" } });
-                    await h.sendText("just chatting again", { ...GROUP, userId: u });
-                    await settle();
-                    assert.strictEqual(ephemerals(h).length, 1, "delivered on the first message once no window is open");
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 1, "the sweeper delivers once the window settles, with no later message");
+                    assert.strictEqual(ephemerals(h).length, 1);
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "never twice");
+                    cfg.captureMode = "shadow";
+                    const w = user();
+                    await memberRepository.importCatchup(String(w), [item(92, "Vest", "Vest tactical 250")], new Date());
+                    await memberRepository.armCatchup(new Date());
+                    await memberRepository.holdCatchup(String(w), new Date(Date.now() - 600_000));
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "no delivery outside optin");
+                    cfg.captureMode = "optin";
                     console.log("  [OK] (cu12) the catch-up note waits for the capture window.");
                 }
             } finally {

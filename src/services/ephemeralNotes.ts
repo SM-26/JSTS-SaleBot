@@ -37,7 +37,7 @@ export async function sendNoteResult(api: Api, config: BotConfig, receiverUserId
         return { kind: typeof sent.message_id === "number" ? "public" : "unknown" };
     } catch (err) {
         console.error("[ERROR - ephemeralNotes.send]", describe(err));
-        return { kind: err instanceof TelegramApiError ? "rejected" : "unknown" };
+        return { kind: err instanceof TelegramApiError && err.errorCode < 500 ? "rejected" : "unknown" };
     }
 }
 

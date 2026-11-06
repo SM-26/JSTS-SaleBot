@@ -37,6 +37,7 @@ import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richM
 import { localeService } from "../services/localeService";
 import { sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
+import memberRepository from "../repositories/memberRepository";
 import captureRepository from "../repositories/captureRepository";
 import { classify } from "../services/classifier";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
@@ -546,13 +547,15 @@ export class BotController {
             // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
             if (this.captureService.isSaleTopicMessage(msg)) {
                 // one sale post must not get a capture note and a catch-up note: hold the offer while a window is open
-                // or this message will open one (a sale-like text, or media alone); the member's next message delivers it
+                // or this message will open one (a sale-like text, or media alone); the sweeper delivers it once the window settles (releaseHeld)
                 let holdOffer = false;
                 if (this.captureOn()) {
+                    const heldAt = new Date(); // before the capture row, so its lastAt is later
                     const text = msg.text ?? msg.caption ?? "";
                     holdOffer = await captureRepository.hasOpen(msg.chat.id, String(msg.from!.id)).catch(() => false)
                         || !text || classify(text, Boolean(msg.photo || msg.video)).tier !== "none";
                     await this.captureService.handleGroupMessage(msg);
+                    if (holdOffer && this.config.captureMode === "optin") await memberRepository.holdCatchup(String(msg.from!.id), heldAt).catch(() => undefined);
                 }
                 // after capture, so a blocked or failed capture never stops the offer; the mode check lives in the service
                 if (!holdOffer) await this.catchupService.onSaleTopicMessage(String(msg.from!.id), new Date());

@@ -15,7 +15,7 @@ export interface IMember extends Document {
     declined?: { hash: string; at: Date }[];
     pendingCatchup?: CatchupItem[];
     // Stamps outlive the items: sentAt alone blocks a second offer.
-    catchup?: { importedAt: Date; armedAt?: Date; sentAt?: Date; note?: { ephemeralMessageId: number } };
+    catchup?: { importedAt: Date; armedAt?: Date; sentAt?: Date; heldAt?: Date; note?: { ephemeralMessageId: number } };
 }
 
 const memberSchema = new Schema<IMember>({
@@ -31,6 +31,7 @@ const memberSchema = new Schema<IMember>({
             importedAt: Date,
             armedAt: Date,
             sentAt: Date,
+            heldAt: Date,
             note: { type: new Schema({ ephemeralMessageId: Number }, { _id: false }), default: undefined },
         }, { _id: false }),
         default: undefined,

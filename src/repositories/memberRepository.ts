@@ -73,6 +73,22 @@ class MemberRepository {
         ).exec();
     }
 
+    // The offer was held back behind a sale post: the sweeper delivers it once the capture window settles.
+    async holdCatchup(userId: string, now: Date): Promise<void> {
+        await Member.updateOne(
+            { userId, "catchup.armedAt": { $exists: true }, "catchup.sentAt": { $exists: false }, "pendingCatchup.0": { $exists: true } },
+            { $set: { "catchup.heldAt": now } }
+        ).exec();
+    }
+
+    findHeldCatchups(): Promise<IMember[]> {
+        return Member.find({ "catchup.heldAt": { $exists: true }, "catchup.sentAt": { $exists: false } }).exec();
+    }
+
+    async clearCatchupHold(userId: string): Promise<void> {
+        await Member.updateOne({ userId }, { $unset: { "catchup.heldAt": "" } }).exec();
+    }
+
     async releaseCatchupDelivery(userId: string): Promise<void> {
         await Member.updateOne({ userId }, { $unset: { "catchup.sentAt": "" } }).exec();
     }

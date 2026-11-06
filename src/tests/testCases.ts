@@ -988,6 +988,8 @@ async function testCase_CatchupOffer(
         const service = new CatchupService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, new PostService(api, config), () => username)), () => username);
         const now = new Date();
         const userId = String(msg.from.id);
+        await listingRepository.deleteBySellerTitle(userId, "גלוק 17"); // repeatable: clear what an earlier run added
+        await listingRepository.deleteBySellerTitle(userId, "וסט טקטי");
         await seedCatchupOffer(userId, [
             { messageId: 1, date: now.toISOString(), title: "גלוק 17", price: "1,300₪", location: "מרכז", text: "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", tier: "strict" },
             { messageId: 2, date: now.toISOString(), title: "וסט טקטי", price: "250₪", text: "וסט טקטי למכירה 250₪", tier: "strict" },

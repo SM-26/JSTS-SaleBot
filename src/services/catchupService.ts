@@ -8,9 +8,11 @@ import { findBlockedWord } from "./blockedWords";
 import { parseCatchupFile, type CatchupFile, type CatchupItem } from "./catchupScan";
 import { classify, textHash, tokenOverlap, tokens } from "./classifier";
 import type { IMember } from "../models/Member";
+import captureRepository from "../repositories/captureRepository";
 import { deleteNote, sendNoteResult } from "./ephemeralNotes";
 import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildCatchupList, buildCatchupNote, parseCatchupArg, type Translate } from "./listingCards";
+import { HELD_RELEASE_DELAY_MS } from "./lifecycleService";
 import { localeService } from "./localeService";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -118,6 +120,26 @@ export class CatchupService {
         } catch (err) {
             console.error("[ERROR - CatchupService.onSaleTopicMessage]", (err as Error).message);
         }
+    }
+
+    // A held offer (see the sale-topic handler) goes out once the member's capture window has settled, with no
+    // further message needed. Same rules as a message: optin only, armed, once, not after "never", 30 days.
+    async releaseHeld(now: Date): Promise<number> {
+        if (this.config.captureMode !== "optin") return 0;
+        let released = 0;
+        for (const member of await memberRepository.findHeldCatchups()) {
+            try {
+                const heldAt = member.catchup?.heldAt;
+                if (!heldAt) continue;
+                const settledBefore = new Date(now.getTime() - HELD_RELEASE_DELAY_MS);
+                if (!(await captureRepository.hasSettledSince(this.config.approvedGroupId, member.userId, heldAt, settledBefore))) continue;
+                await memberRepository.clearCatchupHold(member.userId);
+                if (await this.deliver(member.userId, now)) released++;
+            } catch (err) {
+                console.error("[ERROR - CatchupService.releaseHeld]", (err as Error).message);
+            }
+        }
+        return released;
     }
 
     // No mode check (the /test command uses it). True when the note went out.
