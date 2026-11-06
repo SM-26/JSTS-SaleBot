@@ -30,7 +30,9 @@ function outcomeOf(err: unknown): Outcome {
 
 const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const query = (s: ISavedSearch) => ({ terms: s.terms, maxPrice: s.maxPrice, meetup: s.meetup ?? false });
-const alertable = (l: IListing) => !findBlockedWord(l.title ?? "");
+// A listing /stalecheck just asked about is not news until its seller confirms it (a confirm moves refreshedAt past staleSentAt).
+const unconfirmed = (l: IListing) => l.staleSentAt !== undefined && l.refreshedAt <= l.staleSentAt;
+const alertable = (l: IListing) => !findBlockedWord(l.title ?? "") && !unconfirmed(l);
 
 // DMs saved-search alerts and renew offers (buyerMatches "on").
 export class AlertService {

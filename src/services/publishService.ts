@@ -7,7 +7,7 @@ import userRepository from "../repositories/userRepository";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
-import { isTrustedSeller } from "./trustService";
+import { isTrustedSeller, safeTrustLine } from "./trustService";
 
 // Publishes an approved post (moderator approval today, trusted sellers later)
 // and gives it a `bot` listing.
@@ -70,6 +70,7 @@ export class PublishService {
     // releases the claim. Everything after the send is best-effort and logged.
     async publishApproved(post: Post, author: User): Promise<IListing | null> {
         const postId = String(post._id);
+        const trustLine = await safeTrustLine(post.userId, this.config.lang, "PublishService.publishApproved");
         const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
@@ -80,7 +81,7 @@ export class PublishService {
             userId: Number(author.userId),
             username: author.userName || undefined,
             firstName: author.firstName || "User",
-        }, { showCta: true });
+        }, { showCta: true, trustLine });
 
         // Only this send may throw. Once the message exists the post is public:
         // nothing below rejects, or a caller would release the claim / fall back

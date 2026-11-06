@@ -34,6 +34,11 @@ export type RepostPatch = {
     location?: string;
 };
 
+const DAY_MS = 24 * 3600 * 1000;
+const NUDGE_AFTER_MS = 7 * DAY_MS;
+const EXPIRE_AFTER_MS = 30 * DAY_MS;
+const STALE_ANSWER_MS = 7 * DAY_MS;
+
 class ListingRepository {
     findByPostId(postId: string): Promise<IListing | null> {
         return Listing.findOne({ source: "bot", postId }).exec();
@@ -109,14 +114,14 @@ class ListingRepository {
     // live|expired -> live, with a fresh clock. A repost of the same item also brings the newest
     // message ids, text, media and parsed fields (fields left undefined are not touched).
     refresh(id: string, now: Date, repost?: RepostPatch): Promise<IListing | null> {
-        const $set: Record<string, unknown> = { status: "live", refreshedAt: now };
+        const $set: Record<string, unknown> = { status: "live", refreshedAt: now, hold: false };
         if (repost) {
             $set.textHash = textHash(repost.text);
             for (const [key, value] of Object.entries(repost)) if (value !== undefined) $set[key] = value;
         }
         return Listing.findOneAndUpdate(
             { _id: id, status: { $in: ["live", "expired"] } },
-            { $set, $unset: { nudgedAt: "", endedAt: "", endedBy: "" } },
+            { $set, $unset: { nudgedAt: "", nudgeHeld: "", staleSentAt: "", endedAt: "", endedBy: "" } },
             { returnDocument: "after" }
         ).exec();
     }
@@ -147,12 +152,29 @@ class ListingRepository {
     }
 
     // Final state; only a live or expired listing can be sold.
-    markSold(id: string, now: Date): Promise<IListing | null> {
+    markSold(id: string, now: Date, by: "seller" | "system" = "seller"): Promise<IListing | null> {
         return Listing.findOneAndUpdate(
             { _id: id, status: { $in: ["live", "expired"] } },
-            { $set: { status: "sold", endedAt: now, endedBy: "seller" } },
+            { $set: { status: "sold", endedAt: now, endedBy: by } },
             { returnDocument: "after" }
         ).exec();
+    }
+
+    // live -> expired by the system.
+    markExpired(id: string, now: Date): Promise<IListing | null> {
+        return Listing.findOneAndUpdate(
+            { _id: id, status: "live" },
+            { $set: { status: "expired", endedAt: now, endedBy: "system" } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    countSold(sellerId: string): Promise<number> {
+        return Listing.countDocuments({ sellerId, status: "sold" }).exec();
+    }
+
+    findSellerExpired(sellerId: string, limit: number): Promise<IListing[]> {
+        return Listing.find({ sellerId, source: "bot", status: "expired" }).sort({ endedAt: -1 }).limit(limit).exec();
     }
 
     findById(id: string): Promise<IListing | null> {
@@ -191,9 +213,99 @@ class ListingRepository {
         return Listing.find({ sellerId, status: { $in: ["live", "expired"] }, refreshedAt: { $gte: since } }).exec();
     }
 
+    // Nudge window: 7 days since the last refresh, but not older than 30 (those expire instead).
+    private nudgeFilter(now: Date) {
+        return {
+            status: "live" as const,
+            hold: false,
+            nudgedAt: { $exists: false },
+            refreshedAt: { $lte: new Date(now.getTime() - NUDGE_AFTER_MS), $gt: new Date(now.getTime() - EXPIRE_AFTER_MS) },
+        };
+    }
+
+    findNudgeCandidates(now: Date, limit: number): Promise<IListing[]> {
+        return Listing.find(this.nudgeFilter(now)).sort({ refreshedAt: 1 }).limit(limit).exec();
+    }
+
+    claimNudge(id: string, now: Date): Promise<IListing | null> {
+        return Listing.findOneAndUpdate({ _id: id, ...this.nudgeFilter(now) }, { $set: { nudgedAt: now } }, { returnDocument: "after" }).exec();
+    }
+
+    async releaseNudgeClaim(id: string): Promise<void> {
+        await Listing.updateOne({ _id: id }, { $unset: { nudgedAt: "", nudgeHeld: "" } }).exec();
+    }
+
+    async holdNudge(id: string): Promise<void> {
+        await Listing.updateOne({ _id: id, nudgedAt: { $exists: true } }, { $set: { nudgeHeld: true } }).exec();
+    }
+
+    findHeldNudges(): Promise<IListing[]> {
+        return Listing.find({ nudgeHeld: true, status: "live" }).exec();
+    }
+
+    claimHeldRelease(id: string): Promise<IListing | null> {
+        return Listing.findOneAndUpdate({ _id: id, nudgeHeld: true, status: "live" }, { $set: { nudgeHeld: false } }, { returnDocument: "after" }).exec();
+    }
+
+    // Both expiry sweeps: read the due ids, then end each with the same filter in the update, so a row
+    // that changed in between (sold, refreshed) is skipped. Returns the rows this call expired.
+    private async expireWhere(filter: Record<string, unknown>, now: Date): Promise<IListing[]> {
+        const ids = (await Listing.find({ status: "live", hold: false, ...filter }).select("_id").exec()).map(l => l._id);
+        const out: IListing[] = [];
+        for (const _id of ids) {
+            const row = await Listing.findOneAndUpdate(
+                { _id, status: "live", hold: false, ...filter },
+                { $set: { status: "expired", endedAt: now, endedBy: "system" } },
+                { returnDocument: "after" }
+            ).exec();
+            if (row) out.push(row);
+        }
+        return out;
+    }
+
+    expireDue(now: Date): Promise<IListing[]> {
+        return this.expireWhere({ refreshedAt: { $lte: new Date(now.getTime() - EXPIRE_AFTER_MS) } }, now);
+    }
+
+    expireStaleUnanswered(now: Date): Promise<IListing[]> {
+        return this.expireWhere({ staleSentAt: { $lte: new Date(now.getTime() - STALE_ANSWER_MS) } }, now);
+    }
+
+    private staleFilter(sellerIds: string[] | null) {
+        return {
+            origin: "legacy" as const,
+            hold: true,
+            status: "live" as const,
+            nudgedAt: { $exists: false },
+            ...(sellerIds ? { sellerId: { $in: sellerIds } } : {}),
+        };
+    }
+
+    // Legacy listings /stalecheck may ask about (every seller when sellerIds is null).
+    findStaleEligible(sellerIds: string[] | null): Promise<IListing[]> {
+        return Listing.find(this.staleFilter(sellerIds)).exec();
+    }
+
+    claimStale(id: string, now: Date): Promise<IListing | null> {
+        return Listing.findOneAndUpdate(
+            { _id: id, ...this.staleFilter(null) },
+            { $set: { hold: false, nudgedAt: now, staleSentAt: now, refreshedAt: now } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    async unclaimStale(id: string): Promise<void> {
+        await Listing.updateOne({ _id: id, status: "live", staleSentAt: { $exists: true } }, { $set: { hold: true }, $unset: { nudgedAt: "", staleSentAt: "" } }).exec();
+    }
+
+    // For /test cases only: moves a listing's clock without going through refresh.
+    async setClockForTest(id: string, refreshedAt: Date): Promise<void> {
+        await Listing.updateOne({ _id: id }, { $set: { refreshedAt } }).exec();
+    }
+
     // Legacy listings waiting for the owner's release.
     countHeld(): Promise<number> {
-        return Listing.countDocuments({ hold: true }).exec();
+        return Listing.countDocuments({ hold: true, status: "live" }).exec();
     }
 
     // Listings created since `since` (all time when omitted), grouped by status.

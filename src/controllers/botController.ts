@@ -27,6 +27,9 @@ import { AlertService } from "../services/alertService";
 import { BuyerNoteService } from "../services/buyerNoteService";
 import { SavedSearchService } from "../services/savedSearchService";
 import { GroupListingService } from "../services/groupListingService";
+import { LifecycleService } from "../services/lifecycleService";
+import { StaleCheckService } from "../services/staleCheckService";
+import type { SweeperJob } from "../services/sweeper";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
@@ -66,6 +69,8 @@ export class BotController {
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
+    readonly lifecycle: LifecycleService;
+    private staleCheck: StaleCheckService;
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
     readonly buyerNotes: BuyerNoteService;
@@ -78,16 +83,18 @@ export class BotController {
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
+        this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
+        this.staleCheck = new StaleCheckService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
-        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
+        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername, this.lifecycle);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.alerts = new AlertService(api, this.config, this.groupListings);
         this.savedSearches = new SavedSearchService(api, this.config);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings, this.lifecycle);
         this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
@@ -388,6 +395,16 @@ export class BotController {
             return;
         }
 
+        if (route.action === "lifecycle") {
+            await this.lifecycle.handleCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "stalecheck") {
+            await this.staleCheck.handleCallback(ctx, query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -445,6 +462,10 @@ export class BotController {
 
     private captureOn(): boolean {
         return isCaptureOn(this.config);
+    }
+
+    lifecycleJobs(): SweeperJob[] {
+        return this.lifecycle.jobs();
     }
 
     registerRoutes(bot: Bot, botUsername: string): void {
@@ -599,6 +620,14 @@ export class BotController {
                 return;
             }
             return this.shadowAdminService.handleLabel(msg, args);
+        }));
+        bot.use(cmd("stalecheck", async (msg, args, ctx) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.staleCheck.handleCommand(ctx, msg, args);
         }));
         bot.use(cmd("stats", async (msg) => {
             if (!isPrivate(msg)) return;

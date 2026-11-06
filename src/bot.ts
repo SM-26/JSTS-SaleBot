@@ -66,6 +66,7 @@ async function main() {
                     { name: "captures", everyMs: 10_000, run: async () => { if (isCaptureOn(controller.config)) await tick(controller.config, new Date(), async (event, now) => { await controller.captureNotes.onClassified(event, now); await controller.buyerNotes.onClassified(event, now); }); } },
                     { name: "alerts", everyMs: 60_000, run: () => controller.alerts.tick(new Date()) },
                     { name: "reconcile", everyMs: 3_600_000, run: reconcile },
+                    ...controller.lifecycleJobs(),
                 ]);
             },
             close: async () => {

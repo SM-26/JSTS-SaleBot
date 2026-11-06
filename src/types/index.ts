@@ -43,6 +43,7 @@ export interface LocaleStrings {
     welcome: string;
     wizardStep: string;
     contactSellerCta: string;
+    trustLine: string;
     enterDescription: string;
     enterPrice: string;
     expectedText: string;
@@ -174,6 +175,8 @@ export interface UserSession {
     pendingRejects?: { promptId: number; skipMsgId: number; postId?: string }[];
     // The buyer's one-reply fix after a saved search (or a failed one): the row it edits, the prompt and when.
     pendingAlertFix?: { searchId?: string; promptId: number; at: number };
+    // Admin's /stalecheck dry run waiting for sc_go; ignored after an hour.
+    pendingStalecheck?: { sellerIds: string[]; at: number; promptMessageId?: number };
 }
 
 export interface Post {

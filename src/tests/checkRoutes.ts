@@ -426,6 +426,259 @@ async function run() {
         assert.ok(String(h.calls.at(-1)?.params.text).includes(localeService.t(adminLocale, "configUpdated")), "/config accepts a key missing from config.json");
         assert.strictEqual(oldConfig.captureMode, "shadow");
 
+        // lc_ callbacks: still for sale / sold / remove, from a DM, a note, and a forged press
+        {
+            const { default: listingRepository } = await import("../repositories/listingRepository");
+            const SELLER = 100001;
+            const OTHER = 100099;
+            const tt = (key: string) => localeService.t(config.lang, key);
+            const lcGroup = (extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: String(SELLER), chatId: config.approvedGroupId, messageIds: [1],
+                title: "t", price: "100", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live",
+                createdAt: new Date(2026, 0, 1), refreshedAt: new Date(2026, 0, 1), ...extra,
+            });
+            const lcBot = async (listingStatus: "live" | "expired") => {
+                const post = await Post.create({ userId: String(SELLER), title: "bp", description: "d", price: "10", location: "l", media: [], status: "approved", approvedMessageId: 4242 });
+                const listing = await listingRepository.createForPost(post, "dm", false, new Date(2026, 0, 1));
+                if (listingStatus === "expired") await Listing.updateOne({ _id: listing._id }, { $set: { status: "expired", endedBy: "system", endedAt: new Date() } });
+                return { post, listing };
+            };
+            const press = async (data: string, opts: Parameters<typeof h.pressButton>[1]) => {
+                h.calls.length = 0;
+                await h.pressButton(data, opts);
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "answerCallbackQuery")), `${data} is answered`);
+                await sleep(QUIET_MS);
+                assert.strictEqual(h.calls.filter((c) => c.method === "answerCallbackQuery").length, 1, "exactly one answer");
+                return {
+                    toast: String(h.calls.find((c) => c.method === "answerCallbackQuery")!.params.text),
+                    of: (m: string) => h.calls.filter((c) => c.method === m),
+                    edits: h.calls.filter((c) => ["editMessageText", "editMessageReplyMarkup", "editEphemeralMessageText"].includes(c.method)),
+                };
+            };
+            const kbOf = (c: { params: Record<string, unknown> }) => (c.params.reply_markup as { inline_keyboard: Array<Array<{ callback_data?: string }>> } | undefined)?.inline_keyboard ?? [];
+            const dm = { userId: SELLER, chatId: SELLER };
+
+            const g1 = await lcGroup();
+            const r1 = await press(`lc_r_${g1._id}`, dm);
+            assert.strictEqual(r1.toast, tt("listingRefreshedToast"));
+            assert.ok((await listingRepository.findById(String(g1._id)))!.refreshedAt.getTime() > new Date(2026, 0, 2).getTime(), "refreshedAt moved");
+
+            const rf = await press(`lc_r_${g1._id}`, { userId: OTHER, chatId: OTHER });
+            assert.strictEqual(rf.toast, tt("notYourButton"));
+            assert.strictEqual(rf.edits.length, 0, "a foreign press edits nothing");
+
+            const e1 = await lcBot("expired");
+            await press(`lc_r_${e1.listing._id}`, dm);
+            assert.strictEqual((await listingRepository.findById(String(e1.listing._id)))!.status, "live", "an expired listing is live again");
+            const e2 = await lcBot("expired");
+            const s2 = await press(`lc_s_${e2.listing._id}`, dm);
+            assert.strictEqual(s2.toast, tt("listingSoldToast"));
+            assert.strictEqual((await listingRepository.findById(String(e2.listing._id)))!.status, "sold");
+            assert.strictEqual((await Post.findById(e2.post._id))!.status, "sold", "the bot post is sold too");
+
+            const gone = await lcGroup({ status: "removed", endedBy: "seller", endedAt: new Date() });
+            const kb = (id: unknown) => ({ inline_keyboard: [[{ text: "a", callback_data: `lc_r_${id}` }, { text: "b", callback_data: `lc_s_${id}` }]] });
+            const ended = await press(`lc_r_${gone._id}`, { ...dm, replyMarkup: kb(gone._id) });
+            assert.strictEqual(ended.toast, tt("listingEnded"));
+            assert.ok(ended.edits.length === 1 && kbOf(ended.edits[0]).length === 0, "an ended listing's row is dropped");
+
+            const b3 = await lcBot("expired");
+            await Listing.updateOne({ _id: b3.listing._id }, { $set: { status: "live" } });
+            const nr = await press(`lc_x_${b3.listing._id}`, dm);
+            assert.strictEqual(nr.toast, tt("lcNoRemove"));
+            assert.strictEqual((await listingRepository.findById(String(b3.listing._id)))!.status, "live", "a bot listing is never removed");
+
+            const g2 = await lcGroup();
+            const rm = await press(`lc_x_${g2._id}`, dm);
+            assert.strictEqual(rm.toast, tt("listingRemovedToast"));
+            assert.strictEqual((await listingRepository.findById(String(g2._id)))!.status, "removed");
+
+            const ga = await lcGroup();
+            const gb = await lcGroup();
+            const two = await press(`lc_r_${ga._id}`, { ...dm, replyMarkup: { inline_keyboard: [kb(ga._id).inline_keyboard[0], kb(gb._id).inline_keyboard[0]] } });
+            assert.strictEqual(two.edits.length, 1);
+            assert.deepStrictEqual(kbOf(two.edits[0]).flat().map((b) => b.callback_data), [`lc_r_${gb._id}`, `lc_s_${gb._id}`], "the other post's row stays");
+
+            // a DM with text: the outcome line is appended, the other listing's row stays
+            const gc = await lcGroup();
+            const gd = await lcGroup();
+            const withText = await press(`lc_r_${gc._id}`, { ...dm, text: "Still for sale?", replyMarkup: { inline_keyboard: [kb(gc._id).inline_keyboard[0], kb(gd._id).inline_keyboard[0]] } });
+            const textEdit = withText.of("editMessageText");
+            assert.strictEqual(textEdit.length, 1, "DM text edited");
+            assert.ok(String(textEdit[0].params.text).startsWith("Still for sale?") && String(textEdit[0].params.text).endsWith(tt("listingRefreshedToast")), "outcome line appended");
+            assert.deepStrictEqual(kbOf(textEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${gd._id}`, `lc_s_${gd._id}`], "the other listing's row stays");
+
+            // from a note: never editMessageText/ReplyMarkup (message_id is 0)
+            const nb = await lcBot("expired");
+            const fromNote = await press(`lc_s_${nb.listing._id}`, { userId: SELLER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5551 });
+            // (the bot post's own group message is re-rendered as sold, which is not the pressed note)
+            assert.strictEqual([...fromNote.of("editMessageText"), ...fromNote.of("editMessageReplyMarkup")].filter((c) => Number(c.params.message_id) === 0).length, 0, "no message edit for a note press");
+            assert.strictEqual(fromNote.of("editEphemeralMessageText").length, 1);
+            assert.deepStrictEqual(kbOf(fromNote.of("editEphemeralMessageText")[0]), [], "the note's keyboard is emptied");
+
+            const gn = await lcGroup({ note: { ephemeralMessageId: 5552, sentAt: new Date() } });
+            const own = await press(`lc_r_${gn._id}`, { userId: SELLER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5552 });
+            assert.strictEqual(own.of("editEphemeralMessageText").length, 1, "the listing's own note is edited once, by syncNote");
+            assert.strictEqual(own.of("editMessageText").length + own.of("editMessageReplyMarkup").length, 0);
+
+            const foreignNote = await press(`lc_r_${gn._id}`, { userId: OTHER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5553 });
+            assert.strictEqual(foreignNote.toast, tt("notYourButton"));
+            assert.strictEqual(foreignNote.edits.length, 0, "a foreign press from a note edits nothing");
+
+            const bad = await press("lc_", dm);
+            assert.strictEqual(bad.toast, tt("staleButton"));
+
+            // /myposts relist section: expired BOT listings only, one Relist row each
+            const sectionMsgs = async (chatId: number) => {
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: chatId, chatId });
+                await sleep(QUIET_MS * 2);
+                return h.calls.filter((c) => c.method === "sendMessage" && String(c.params.text).startsWith(tt("endedSectionTitle")));
+            };
+            await Listing.deleteMany({ sellerId: String(SELLER) });
+            await Post.deleteMany({ userId: String(SELLER) });
+            assert.strictEqual((await sectionMsgs(SELLER)).length, 0, "no expired listing: no relist message");
+            await lcGroup({ status: "expired", endedBy: "system", endedAt: new Date() });
+            assert.strictEqual((await sectionMsgs(SELLER)).length, 0, "an expired group listing gets no extra message");
+            const rl = await lcBot("expired");
+            const rlSold = await lcBot("expired");
+            await Listing.updateOne({ _id: rlSold.listing._id }, { $set: { status: "sold" } });
+            const sec = await sectionMsgs(SELLER);
+            assert.strictEqual(sec.length, 1, "one relist message (also with no posts rows)");
+            assert.deepStrictEqual(kbOf(sec[0]).flat().map((b) => b.callback_data), [`lc_r_${rl.listing._id}`], "only the expired bot listing has Relist");
+            assert.strictEqual(sec[0].params.parse_mode, undefined, "titles are in buttons: no parse mode");
+            const rp = await press(`lc_r_${rl.listing._id}`, { ...dm, replyMarkup: { inline_keyboard: kbOf(sec[0]) } });
+            const after = await listingRepository.findById(String(rl.listing._id));
+            assert.strictEqual(after!.status, "live", "relist makes it live");
+            assert.ok(after!.refreshedAt.getTime() > new Date(2026, 0, 2).getTime(), "relist updates refreshedAt");
+            assert.ok(rp.edits.length === 1 && kbOf(rp.edits[0]).length === 0, "the only row goes: no keyboard left");
+            // /start l_<id> on an expired bot listing offers Relist; a sold one does not
+            const ex = await lcBot("expired");
+            h.calls.length = 0;
+            await h.sendText(`/start l_${ex.listing._id}`, { userId: SELLER, chatId: SELLER });
+            await sleep(QUIET_MS * 2);
+            const card = h.calls.filter((c) => c.method === "sendMessage").at(-1)!;
+            assert.deepStrictEqual(kbOf(card).flat().map((b) => b.callback_data), [`lc_r_${ex.listing._id}`], "expired bot card has Relist");
+            h.calls.length = 0;
+            await h.sendText(`/start l_${rlSold.listing._id}`, { userId: SELLER, chatId: SELLER });
+            await sleep(QUIET_MS * 2);
+            assert.deepStrictEqual(kbOf(h.calls.filter((c) => c.method === "sendMessage").at(-1)!), [], "a sold listing never gets Relist");
+
+            await Listing.deleteMany({ sellerId: String(SELLER) });
+            await Post.deleteMany({ userId: String(SELLER) });
+        }
+
+
+        // slice 3: /stalecheck (ADMIN, DM) -> dry run -> confirm
+        {
+            const created = new Date("2026-03-05T22:30:00Z");
+            const seedLegacy = async (seller: string, title: string) => {
+                const post = await Post.create({ userId: seller, title, description: "d", price: "100", location: "l", media: [], status: "approved", createdAt: created });
+                return Listing.create({
+                    source: "bot", origin: "legacy", hold: true, postId: String(post._id), sellerId: seller, title, price: "100",
+                    messageIds: [], media: [], status: "live", createdAt: created, refreshedAt: created,
+                });
+            };
+            const clean = async () => { await Listing.deleteMany({}); await Post.deleteMany({ userId: /^1\d{5}$/ }); };
+            const sent = () => h.calls.filter((c) => c.method === "sendMessage");
+            const kb = (c: { params: Record<string, unknown> }) => ((c.params.reply_markup as { inline_keyboard: Array<Array<{ callback_data?: string }>> } | undefined)?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
+            const t = (key: string) => localeService.t(config.lang, key);
+            const sessions = mongoose.connection.db!.collection<{ _id: string }>("bot_sessions");
+            const adminSession = async () => JSON.stringify(await sessions.findOne({ _id: { $regex: `:${adminId}$` } } as never) ?? {});
+            await clean();
+
+            await expectCalls("/stalecheck as USER", () => h.sendText("/stalecheck", { userId }));
+            assert.strictEqual(lastText(), notAdminText, "/stalecheck denies a plain user");
+            await expectCalls("/stalecheck as MOD", () => h.sendText("/stalecheck", { userId: modId }));
+            assert.strictEqual(lastText(), notAdminText, "/stalecheck denies a moderator");
+            await expectCalls("/stalecheck, nothing eligible", () => h.sendText("/stalecheck", { userId: adminId }));
+            assert.strictEqual(sent().length, 1);
+            assert.strictEqual(lastText(), t("staleNothing"));
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "no session data when nothing is eligible");
+            await expectCalls("/stalecheck 100001 x", () => h.sendText("/stalecheck 100001 x", { userId: adminId }));
+            assert.strictEqual(sent().length, 1);
+            assert.ok(lastText().startsWith(t("staleBadIds").split("{")[0]), "bad ids answer");
+            await expectSilence("/stalecheck in a group", () => h.sendText("/stalecheck", { userId: adminId, chatId: -100123, chatType: "supergroup" }));
+
+            const l1 = await seedLegacy("100001", "Glock 17 alpha");
+            await seedLegacy("100001", "Hi-capa beta");
+            await seedLegacy("100002", "Scope gamma");
+            await expectCalls("/stalecheck dry run", () => h.sendText("/stalecheck", { userId: adminId }));
+            await sleep(QUIET_MS);
+            const msgs = sent();
+            const pid = (m: { result?: unknown }) => (m.result as { message_id: number }).message_id;
+            const previewId = pid(msgs[1]);
+            assert.strictEqual(msgs.length, 2, "dry run is two messages");
+            assert.deepStrictEqual(kb(msgs[1]), ["sc_go", "sc_no"], "confirm keyboard on the second");
+            assert.ok(!kb(msgs[0]).length, "no keyboard on the report");
+            assert.ok(msgs.every((m) => !["100001", "100002"].includes(String(m.params.chat_id))), "no DM to any seller yet");
+            assert.strictEqual((await Listing.countDocuments({ hold: true })), 3, "no listing changed");
+            assert.ok((await adminSession()).includes("pendingStalecheck"), "pending stored in the session");
+
+            // a non-admin pressing sc_go is refused
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId, chatId: adminId, messageId: previewId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 3, "USER press refused");
+
+            // confirm
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
+            assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "seller DMs sent");
+            await sleep(QUIET_MS);
+            assert.strictEqual((await Listing.countDocuments({ hold: false, nudgedAt: { $exists: true } })), 3, "all three claimed");
+            assert.ok(sent().some((c) => String(c.params.chat_id) === String(adminId)), "admin told the result");
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "pending gone");
+            const l1Raw = await Listing.findById(l1._id);
+            assert.ok(l1Raw && l1Raw.hold === false);
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
+            await sleep(QUIET_MS);
+            const toast = h.calls.find((c) => c.method === "answerCallbackQuery");
+            assert.strictEqual(toast?.params.text, t("staleButton"), "second press -> staleButton");
+            assert.ok(!sent().some((c) => ["100001", "100002"].includes(String(c.params.chat_id))), "second press sends nothing");
+
+            // cancel
+            await clean();
+            await seedLegacy("100001", "Glock 17 alpha");
+            await expectCalls("/stalecheck again", () => h.sendText("/stalecheck 100001", { userId: adminId }));
+            const againId = pid(sent()[1]);
+            h.calls.length = 0;
+            await h.pressButton("sc_no", { userId: adminId, messageId: againId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length, "sc_no sends nothing");
+            assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "sc_no drops the keyboard");
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "sc_no clears pending");
+            assert.strictEqual(await Listing.countDocuments({ hold: true }), 1, "nothing claimed");
+            await clean();
+
+            // two dry runs: the first one's Send button is dead, the second one's sends only its own sellers
+            await seedLegacy("100001", "Glock 17 alpha");
+            await seedLegacy("100002", "Scope gamma");
+            await expectCalls("pilot dry run", () => h.sendText("/stalecheck 100001", { userId: adminId }));
+            const pilotId = pid(sent()[1]);
+            await expectCalls("full dry run", () => h.sendText("/stalecheck", { userId: adminId }));
+            const fullId = pid(sent()[1]);
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: pilotId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length, "Send on the superseded dry run sends nothing");
+            assert.strictEqual(h.calls.find((c) => c.method === "answerCallbackQuery")?.params.text, t("staleButton"), "superseded press -> staleButton");
+            assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "superseded keyboard dropped");
+            assert.strictEqual(await Listing.countDocuments({ hold: true }), 2, "nothing claimed by the stale button");
+            assert.ok((await adminSession()).includes("pendingStalecheck"), "newer pending state kept");
+            // a bad arg sends nothing and keeps pending
+            h.calls.length = 0;
+            await h.pressButton("sc_xx", { userId: adminId, messageId: fullId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 2, "bad arg sends nothing");
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: fullId });
+            assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "the newer dry run sends its own sellers");
+            await sleep(QUIET_MS);
+            await clean();
+        }
+
         console.log("[OK] commands, look-alikes, stale button and the persisted wizard are routed correctly.");
     } finally {
         fs.writeFileSync(configPath, originalConfigFile); // updateConfig writes config.json

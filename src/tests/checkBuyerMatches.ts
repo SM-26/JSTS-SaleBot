@@ -501,7 +501,7 @@ async function checkAlerts() {
         const s = await search(u1);
         await mkListing(`al-${U}-a`, "Glock 17 alpha");
         await svc.tick(new Date());
-assert.strictEqual(to(h, u1).length, 1, "one alert");
+        assert.strictEqual(to(h, u1).length, 1, "one alert");
         assert.ok(String(to(h, u1)[0].params.text).includes("Glock 17 alpha"), "the title is in the alert");
         assert.strictEqual(to(h, u1)[0].params.parse_mode, "HTML");
         assert.strictEqual(await logs(u1), 1);
@@ -611,6 +611,21 @@ assert.strictEqual(to(h, u1).length, 1, "one alert");
         assert.strictEqual(new Set(to(h, u1).map(c => c.params.text)).size, 30, "none repeated");
 
         // a card that cannot be built is skipped and does not block the others
+        await reset();
+        // /stalecheck lifts a hold with refreshedAt = staleSentAt: no alert until the seller confirms
+        ({ h, svc } = mkSvc("on"));
+        await search(u1);
+        const askedAt = new Date(Date.now() - 600_000);
+        const asked = await mkListing(`al-${U}-stale`, "Glock 17 stale", { origin: "legacy", staleSentAt: askedAt, nudgedAt: askedAt, refreshedAt: askedAt });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 0, "an unconfirmed stale listing does not alert");
+        assert.strictEqual(await logs(u1), 0, "and is not claimed, so a confirm can still alert");
+        await listingRepository.refresh(String(asked._id), new Date());
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "the seller's confirm alerts once");
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "and only once");
+
         await reset();
         ({ h, svc } = mkSvc("on"));
         await search(u1);
