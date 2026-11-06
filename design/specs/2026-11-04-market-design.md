@@ -857,20 +857,16 @@ node in DM. In captured text,
 ## 18. Status and owner decisions (2026-11-06)
 
 **Where things stand:**
-- **In prod:** 3.1.0 (slices 0-2), `captureMode: shadow`.
-- **Merged, not deployed:** slice 3, slice 4, the dependency update (#115), the moderator delete-original option (#116, #113), numbered stale-check result lines (#120).
-- **In progress:** slice 5, behind a new config key that is off by default. Slice 6 (#118) waits for the recheck below.
+- **In prod:** 3.3.0 (slices 0-6), `captureMode: shadow`, `tierLayouts` off.
+- **Still ahead:** turning on `optin`, under the gate below. Current switches and what each sends: [Rollout](../../docs/Rollout.md).
 
-**Rollout order:**
-1. Merge slice 5 with its switch off.
-2. Recheck the combined master: full suite, all synthetic scripts, the owner's real presses with the slice 5 switch off and then on, and the Hebrew walkthrough.
-3. Update slice 6 on that master, give it one fresh final review, merge it, and recheck.
-4. Deploys are separate from merges: one release at a time, on the owner's go-ahead, with the backup and census first.
-5. `/catchup send` only after `optin` is on.
+**Rollout rules:**
+1. Deploys are separate from merges: one release at a time, on the owner's go-ahead, with the backup and census first.
+2. `/catchup send` only after `optin` is on.
 
 **Gate for `optin` in prod (denied until both are met):**
 - More shadow data. It counts from 2026-11-06 11:34 UTC: before that, another poller on the old prod token kept kicking the bot off, so updates were lost. The token was rotated and the poller was never identified.
-- The owner's approval of the Hebrew text, tested in the app on the test bot, not on file.
+- Approval of the Hebrew text by the other admins. The owner has approved what they saw, tested in the app on the test bot.
 
 **Owner decisions:**
 - **Notes are best effort** (6.5). Showing unasked posts in `/myposts` is parked in #114.

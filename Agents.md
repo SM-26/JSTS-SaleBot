@@ -11,9 +11,9 @@
 **Stack:**
 - Runtime: Node.js + TypeScript
 - Telegram library: `node-telegram-bot-api` **v2.3.0** (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
-- Database: MongoDB via `mongoose` (collections `posts`, `users`, plus `drafts` and `bot_sessions` for persistent flows)
+- Database: MongoDB via `mongoose` (collections `posts`, `users`, `drafts`, `bot_sessions`, and the market's `listings`, `captures`, `shadow_log`, `members`, `saved_searches`, `alert_log`)
 - Linting: ESLint + `typescript-eslint`
-- Infrastructure: Docker + Docker Compose (bot + MongoDB + mongo-express)
+- Infrastructure: Docker + Docker Compose (bot + MongoDB; mongo-express on demand in prod and test, see [Running](docs/Running.md))
 
 ---
 
@@ -32,6 +32,8 @@
 | [Localization](docs/Localization.md) | Locale files, FAQ |
 | [Moderating](docs/Moderating.md), [Selling](docs/Selling.md), [Buying](docs/Buying.md), [Catch-up](docs/Catch-up.md), [Backup](docs/BACKUP.md) | What moderators, members and the owner do |
 
+`design/` holds the market redesign's spec and plans. It's a record of why, not a guide, and stays out of the wiki: don't put working documents under `docs/`, since everything tracked there is published.
+
 Before opening a PR: `pnpm run lint`, `pnpm run build`, `pnpm test`. Never run the bot, or a check, against the production token or database.
 
 ---
@@ -45,7 +47,7 @@ Before opening a PR: `pnpm run lint`, `pnpm run build`, `pnpm test`. Never run t
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Tell the author once**: any path that notifies a post's author of a rejection must go through `postRepository.claimRejectionNotice`, so a double press or a restart never sends two notices.
-- **Post layout by tier**: `PostService.formatPostRichMessage` takes `tier`/`stats` from `sellerLayout()` (publish, bump, sold edit). Regular is the original code and its golden must not change; the other layouts are pinned in `tierLayouts.golden.json` (`UPDATE_GOLDEN=1 pnpm run check-rich`, review the diff). `posts.layoutTier` is set only by the `/test` "Post as" cases.
+- **Post layout by tier**: `PostService.formatPostRichMessage` takes `tier`/`stats` from `sellerLayout()` (publish, bump, sold edit); with `tierLayouts` off, every post is regular. Regular is the original code and its golden must not change; the other layouts are pinned in `tierLayouts.golden.json` (`UPDATE_GOLDEN=1 pnpm run check-rich`, review the diff). `posts.layoutTier` is set only by the `/test` "Post as" cases.
 - **Seller-post `/test` cases refuse outside the test bot** (`isTestBotToken`): they publish real posts, so never loosen that guard.
 - **Persist flow state**: flows are persisted (drafts, sessions), so there is no `isIdle` flag. Before acting on a wizard message or button, read the user's draft (`draftRepository.findByUserId`) and check it exists, is not expired (`isDraftExpired`) and is at the expected step. On errors, tell the user and leave the draft consistent, so they can `/cancel` or continue.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
@@ -59,23 +61,23 @@ Before opening a PR: `pnpm run lint`, `pnpm run build`, `pnpm test`. Never run t
 
 ### Don't
 - **Don't use `any`**: This project enforces the `@typescript-eslint/no-explicit-any` rule. Do not introduce new `any` declarations.
-- **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
-- **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
+- **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts`, `src/services/configSchema.ts` (what `/config` accepts), `config.json.example` and [Config](docs/Config.md).
+- **Don't hardcode strings in service files** — all text must come from `localeService.t()` and the locale files.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
 - **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. The one deliberate exception to "a member's own message is never touched" is a moderator's **Take down and delete original post** (`tx_`) on a group listing's take-down card: it ends the listing and deletes every id in `listing.messageIds` (photos included). It is moderators only and behind a confirm step; a seller's Remove still never deletes anything, and a bot listing's card has no such button. Catch-up offers (`/catchup`) reach no member before an admin runs `/catchup send`, and then only under `captureMode: optin`.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 5 adds `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>` and the `faq_1` start payload (the meeting-point button; it must keep opening FAQ node 1), frozen the same way. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 5 adds `draft_edit_title_<userId>`, `draft_edit_description_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>` and the `faq_1` start payload (the meeting-point button; it must keep opening FAQ node 1), frozen the same way. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>`, `lp_<postId>` and `sc_go` / `sc_no`.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
-
 - **An approved bot post ends only by Sold, expiry or take-down.** Never add a seller-facing way to remove one: `lc_x_` is refused on a `bot` listing and is not on its keyboards. Expiry changes the listing only; the post stays `approved`.
-- **Nothing goes to a member unless `nudges` is on or the admin confirmed `/stalecheck`.**
+- **Don't message members unprompted without a switch.** Each proactive message has its gate: capture notes need `captureMode: optin`, buyer notes and alerts need `buyerMatches: on`, nudges need `nudges`, stale-check DMs need an admin's confirmed `/stalecheck`, and catch-up offers need `/catchup send` under `optin`. See [Rollout](docs/Rollout.md).
+- **Always name `allowedUpdates` in `run()`** (`src/bot.ts`), and add a type there when you add a handler for it. Without the list, Telegram reuses the last one set for that token; that once dropped every button press on the test bot.
 
 ### Adding a New Command
 1. Add the handler method to an appropriate service (or create a new one in `src/services/`).
 2. Register it in `BotController.registerRoutes()` in `src/controllers/botController.ts` with `cmd("name", handler)` (a thin wrapper over `command()` in `src/controllers/commands.ts`). Matching is anchored at the start of the message, case-insensitive, matches the exact command name, and accepts `/name` or `/name@ourbot` only; `/name@otherbot` is ignored. Pass `{ detached: true }` only for long jobs.
-3. Add help strings to `src/locales/<lang>/common.json` for all languages and reference them in `showHelp()`.
-4. Update the `/help` display in `botController.ts` if the command is user-facing, and add the command to `docs/Commands.md`.
+3. Add help strings to `src/locales/<lang>/common.json` for all languages.
+4. Update the `/help` lists in `src/services/richMessages.ts` (and the golden in `checkRichMessages.ts`) if the command is user-facing, and add the command to `docs/Commands.md`.
 5. Extend `src/tests/checkRoutes.ts` or `checkPlatform.ts` if the routing changes.
 
 ### Adding a New Locale
