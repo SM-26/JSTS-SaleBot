@@ -27,7 +27,8 @@ async function run() {
     const { default: Listing } = await import("../models/Listing");
     const { default: Post } = await import("../models/Post");
     const { default: User } = await import("../models/User");
-    const { sellerTier, sellerLayout } = await import("../services/trustService");
+    const { sellerTier, sellerLayout, configureTiers } = await import("../services/trustService");
+    configureTiers({ tierLayouts: true });
     const { PostService } = await import("../services/postService");
     const { PublishService } = await import("../services/publishService");
     const { AdminService } = await import("../services/adminService");
@@ -84,6 +85,17 @@ async function run() {
         assert.strictEqual(layout.tier, "top");
         assert.strictEqual(layout.stats?.sold, 2);
         assert.ok(layout.stats?.since, "time in the market is read from real data");
+        // the switch: off, everyone is regular, but a /test sample still shows its tier; the thresholds come from config
+        configureTiers({});
+        assert.strictEqual((await sellerLayout(boundary, "he", "check")).tier, "regular", "tierLayouts off");
+        assert.strictEqual((await sellerLayout(boundary, "he", "check", "verified")).tier, "verified", "a forced sample keeps its tier");
+        configureTiers({ tierLayouts: true, topSellerMinEnded: 4 });
+        assert.strictEqual(await sellerTier(boundary), "regular", "3 ended is under a minimum of 4");
+        configureTiers({ tierLayouts: true, topSellerPercent: 70 });
+        assert.strictEqual(await sellerTier(boundary), "regular", "2 of 3 is under 70%");
+        configureTiers({ tierLayouts: true, topSellerPercent: 50, topSellerMinEnded: 2 });
+        assert.strictEqual(await sellerTier(boundary), "top");
+        configureTiers({ tierLayouts: true });
         // regular keeps the trust line, not a tier layout
         assert.strictEqual((await sellerLayout(plain, "he", "check")).stats, undefined);
 

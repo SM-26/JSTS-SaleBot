@@ -19,5 +19,8 @@
     "buyerMatches": "shadow",
     "nudges": false,
     "quickListing": false,
+    "tierLayouts": false,
+    "topSellerPercent": 60,
+    "topSellerMinEnded": 3,
     "rulesUrl": ""
 }

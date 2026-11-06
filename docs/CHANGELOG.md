@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased (slice 5) - One-message listing and the Beit Dagan meeting point (#104).
+3.3.0 - Seller tiers, price changes and slices 4 to 6 (entries below). 3.2.0 was never deployed; slice 3 reaches prod here too.
+  - Added:
+    - `tierLayouts` (default off), `topSellerPercent` (60) and `topSellerMinEnded` (3) in `config.json`. With `tierLayouts` off, every post uses the regular layout.
+  - Notes:
+    - Deploy in `shadow`: `optin`, `buyerMatches: on`, `quickListing`, `nudges` and `tierLayouts` stay off. New posts expire silently at 30 days while `nudges` is off.
+
+3.3.0 (slice 5) - One-message listing and the Beit Dagan meeting point (#104).
   - Added (#128, #121):
     - **Change price in `/myposts`.** A third button, 💸 Change price (`lp_<postId>`), on an approved bot post. The seller replies to a force-reply prompt with the new price (a number; commas and spaces allowed). Lower: the post is re-posted like a bump with the old price struck through (`1,400 ₪ → 1,200 ₪`) on the top, verified and both layouts, and it does **not** count against `dailyBumpLimit`. Higher: a normal counted bump, refused at the limit (after the price is entered), shown plainly, and it clears `previousPrice`. The same price, a non-number, or a post whose price is not a number are refused. The regular layout is unchanged. The prompt lives in the persisted session (`pendingPriceCut`, 30 minutes, survives a restart) and `/cancel` drops it. Sold, taken-down, expired and someone else's posts get the usual toasts. New optional `posts.previousPrice` (additive: 3.1.0 ignores it).
     - **Disabled Bump.** At `dailyBumpLimit` the card shows Bump as Telegram's disabled button (`InlineKeyboardButton.disabled`; a press never reaches the bot), and the card swaps its buttons right after the last bump. Old messages with the live button still get the existing refusal.
@@ -32,15 +38,15 @@ Unreleased (slice 5) - One-message listing and the Beit Dagan meeting point (#10
     - Data: additive only. New optional draft fields `quick`, `collecting`, `mediaGroupId`, `caption`, `meetup`; new optional `meetup` on posts and listings. After a rollback to 3.1.0 they are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
     - The version is not bumped here; the owner picks the release order.
 
-Unreleased - Test stack.
+3.3.0 - Test stack.
   - Added:
     - `compose.test.yaml`: a local stack for trying the bot on the test bot and test groups, from Docker Desktop. It has its own database and refuses any token but the test bot's.
 
-Unreleased - Numbered stale-check results.
+3.3.0 - Numbered stale-check results.
   - Changed:
     - On a multi-item `/stalecheck` DM, each result line now starts with the item's number ("1 · Refreshed"). `lcItemResult` is a new locale string; a stale button's label must keep starting with `{i}`, which `check-routes` enforces.
 
-Unreleased - Catch-up scan (slice 6 of "the market", #104).
+3.3.0 - Catch-up scan (slice 6 of "the market", #104).
   - Added:
     - **Catch-up scan.** A one-off way to offer the sale-topic posts members already made, before the bot was listening, as group listings. The owner exports the group history and runs `pnpm run catchup -- <export.json>` on their own machine (no database, no network). It reads the last 30 days, groups posts the way the live capture does, keeps the `strict` and `ask` tiers, merges reposts and writes `catchup.json` (gitignored) plus a counts-only summary. Posts without a title are dropped and counted.
     - **`/catchup`** (admin, private chat). `/catchup` shows counts. Sending `catchup.json` as a file with the caption `/catchup import` stores each seller's items on their `members` record and deletes the file message; a re-import replaces unsent offers. `/catchup send` arms them. Nothing reaches a member before that.
@@ -54,7 +60,7 @@ Unreleased - Catch-up scan (slice 6 of "the market", #104).
     - **Owner gates:** (1) the owner reviews `catchup.json` before the import; (2) the owner approves the final note text, as sent by "Catch-up offer to me" on the test bot; (3) `/catchup send` needs the owner's go-ahead. Delivery also needs `captureMode: optin`, which is a separate switch: with `shadow` armed offers wait (their clock keeps running).
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead.
 
-Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
+3.3.0 (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
   - Added:
     - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
     - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. Only a Telegram reply to the prompt changes a search; a plain next message never does. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a 403, meaning the buyer blocked the bot, deletes all of that buyer's saved searches). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.

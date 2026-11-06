@@ -3,6 +3,7 @@ import memberRepository from "../repositories/memberRepository";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import { localeService } from "./localeService";
+import type { BotConfig } from "../types";
 
 export const TRUST_REVOKE_MS = 90 * 24 * 60 * 60 * 1000;
 export const NEW_SELLER_DAYS = 30;
@@ -42,12 +43,21 @@ export async function safeTrustLine(sellerId: string, locale: string, ctx: strin
 
 // Seller tiers (spec 17.1). Verified outranks top seller; "both" is the two together.
 export type SellerTier = "regular" | "top" | "verified" | "both";
-export const TOP_SELLER_RATE = 0.6;
+export const TOP_SELLER_PERCENT = 60;
 export const TOP_SELLER_MIN_ENDED = 3;
+
+// The live config object (/config updates it in place). BotController hands it over on start.
+type TierSettings = Pick<BotConfig, "tierLayouts" | "topSellerPercent" | "topSellerMinEnded">;
+let tierSettings: TierSettings = {};
+export function configureTiers(settings: TierSettings): void {
+    tierSettings = settings;
+}
 
 export async function isTopSeller(sellerId: string): Promise<boolean> {
     const { sold, ended } = await listingRepository.countEnded(sellerId);
-    return ended >= TOP_SELLER_MIN_ENDED && sold / ended >= TOP_SELLER_RATE;
+    const minEnded = tierSettings.topSellerMinEnded ?? TOP_SELLER_MIN_ENDED;
+    const percent = tierSettings.topSellerPercent ?? TOP_SELLER_PERCENT;
+    return ended > 0 && ended >= minEnded && (sold / ended) * 100 >= percent;
 }
 
 export async function sellerTier(sellerId: string): Promise<SellerTier> {
@@ -67,7 +77,8 @@ export interface SellerLayout {
 // `forced` is a post's own layoutTier (test posts only); the stats stay the seller's real ones.
 export async function sellerLayout(sellerId: string, locale: string, ctx: string, forced?: SellerTier): Promise<SellerLayout> {
     try {
-        const tier = forced ?? await sellerTier(sellerId);
+        // tierLayouts off: everyone gets the regular post. A /test sample still shows its own tier (forced).
+        const tier = forced ?? (tierSettings.tierLayouts === true ? await sellerTier(sellerId) : "regular");
         if (tier === "regular") return { tier, trustLine: (await trustLineFor(sellerId, locale, new Date())) ?? undefined };
         const [sold, since] = await Promise.all([listingRepository.countSold(sellerId), marketSince(sellerId)]);
         return { tier, stats: { sold, since: since ? formatSince(since, locale) : "" } };

@@ -36,6 +36,9 @@ export const CONFIG_SCHEMA: Record<string, ConfigFieldSpec> = {
     enableFaq: { kind: "boolean" },
     nudges: { kind: "boolean" },
     quickListing: { kind: "boolean" },
+    tierLayouts: { kind: "boolean" },
+    topSellerPercent: { kind: "number", min: 0 },
+    topSellerMinEnded: { kind: "number", min: 1 },
 
     // ponytail: these three live in config.json but nothing reads them yet;
     // typed here so /config still validates rather than accepting anything.

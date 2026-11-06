@@ -156,6 +156,9 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`      | string  | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the buyer notes and saved-search alerts (`shadow` is the kill switch: saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `quickListing`      | boolean | `true` lets a captioned photo, video or album in DM start a draft, adds field-edit buttons and the Beit Dagan toggle to previews, and handles `/start sell`. Default `false`: the wizard behaves as before |
+| `tierLayouts`       | boolean | `true` turns on post layouts by seller tier. Default `false`: every post uses the regular layout; `/test` samples still show theirs |
+| `topSellerPercent`  | number  | Top seller: minimum percent of ended listings sold. Default `60` |
+| `topSellerMinEnded` | number  | Top seller: minimum ended listings. Default `3` |
 | `nudges`            | boolean | `true` sends the 7-day refresh nudge (default `false`); expiry at 30 days runs regardless |
 | `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 

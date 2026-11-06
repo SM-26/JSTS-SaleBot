@@ -511,6 +511,9 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`       | enum | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the private buyer notes and the DM alerts for saved searches. `shadow` is the kill switch (notes and alerts stop at once; saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `quickListing`       | boolean | `true` lets a captioned photo, video or album in DM start a draft, adds field-edit buttons and the Beit Dagan toggle to the preview, and handles `/start sell`. Default `false` (the wizard behaves as before) |
+| `tierLayouts`        | boolean | `true` turns on post layouts by seller tier (top seller, verified, both). Default `false`: every post uses the regular layout. |
+| `topSellerPercent`   | number  | Top seller: minimum percent of ended listings that were sold. Default `60`. |
+| `topSellerMinEnded`  | number  | Top seller: minimum number of ended listings. Default `3`. |
 | `nudges`             | boolean | `true` sends the 7-day refresh nudge to sellers (default `false`; expiry runs regardless) |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
