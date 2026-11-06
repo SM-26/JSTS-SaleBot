@@ -360,6 +360,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "takeDownDelete") {
+            await this.takeDownService.handleDeleteCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "capture") {
             // set_ask / set_never are the /myposts settings row; the capture parser rejects them.
             if (route.arg.startsWith("set_")) await this.myPostsService.handleAskToggle(query, route.arg);
