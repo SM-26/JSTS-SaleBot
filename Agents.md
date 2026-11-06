@@ -188,7 +188,8 @@ User sends /newPost (or, with config.quickListing, a photo/video/album with a ca
                          removed, author told, trust revoked for 90 days; the post can no longer be bumped or sold
   → User can /myposts:
       → Mark as "sold"  → updates approved group message with sold tag
-      → Bump post       → re-posts with updated timestamp (subject to dailyBumpLimit)
+      → Bump post       → re-posts with updated timestamp (subject to dailyBumpLimit); the button is Telegram's disabled type at the limit
+      → Change price    → `lp_` prompt (session `pendingPriceCut`, reply-to); a cut re-posts without using a bump and sets `previousPrice` (struck through on tier layouts), a raise is a counted bump and clears it
   → LifecycleService (listings, not posts): 7 days without refresh → nudge DM (only with config.nudges);
       30 days → listing "expired" (always; the approved bot post stays "approved", its group message is untouched);
       /myposts offers Relist on an expired bot listing; the admin's /stalecheck asks legacy (hold) sellers once
@@ -222,7 +223,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/start`  | All users | Shows a welcome greeting                          |
 | `/newPost`| All users | Begins the post creation wizard (Continue / Start over if a draft exists) |
 | `/cancel` | All users | Drops your wizard draft; in the moderation group, forgets your pending reject-reason prompts |
-| `/myposts`| All users | Lists user's own posts with bump/sold actions    |
+| `/myposts`| All users | Lists user's own posts with bump/sold/change-price actions |
 | `/lang`   | All users | Change language preference                       |
 | `/faq`    | All users | View airsoft FAQ and frequently asked questions  |
 | `/help`   | All users | Shows available commands (admins see extra items)|
@@ -356,7 +357,7 @@ Never run the bot, or a check, against the production token or database.
 | `src/services/inputService.ts` | Wizard prompts and price validation |
 | `src/services/postService.ts` | Post formatting & Telegram message management |
 | `src/services/moderationService.ts` | Approve/reject logic, reject-reason prompt |
-| `src/services/myPostsService.ts` | User post management (bump, sold; Sold also ends the listing) |
+| `src/services/myPostsService.ts` | User post management (bump, sold, change price; Sold also ends the listing) |
 | `src/services/publishService.ts` | submitPost(): trusted sellers publish at once, others go to moderation |
 | `src/services/trustService.ts` | isTrustedSeller(): approved or sold post, no moderator take-down in 90 days |
 | `src/services/takeDownService.ts` | Moderator take-down (td_) |

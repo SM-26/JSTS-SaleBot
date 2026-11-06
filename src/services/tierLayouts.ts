@@ -44,7 +44,10 @@ export function buildTierMessage(data: PostData, o: TierLayoutOpts, lang: string
     const sold = Boolean(o.sold);
     const b = new RichMessageBuilder();
 
-    const priceText = sold ? t().strikethrough(data.price) : t().marked(t().bold(data.price));
+    // After a price cut: the old price struck through, an arrow, the new price.
+    const priceText = sold ? t().strikethrough(data.price)
+        : data.previousPrice ? t().marked(t().strikethrough(data.previousPrice).plain(" → ").bold(data.price))
+            : t().marked(t().bold(data.price));
     const nameBold = data.username ? `@${data.username}` : data.firstName || "User";
     // The seller as a link (@username mention, or a text mention of the first name).
     const sellerLink = (prefix: string): RichTextBuilder => {

@@ -10,6 +10,12 @@ export interface WizardStep {
     total: number;
 }
 
+// Accepts thousands separators: "2,000" and "2 000" mean the same as "2000". NaN when it is not a number.
+export function priceNumber(priceInput: string): number {
+    const trimmed = priceInput.replace(/[,\s]/g, "");
+    return trimmed === "" ? NaN : Number(trimmed);
+}
+
 // The stateless half of the wizard: sending prompts and validating one answer.
 // The step machine that decides what to ask next lives in WizardService.
 export class InputService {
@@ -34,8 +40,7 @@ export class InputService {
 
     validatePriceValue(priceInput: string): boolean {
         if (!this.config.validatePrice) return true;
-        // Accept thousands separators: "2,000" and "2 000" mean the same as "2000".
-        const price = Number(priceInput.replace(/[,\s]/g, ""));
+        const price = priceNumber(priceInput);
         return !isNaN(price) && price > 0;
     }
 }

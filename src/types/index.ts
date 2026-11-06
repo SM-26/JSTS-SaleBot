@@ -187,6 +187,8 @@ export interface UserSession {
     // The buyer's one-reply fix after a saved search (or a failed one): the row it edits, the prompt and when.
     pendingAlertFix?: { searchId?: string; promptId: number; at: number };
     // Admin's /stalecheck dry run waiting for sc_go; ignored after an hour.
+    // A seller who pressed Lower price: the post, the force-reply prompt (and the /myposts card to refresh) and when.
+    pendingPriceCut?: { postId: string; promptId: number; cardId?: number; at: number };
     pendingStalecheck?: { sellerIds: string[]; at: number; promptMessageId?: number };
 }
 
@@ -210,6 +212,8 @@ export interface Post {
     meetup?: boolean;
     layoutTier?: "regular" | "top" | "verified" | "both";
     highlight?: string;
+    // The price before the latest price cut; the tiered layouts show it struck through.
+    previousPrice?: string;
 }
 
 export interface User {

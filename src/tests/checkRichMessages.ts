@@ -378,6 +378,7 @@ function checkTierLayouts(): number {
     for (const tier of ["top", "verified", "both"] as const) {
         for (const sold of [false, true]) built[`${tier}${sold ? "-sold" : ""}`] = service.formatPostRichMessage(data, { tier, stats, sold });
         built[`${tier}-nouser`] = service.formatPostRichMessage({ ...data, username: undefined }, { tier, stats });
+        built[`${tier}-cut`] = service.formatPostRichMessage({ ...data, previousPrice: "1,400 ₪" }, { tier, stats });
     }
     if (process.env.UPDATE_GOLDEN) fs.writeFileSync(goldenPath, JSON.stringify(built, null, 2) + "\n");
     const golden = JSON.parse(fs.readFileSync(goldenPath, "utf-8")) as Record<string, unknown>;
@@ -388,6 +389,10 @@ function checkTierLayouts(): number {
     const blocks = (m: unknown) => (m as { blocks: B[] }).blocks;
     for (const [name, msg] of Object.entries(built)) {
         const s = JSON.stringify(msg);
+        if (name.endsWith("-cut")) { // a price cut: old price struck through, an arrow, the new price
+            assert.ok(s.includes("strikethrough") && s.includes("1,400 ₪") && s.includes(" → ") && s.includes("1,200 ₪"), `${name}: 1,400 ₪ → 1,200 ₪`);
+            continue;
+        }
         assert.ok(!s.includes("נקודת מפגש"), `${name}: no meeting-point wording`);
         assert.ok(blocks(msg).some(b => b.type === "slideshow"), `${name}: slideshow of all photos`);
         assert.ok(blocks(msg).some(b => b.type === "details"), `${name}: foldable description`);
@@ -400,6 +405,9 @@ function checkTierLayouts(): number {
     assert.ok(JSON.stringify(built.both).includes("⭐"), "both has the banner");
     assert.ok(!JSON.stringify(built.verified).includes("⭐"), "verified has no banner");
     assert.ok(JSON.stringify(built.both).includes("12") && JSON.stringify(built.both).includes("נובמבר 2026"), "both shows seller stats");
+    // regular layout and sold cards ignore previousPrice
+    assert.strictEqual(JSON.stringify(service.formatPostRichMessage({ ...data, previousPrice: "1,400 ₪" })), JSON.stringify(service.formatPostRichMessage(data)), "regular layout ignores previousPrice");
+    assert.ok(!JSON.stringify(service.formatPostRichMessage({ ...data, previousPrice: "1,400 ₪" }, { tier: "both", stats, sold: true })).includes("1,400 ₪"), "a sold card does not show the old price");
     // a plain regular call is still the old layout
     assert.strictEqual(JSON.stringify(service.formatPostRichMessage(data, { tier: "regular" })), JSON.stringify(service.formatPostRichMessage(data)), "tier regular = today's layout");
     return Object.keys(built).length;

@@ -142,6 +142,14 @@ class ListingRepository {
 
     // live|expired -> live, with a fresh clock. A repost of the same item also brings the newest
     // message ids, text, media and parsed fields (fields left undefined are not touched).
+    setPriceByPostId(postId: string, price: string) {
+        const priceValue = priceValueOf(price);
+        return Listing.updateOne(
+            { source: "bot", postId },
+            priceValue !== undefined ? { $set: { price, priceValue } } : { $set: { price }, $unset: { priceValue: "" } }
+        ).exec();
+    }
+
     refresh(id: string, now: Date, repost?: RepostPatch): Promise<IListing | null> {
         const $set: Record<string, unknown> = { status: "live", refreshedAt: now, hold: false };
         if (repost) {

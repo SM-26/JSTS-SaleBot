@@ -9,6 +9,7 @@ import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
 import { quickListingChecks } from "./quickListingChecks";
+import { priceChangeChecks } from "./priceChangeChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 import type { CatchupItem } from "../services/catchupScan";
@@ -577,6 +578,8 @@ async function run() {
             assert.ok(text(edits()[0]).startsWith(T("myPostsTitle")), "the summary text");
             console.log("  [OK] (l) a sold card is re-rendered in place, bump leaves it, clear_sold refreshes the summary.");
         }
+
+        await priceChangeChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP });
 
         // (m) a moderator approval publishes the post and creates the bot listing
         {
@@ -2505,7 +2508,7 @@ async function run() {
                 await settle();
                 const card = richTo(h, u);
                 assert.strictEqual(card.length, 1);
-                assert.deepStrictEqual(keyboard(card[0]).map((b) => b.callback_data), [`sold_${post._id}`, `bump_${post._id}`]);
+                assert.deepStrictEqual(keyboard(card[0]).map((b) => b.callback_data), [`sold_${post._id}`, `bump_${post._id}`, `lp_${post._id}`]);
                 assert.strictEqual(dms(h, u).length, 0);
 
                 await Post.updateOne({ _id: post._id }, { $set: { status: "pending" } });
@@ -2778,7 +2781,7 @@ async function run() {
                 const out = sent(h, u);
                 assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage"]);
                 assert.ok(text(out[0]).includes(T("myPostsTitle")));
-                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`, `lp_${postId}`]);
                 console.log("  [OK] (z1) /myposts with captureMode shadow is unchanged.");
             }
 
@@ -2797,7 +2800,7 @@ async function run() {
                 const out = sent(h, u);
                 assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage", "sendMessage"]);
                 assert.ok(text(out[0]).includes(T("myPostsTitle")));
-                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`, `lp_${postId}`]);
                 const section = out[2];
                 assert.strictEqual(section.params.parse_mode, "HTML");
                 assert.deepStrictEqual(section.params.link_preview_options, { is_disabled: true });
