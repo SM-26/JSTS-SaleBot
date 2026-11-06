@@ -41,6 +41,8 @@ for (const k of missing(documentedKeys, keys)) errors.push(`Config.md: ${k} is d
 for (const name of pages) {
     const text = prose(page(name));
     for (const [, target] of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+        const wikiPage = target!.match(/^https:\/\/github\.com\/SM-26\/JSTS-SaleBot\/wiki\/([^/#?]+)/)?.[1];
+        if (wikiPage && wikiPage !== "Home" && !pages.includes(`${wikiPage}.md`)) errors.push(`${name}: wiki link ${target} is not a page in docs/`);
         if (/^([a-z]+:|#)/i.test(target!)) continue;
         const file = target!.split("#")[0]!;
         if (file.includes("/") || !pages.includes(file)) errors.push(`${name}: link ${target} is not a page in docs/`);
