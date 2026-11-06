@@ -6,6 +6,9 @@ import { normalize, phoneRe, tokenOverlap, tokens } from "./classifier";
 const aliasHeads = new Set(data.aliases.map(([head]) => normalize(head)));
 const isStrong = (t: string) => aliasHeads.has(t) || (t.length >= 2 && /\d/.test(t));
 
+// category heads, not models: they must not silence a model number
+const categoryHeads = new Set(["gbb", "aeg", "hpa"]);
+
 const MEETUP = normalize("בית דגן");
 const MEETUP_RE = new RegExp(`(?<![\\p{L}\\p{N}])[בלמה]?${MEETUP}(?![\\p{L}\\p{N}])`, "gu"); // prefixed like `cities`
 const CEILING_RE = /(?<!\p{L})עד\s*(\d[\d,]*)/u; // a word of its own, not the end of one ("מועד 2025")
@@ -33,7 +36,7 @@ export function matchListings(q: Pick<BuyerQuery, "terms" | "maxPrice" | "meetup
     const strong = q.terms.filter(isStrong);
     if (!strong.length) return [];
     // a budget ("תקציב 800") is a bare number: when the query names a model (glock, m4), only the names decide; numbers still rank
-    const named = strong.filter(s => /\p{L}/u.test(s));
+    const named = strong.filter(s => /\p{L}/u.test(s) && !categoryHeads.has(s));
     const decisive = named.length ? named : strong;
 
     return listings

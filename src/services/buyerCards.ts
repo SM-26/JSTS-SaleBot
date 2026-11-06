@@ -19,9 +19,9 @@ function renderLine(l: ListingLine): string {
 }
 
 // The stored query is the unique key (and has lost its final letters to the tokenizer); members see this instead.
-const FINALS: Record<string, string> = { כ: "ך", מ: "ם", נ: "ן", פ: "ף", צ: "ץ" };
+const FINALS: Record<string, string> = { כ: "ך", מ: "ם", נ: "ן", צ: "ץ" };
 export const displayQuery = (query: string): string =>
-    query.split(/\s+/).filter(Boolean).slice(0, 6).map(w => w.replace(/[כמנפצ]$/, c => FINALS[c])).join(" ");
+    query.split(/\s+/).filter(Boolean).slice(0, 6).map(w => (w.length > 1 ? w.replace(/[כמנצ]$/, c => FINALS[c]) : w)).join(" ");
 
 // What a saved search says to its owner: the query, the ceiling and the meeting point.
 export const describeSearch = (t: Translate, s: { query: string; maxPrice?: number; meetup?: boolean }): string =>

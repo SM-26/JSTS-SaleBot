@@ -113,6 +113,7 @@ async function main(): Promise<number> {
         await SavedSearch.deleteMany({ userId: sender });
         await AlertLog.deleteMany({ userId: sender });
         await User.deleteMany({ userId: sender });
+        await mongoose.connection.db!.collection("bot_sessions").deleteMany({ _id: `${OWNER}:${OWNER}` } as never); // the private /start session
     };
     await wipe(); // throwaway db: leftovers must not skew this run
 
@@ -181,7 +182,7 @@ async function main(): Promise<number> {
         const photo = calls.find(c => c.method === "sendPhoto" && c.chat === OWNER);
         step(4, "alert sent to the owner as a photo with a caption", photo?.ok === true && !!photo.text?.includes("גלוק 17"), `ok ${photo?.ok}`);
     } finally {
-        // 4. clean up, also after a failure
+        // 5. clean up, also after a failure
         let cleaned = true;
         const detail: string[] = [];
         // ids from what Telegram answered, so a throw before they were stored still cleans up

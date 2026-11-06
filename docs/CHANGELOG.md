@@ -13,7 +13,7 @@ Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
     - Tests: `check-buyer` (new, in `pnpm test`, needs `MONGO_URI`), plus coverage in `check-callbacks`, `check-cards`, `check-routes`, `check-classifier` and `check-rich`. `/test` gained buyer cases. `src/tests/syntheticBuyer.ts` is manual (not in `pnpm test`), TEST bot and groups only.
   - Notes:
     - `s_` carries a capture id, and captures live 7 days, so an `s_` link stops working after 7 days. `/alerts <text>` has no such limit.
-    - A "wanted" post the bot cannot search (no model name, only a budget or a phone number) gets no note.
+    - A "wanted" post the bot cannot search (no model name, only a ceiling (`עד 800`) or a phone number) gets no note.
     - Private notes are best effort: they reach only apps online when sent. The alert DMs are ordinary messages.
     - The `saved_searches` TTL deletes a search at 60 days in every mode, including `shadow` and `off`.
     - Data: additive only. New collections `saved_searches` and `alert_log`; new optional fields `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. Rolling back to 3.1.0 leaves them as harmless leftovers; `al_` buttons fall to the stale toast and `s_` links to the greeting.

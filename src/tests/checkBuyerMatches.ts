@@ -60,6 +60,10 @@ function checkPure() {
     assert.deepStrictEqual(matchListings(budget, [L("g", "glock 19")]), ["g"]);
     assert.deepStrictEqual(matchListings(parseQuery("מחפש M4 בתקציב 1500"), [L("ak", "ak 1500")]), [], "a budget is not a model");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש 1911"), [L("c", "1911 מצוין")]), ["c"], "a number alone is still strong");
+    // a category head (gbb, aeg, hpa) must not silence a model number
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש gbb 1911"), [L("c", "1911 מצוין")]), ["c"], "gbb alone does not decide");
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש aeg 416"), [L("h", "hk 416 מצוין")]), ["h"], "aeg alone does not decide");
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש glock gbb 1911"), [L("g", "glock 19"), L("c", "1911 מצוין")]), ["g"], "glock still decides");
     console.log("[OK] buyer query parsing and matching.");
 }
 
