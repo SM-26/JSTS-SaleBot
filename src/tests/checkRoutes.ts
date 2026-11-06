@@ -79,7 +79,7 @@ async function run() {
         const commands = [
             "/start", "/myposts", "/help", "/lang", "/config", "/activeUsers", "/pending",
             "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
-            "/auth", "/test", "/donate", "/cancel", "/stats", "/label",
+            "/auth", "/test", "/donate", "/cancel", "/stats", "/label", "/catchup",
             "/start@" + BOT_USERNAME, "/START",
         ];
         if (config.enableFaq !== false) commands.push("/faq");

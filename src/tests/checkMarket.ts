@@ -11,7 +11,9 @@ import draftRepository from "../repositories/draftRepository";
 import listingRepository, { priceValueOf } from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
-import type { CatchupItem } from "../services/catchupScan";
+import type { CatchupFile, CatchupItem } from "../services/catchupScan";
+import { CatchupService } from "../services/catchupService";
+import { GroupListingService } from "../services/groupListingService";
 import { textHash } from "../services/classifier";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
@@ -20,6 +22,7 @@ import { tick } from "../services/shadowService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
 import { seedCapture } from "./fixtures";
+import { createHarness, type HarnessOptions } from "./harness";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
 // are atomic updates and index behaviour (TTL, partial unique), which a mock
@@ -29,6 +32,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const RUN = `mkt-${Date.now()}`;
 const CHAT = -1000000000 - (Date.now() % 1000000);
 const SEC = 1000;
+const odIds: string[] = []; // numeric member ids of the offer-delivery section
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -679,7 +683,127 @@ async function run() {
         assert.ok(raw.firstSeenAt && raw.askMode === "ask" && raw.catchup, "3.1.0 fields intact, catchup added");
         console.log("[OK] catch-up offers.");
         }
+
+        // catch-up offer delivery (slice 6): CatchupService against a recording fake Telegram
+        {
+        const DAYMS = 24 * 3600 * 1000;
+        const ago = (days: number) => new Date(Date.now() - days * DAYMS);
+        const item = (id: number, days = 2): CatchupItem => ({ messageId: id, date: ago(days).toISOString(), title: "Glock", price: "1,300", text: "Glock 17 1,300", tier: "strict" });
+        const cfg = { captureMode: "optin", approvedGroupId: CHAT, approvedTopicId: 1, lang: "en" } as BotConfig;
+        let odSeq = 8_100_000_000 + (Date.now() % 100_000_000) * 10;
+        const fresh = () => { const id = String(odSeq++); odIds.push(id); return id; };
+        const boot = (responses?: HarnessOptions["responses"]) => {
+            const h = createHarness({ responses });
+            const svc = new CatchupService(h.bot.api, cfg, new GroupListingService(h.bot.api, cfg, () => "bot"), () => "bot");
+            return { h, svc };
+        };
+        const notes = (h: ReturnType<typeof boot>["h"]) => h.calls.filter(c => c.method === "sendMessage");
+        const stamps = async (id: string) => (await Member.collection.findOne({ userId: id }))!;
+        const now = () => new Date();
+
+        // unarmed: nothing goes out
+        {
+            const { h, svc } = boot();
+            const u = fresh();
+            await memberRepository.importCatchup(u, [item(1)], now());
+            await svc.onSaleTopicMessage(u, now());
+            assert.strictEqual(notes(h).length, 0, "unarmed offer: no sendMessage");
+        }
+
+        // armed: exactly one ephemeral note, never twice
+        const sentUser = fresh();
+        {
+            const { h, svc } = boot();
+            await memberRepository.importCatchup(sentUser, [item(1), item(2)], now());
+            await memberRepository.armCatchup(now());
+            await svc.onSaleTopicMessage(sentUser, now());
+            assert.strictEqual(notes(h).length, 1, "armed: one note");
+            const p = notes(h)[0].params;
+            assert.strictEqual((p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(sentUser));
+            assert.strictEqual(Number(p.chat_id), CHAT);
+            const memberId = String((await stamps(sentUser))._id);
+            const buttons = (p.reply_markup as { inline_keyboard: { url?: string }[][] }).inline_keyboard.flat();
+            assert.ok(buttons.some(b => b.url === `https://t.me/bot?start=k_${memberId}`), "the k_ URL");
+            assert.ok((await stamps(sentUser)).catchup.note.ephemeralMessageId >= 5000, "note id stored");
+            await svc.onSaleTopicMessage(sentUser, now());
+            assert.strictEqual(notes(h).length, 1, "second message: nothing more");
+        }
+
+        // shadow mode holds the offer; optin then delivers
+        {
+            const { h, svc } = boot();
+            const u = fresh();
+            await memberRepository.importCatchup(u, [item(1)], now());
+            await memberRepository.armCatchup(now());
+            cfg.captureMode = "shadow";
+            try { await svc.onSaleTopicMessage(u, now()); } finally { cfg.captureMode = "optin"; }
+            assert.strictEqual(notes(h).length, 0, "shadow: nothing sent");
+            assert.ok((await stamps(u)).pendingCatchup && !(await stamps(u)).catchup.sentAt, "shadow: offer still held");
+            await svc.onSaleTopicMessage(u, now());
+            assert.strictEqual(notes(h).length, 1, "optin delivers the held offer");
+        }
+
+        // armed 31 days ago: no note, purge drops it
+        {
+            const { h, svc } = boot();
+            const u = fresh();
+            await memberRepository.importCatchup(u, [item(1)], ago(32));
+            await Member.updateOne({ userId: u }, { $set: { "catchup.armedAt": ago(31) } });
+            await svc.onSaleTopicMessage(u, now());
+            assert.strictEqual(notes(h).length, 0, "armed 31 days ago: no note");
+            await memberRepository.dropExpiredCatchups(now());
+            assert.strictEqual((await stamps(u)).pendingCatchup, undefined, "purge drops it");
+        }
+
+        // every item older than 30 days: no note, items dropped
+        {
+            const { h, svc } = boot();
+            const u = fresh();
+            await memberRepository.importCatchup(u, [item(1, 40), item(2, 35)], now());
+            await memberRepository.armCatchup(now());
+            await svc.onSaleTopicMessage(u, now());
+            assert.strictEqual(notes(h).length, 0, "stale items: no note");
+            assert.strictEqual((await stamps(u)).pendingCatchup, undefined, "stale items dropped");
+        }
+
+        // a failing send releases the claim; the next message delivers once
+        {
+            let fail = true;
+            const { h, svc } = boot({ sendMessage: () => (fail ? { ok: false, error_code: 400, description: "Bad Request: nope" } : undefined) });
+            const u = fresh();
+            await memberRepository.importCatchup(u, [item(1)], now());
+            await memberRepository.armCatchup(now());
+            const realError = console.error;
+            console.error = () => {};
+            try { await svc.onSaleTopicMessage(u, now()); } finally { console.error = realError; }
+            assert.ok(!(await stamps(u)).catchup.sentAt, "failed send: claim released");
+            fail = false;
+            await svc.onSaleTopicMessage(u, now());
+            await svc.onSaleTopicMessage(u, now());
+            assert.strictEqual(notes(h).filter(c => (c.result as { ephemeral_message_id?: number }).ephemeral_message_id !== undefined).length, 1, "delivered once after the retry");
+        }
+
+        // importFile end to end
+        {
+            const { svc } = boot();
+            const a = fresh();
+            const b = fresh();
+            const c = fresh();
+            const file: CatchupFile = { version: 1, generatedAt: now().toISOString(), sellers: [
+                { userId: a, name: "A", items: [item(1), item(2)] },
+                { userId: b, name: "B", items: [item(3)] },
+                { userId: sentUser, name: "S", items: [item(4)] }, // already offered
+                { userId: c, name: "C", items: [] },
+            ] };
+            assert.deepStrictEqual(await svc.importFile(file, now()), { sellers: 2, items: 3, skipped: 2 }, "import counts");
+            assert.strictEqual((await stamps(a)).pendingCatchup.length, 2);
+            assert.ok(!(await stamps(a)).catchup.armedAt && !(await stamps(a)).catchup.sentAt, "imported, not armed, not sent");
+            assert.strictEqual((await stamps(sentUser)).pendingCatchup.length, 2, "sent member untouched");
+        }
+        console.log("[OK] catch-up offer delivery.");
+        }
     } finally {
+        await Member.deleteMany({ userId: { $in: odIds } });
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
             Capture.deleteMany({ chatId: CHAT }),

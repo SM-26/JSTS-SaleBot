@@ -1,4 +1,6 @@
 import Capture, { ICapture, CaptureState } from "../models/Capture";
+import Member from "../models/Member";
+import type { CatchupItem } from "../services/catchupScan";
 import type { IMediaItem, StoredEntity } from "../models/Post";
 import { classify } from "../services/classifier";
 
@@ -39,4 +41,13 @@ export function seedCapture(o: SeedCaptureOptions): Promise<ICapture> {
         parsed,
         note: o.note,
     });
+}
+
+// An armed catch-up offer straight through the model (replaces any earlier one, so it can be delivered again).
+export async function seedCatchupOffer(userId: string, items: CatchupItem[], now: Date): Promise<void> {
+    await Member.updateOne(
+        { userId },
+        { $set: { pendingCatchup: items, catchup: { importedAt: now, armedAt: now } }, $setOnInsert: { firstSeenAt: now, askMode: "ask" } },
+        { upsert: true }
+    ).exec();
 }
