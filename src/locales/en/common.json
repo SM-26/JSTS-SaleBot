@@ -188,6 +188,7 @@
     "listingSoldToast": "Marked as sold",
     "listingRefreshedToast": "Refreshed",
     "listingRemovedToast": "Removed from the market",
+    "lcNoRemove": "Only a group listing can be removed here. Use Sold when it is gone.",
     "captureModCard": "New seller's first listing: {name}\n{title} · {price}\n{link}",
     "captureExpired": "This post is no longer available. To list something, send /newpost.",
     "captureDraftBusy": "You have a post in progress. Finish it or send /cancel, then open the link again.",

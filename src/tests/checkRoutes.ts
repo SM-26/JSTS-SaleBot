@@ -7,6 +7,7 @@ import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Capture from "../models/Capture";
 import Member from "../models/Member";
+import Listing from "../models/Listing";
 import ShadowLog from "../models/ShadowLog";
 import { createHarness, BOT_USERNAME } from "./harness";
 import { seedCapture } from "./fixtures";
@@ -369,6 +370,103 @@ async function run() {
         await admin.handleConfig(configMsg, "captureMode shadow");
         assert.ok(String(h.calls.at(-1)?.params.text).includes(localeService.t(adminLocale, "configUpdated")), "/config accepts a key missing from config.json");
         assert.strictEqual(oldConfig.captureMode, "shadow");
+
+        // lc_ callbacks: still for sale / sold / remove, from a DM, a note, and a forged press
+        {
+            const { default: listingRepository } = await import("../repositories/listingRepository");
+            const SELLER = 100001;
+            const OTHER = 100099;
+            const tt = (key: string) => localeService.t(config.lang, key);
+            const lcGroup = (extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: String(SELLER), chatId: config.approvedGroupId, messageIds: [1],
+                title: "t", price: "100", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live",
+                createdAt: new Date(2026, 0, 1), refreshedAt: new Date(2026, 0, 1), ...extra,
+            });
+            const lcBot = async (listingStatus: "live" | "expired") => {
+                const post = await Post.create({ userId: String(SELLER), title: "bp", description: "d", price: "10", location: "l", media: [], status: "approved", approvedMessageId: 4242 });
+                const listing = await listingRepository.createForPost(post, "dm", false, new Date(2026, 0, 1));
+                if (listingStatus === "expired") await Listing.updateOne({ _id: listing._id }, { $set: { status: "expired", endedBy: "system", endedAt: new Date() } });
+                return { post, listing };
+            };
+            const press = async (data: string, opts: Parameters<typeof h.pressButton>[1]) => {
+                h.calls.length = 0;
+                await h.pressButton(data, opts);
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "answerCallbackQuery")), `${data} is answered`);
+                await sleep(QUIET_MS);
+                assert.strictEqual(h.calls.filter((c) => c.method === "answerCallbackQuery").length, 1, "exactly one answer");
+                return {
+                    toast: String(h.calls.find((c) => c.method === "answerCallbackQuery")!.params.text),
+                    of: (m: string) => h.calls.filter((c) => c.method === m),
+                    edits: h.calls.filter((c) => ["editMessageText", "editMessageReplyMarkup", "editEphemeralMessageText"].includes(c.method)),
+                };
+            };
+            const kbOf = (c: { params: Record<string, unknown> }) => (c.params.reply_markup as { inline_keyboard: Array<Array<{ callback_data?: string }>> } | undefined)?.inline_keyboard ?? [];
+            const dm = { userId: SELLER, chatId: SELLER };
+
+            const g1 = await lcGroup();
+            const r1 = await press(`lc_r_${g1._id}`, dm);
+            assert.strictEqual(r1.toast, tt("listingRefreshedToast"));
+            assert.ok((await listingRepository.findById(String(g1._id)))!.refreshedAt.getTime() > new Date(2026, 0, 2).getTime(), "refreshedAt moved");
+
+            const rf = await press(`lc_r_${g1._id}`, { userId: OTHER, chatId: OTHER });
+            assert.strictEqual(rf.toast, tt("notYourButton"));
+            assert.strictEqual(rf.edits.length, 0, "a foreign press edits nothing");
+
+            const e1 = await lcBot("expired");
+            await press(`lc_r_${e1.listing._id}`, dm);
+            assert.strictEqual((await listingRepository.findById(String(e1.listing._id)))!.status, "live", "an expired listing is live again");
+            const e2 = await lcBot("expired");
+            const s2 = await press(`lc_s_${e2.listing._id}`, dm);
+            assert.strictEqual(s2.toast, tt("listingSoldToast"));
+            assert.strictEqual((await listingRepository.findById(String(e2.listing._id)))!.status, "sold");
+            assert.strictEqual((await Post.findById(e2.post._id))!.status, "sold", "the bot post is sold too");
+
+            const gone = await lcGroup({ status: "removed", endedBy: "seller", endedAt: new Date() });
+            const kb = (id: unknown) => ({ inline_keyboard: [[{ text: "a", callback_data: `lc_r_${id}` }, { text: "b", callback_data: `lc_s_${id}` }]] });
+            const ended = await press(`lc_r_${gone._id}`, { ...dm, replyMarkup: kb(gone._id) });
+            assert.strictEqual(ended.toast, tt("listingEnded"));
+            assert.ok(ended.edits.length === 1 && kbOf(ended.edits[0]).length === 0, "an ended listing's row is dropped");
+
+            const b3 = await lcBot("expired");
+            await Listing.updateOne({ _id: b3.listing._id }, { $set: { status: "live" } });
+            const nr = await press(`lc_x_${b3.listing._id}`, dm);
+            assert.strictEqual(nr.toast, tt("lcNoRemove"));
+            assert.strictEqual((await listingRepository.findById(String(b3.listing._id)))!.status, "live", "a bot listing is never removed");
+
+            const g2 = await lcGroup();
+            const rm = await press(`lc_x_${g2._id}`, dm);
+            assert.strictEqual(rm.toast, tt("listingRemovedToast"));
+            assert.strictEqual((await listingRepository.findById(String(g2._id)))!.status, "removed");
+
+            const ga = await lcGroup();
+            const gb = await lcGroup();
+            const two = await press(`lc_r_${ga._id}`, { ...dm, replyMarkup: { inline_keyboard: [kb(ga._id).inline_keyboard[0], kb(gb._id).inline_keyboard[0]] } });
+            assert.strictEqual(two.edits.length, 1);
+            assert.deepStrictEqual(kbOf(two.edits[0]).flat().map((b) => b.callback_data), [`lc_r_${gb._id}`, `lc_s_${gb._id}`], "the other post's row stays");
+
+            // from a note: never editMessageText/ReplyMarkup (message_id is 0)
+            const nb = await lcBot("expired");
+            const fromNote = await press(`lc_s_${nb.listing._id}`, { userId: SELLER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5551 });
+            // (the bot post's own group message is re-rendered as sold, which is not the pressed note)
+            assert.strictEqual([...fromNote.of("editMessageText"), ...fromNote.of("editMessageReplyMarkup")].filter((c) => Number(c.params.message_id) === 0).length, 0, "no message edit for a note press");
+            assert.strictEqual(fromNote.of("editEphemeralMessageText").length, 1);
+            assert.deepStrictEqual(kbOf(fromNote.of("editEphemeralMessageText")[0]), [], "the note's keyboard is emptied");
+
+            const gn = await lcGroup({ note: { ephemeralMessageId: 5552, sentAt: new Date() } });
+            const own = await press(`lc_r_${gn._id}`, { userId: SELLER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5552 });
+            assert.strictEqual(own.of("editEphemeralMessageText").length, 1, "the listing's own note is edited once, by syncNote");
+            assert.strictEqual(own.of("editMessageText").length + own.of("editMessageReplyMarkup").length, 0);
+
+            const foreignNote = await press(`lc_r_${gn._id}`, { userId: OTHER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5553 });
+            assert.strictEqual(foreignNote.toast, tt("notYourButton"));
+            assert.strictEqual(foreignNote.edits.length, 0, "a foreign press from a note edits nothing");
+
+            const bad = await press("lc_", dm);
+            assert.strictEqual(bad.toast, tt("staleButton"));
+
+            await Listing.deleteMany({ sellerId: String(SELLER) });
+            await Post.deleteMany({ userId: String(SELLER) });
+        }
 
         console.log("[OK] commands, look-alikes, stale button and the persisted wizard are routed correctly.");
     } finally {

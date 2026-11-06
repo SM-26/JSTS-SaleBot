@@ -188,6 +188,7 @@
     "listingSoldToast": "סומן כנמכר",
     "listingRefreshedToast": "רועננה",
     "listingRemovedToast": "הוסרה מהשוק",
+    "lcNoRemove": "אפשר להסיר כאן רק מודעה מהקבוצה. כשהיא נמכרה, לחצו על נמכר.",
     "captureModCard": "המודעה הראשונה של מוכר חדש: {name}\n{title} · {price}\n{link}",
     "captureExpired": "הפוסט הזה כבר לא זמין. כדי להעלות מודעה, שלחו /newpost.",
     "captureDraftBusy": "יש לכם פוסט בתהליך. סיימו אותו או שלחו /cancel, ואז פתחו את הקישור שוב.",

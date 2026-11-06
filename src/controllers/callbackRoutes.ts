@@ -2,7 +2,7 @@
 // these prefixes and formats must never change (see src/tests/checkCallbackData.ts).
 export type CallbackAction =
     | "test" | "faq" | "approve" | "reject" | "clearRejected" | "clearSold"
-    | "sold" | "bump" | "lang" | "donate" | "label" | "takeDown" | "rejectReason" | "capture" | "listing";
+    | "sold" | "bump" | "lang" | "donate" | "label" | "takeDown" | "rejectReason" | "capture" | "listing" | "lifecycle";
 
 export function routeCallback(data: string): { action: CallbackAction; arg: string } | null {
     if (data.startsWith("test_")) return { action: "test", arg: data.slice("test_".length) };
@@ -20,5 +20,6 @@ export function routeCallback(data: string): { action: CallbackAction; arg: stri
     if (data.startsWith("rr_")) return { action: "rejectReason", arg: data.slice("rr_".length) };
     if (data.startsWith("mk_")) return { action: "capture", arg: data.slice("mk_".length) };
     if (data.startsWith("ls_")) return { action: "listing", arg: data.slice("ls_".length) };
+    if (data.startsWith("lc_")) return { action: "lifecycle", arg: data.slice("lc_".length) };
     return null;
 }

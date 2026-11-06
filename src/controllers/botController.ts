@@ -78,7 +78,7 @@ export class BotController {
         this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
-        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
+        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername, this.lifecycle);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
@@ -366,6 +366,11 @@ export class BotController {
 
         if (route.action === "listing") {
             await this.groupListings.handleListingCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "lifecycle") {
+            await this.lifecycle.handleCallback(query, route.arg);
             return;
         }
 

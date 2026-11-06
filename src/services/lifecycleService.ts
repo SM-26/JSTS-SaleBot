@@ -1,13 +1,14 @@
 import type { Api } from "node-telegram-bot-api";
-import { isUnreachable } from "../config/telegramErrors";
+import type { CallbackQuery, InlineKeyboardButton, Message } from "node-telegram-bot-api/types";
+import { isApiError, isUnreachable } from "../config/telegramErrors";
 import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
-import { deleteNote, sendNote } from "./ephemeralNotes";
-import { nudgeKeyboard } from "./listingCards";
+import { deleteNote, editNote, sendNote } from "./ephemeralNotes";
+import { buildEndedCard, buildManagementCard, nudgeKeyboard } from "./listingCards";
 import type { Card } from "./listingCards";
 import { localeService } from "./localeService";
 import { createBotListing } from "./marketService";
@@ -110,6 +111,87 @@ export class LifecycleService {
     async refreshForPost(postId: string, now: Date): Promise<void> {
         const listing = await this.ensureBotListing(postId, now);
         if (listing) await listingRepository.refresh(id(listing), now);
+    }
+
+    // Brings the private note in line with the listing; best effort, and never from query.message.
+    async syncNote(listing: IListing, refreshed = false): Promise<void> {
+        if (!listing.note || listing.chatId === undefined) return;
+        try {
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(listing.sellerId));
+            const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
+            const card: Card = listing.status === "live"
+                ? buildManagementCard(t, listing, { surface: "n", botUsername: this.botUsername(), refreshed })
+                : buildEndedCard(t, listing);
+            await editNote(this.api, listing.chatId, Number(listing.sellerId), listing.note.ephemeralMessageId, card);
+        } catch (err) {
+            console.error("[ERROR - GroupListingService.syncNote]", (err as Error).message);
+        }
+    }
+
+    // lc_<r|s|x>_<id>: the answer to a nudge or a /stalecheck message. One answer per press.
+    async handleCallback(query: CallbackQuery, arg: string, now = new Date()): Promise<void> {
+        let locale = this.config.lang;
+        let answered = false;
+        const answer = async (key: string): Promise<void> => {
+            if (answered) return;
+            answered = true;
+            try {
+                await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, key) });
+            } catch (err) {
+                console.error("[ERROR - lifecycle.handleCallback]", "answerCallbackQuery failed:", (err as Error).message);
+            }
+        };
+        try {
+            const from = String(query.from.id);
+            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            const m = /^([rsx])_([0-9a-f]{24})$/.exec(arg);
+            if (!m) return await answer("staleButton");
+            const [, action, listingId] = m;
+            const result = action === "r" ? await this.refreshListing(listingId, from, now)
+                : action === "s" ? await this.sellListing(listingId, from, now)
+                    : await this.removeListing(listingId, from, now);
+
+            const okKey = action === "r" ? "listingRefreshedToast" : action === "s" ? "listingSoldToast" : "listingRemovedToast";
+            const key = { ok: okKey, ended: "listingEnded", not_found: "listingEnded", forbidden: "notYourButton", not_allowed: "lcNoRemove" }[result.outcome];
+            await answer(key);
+            if (result.outcome === "forbidden" || result.outcome === "not_allowed") return; // a foreign or refused press edits nothing
+
+            const listing = result.listing;
+            const ok = result.outcome === "ok";
+            const msg = query.message as Partial<Message> & Pick<Message, "chat" | "message_id"> | undefined; // a note press may arrive as inaccessible
+            const noteId = msg?.ephemeral_message_id;
+            const ownNote = noteId !== undefined && listing?.note?.ephemeralMessageId === noteId;
+            // the listing's own note is brought in line here, so a press from it needs no second edit
+            if (listing?.source === "group") await this.syncNote(listing, ok && action === "r" && listing.status === "live");
+            if (!msg || ownNote) return;
+
+            if (noteId !== undefined) {
+                // a note holds one listing: its text becomes the outcome, the keyboard goes; never editMessage* (message_id is 0)
+                const text = ok ? localeService.t(locale, key) : msg.text;
+                if (text) await editNote(this.api, msg.chat.id, Number(from), noteId, { text, keyboard: [] });
+                return;
+            }
+            // a DM keeps the other posts' rows; only this listing's row goes
+            if (msg.chat.type !== "private" || !msg.reply_markup) return;
+            const mine = (b: InlineKeyboardButton) => ("callback_data" in b && b.callback_data?.endsWith(listingId)) || ("url" in b && b.url?.endsWith(listingId));
+            const rows = msg.reply_markup.inline_keyboard.filter((row) => !row.some(mine));
+            try {
+                if (ok && msg.text) {
+                    await this.api.editMessageText({ chat_id: msg.chat.id, message_id: msg.message_id, text: `${msg.text}
+
+${localeService.t(locale, key)}`, reply_markup: { inline_keyboard: rows } });
+                } else {
+                    await this.api.editMessageReplyMarkup({ chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: rows } });
+                }
+            } catch (err) {
+                if (!isApiError(err, 400, "message is not modified")) {
+                    console.error("[ERROR - lifecycle.handleCallback]", "edit failed:", (err as Error).message);
+                }
+            }
+        } catch (err) {
+            console.error("[ERROR - lifecycle.handleCallback]", (err as Error).message);
+            await answer("staleButton");
+        }
     }
 
     private async translatorFor(sellerId: string) {

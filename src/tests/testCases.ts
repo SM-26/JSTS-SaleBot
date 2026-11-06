@@ -2,6 +2,7 @@ import type { Api } from "node-telegram-bot-api";
 import type { Message, User as TgUser } from "node-telegram-bot-api/types";
 import postRepository from "../repositories/postRepository";
 import { PostService } from "../services/postService";
+import { LifecycleService } from "../services/lifecycleService";
 import { UserService } from "../services/userService";
 import { PaymentService } from "../services/paymentService";
 import { InputService } from "../services/inputService";
@@ -640,7 +641,7 @@ async function testCase_CaptureNote(
     }
     try {
         const username = (await api.getMe()).username ?? "";
-        const groupListings = new GroupListingService(api, config, () => username);
+        const groupListings = new GroupListingService(api, config, () => username, new LifecycleService(api, config, new PostService(api, config), () => username));
         const notes = new CaptureNoteService(api, config, groupListings, () => username);
         const capture = await seedCapture({
             chatId: config.approvedGroupId,
