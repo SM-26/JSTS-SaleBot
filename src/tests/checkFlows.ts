@@ -7,6 +7,7 @@ import Listing from "../models/Listing";
 import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
+import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -999,6 +1000,9 @@ async function run() {
             console.log("  [OK] (r12) a malformed td_ id answers already.");
         }
 
+        // (tx1)..(tx7): a moderator also deletes the member's original post
+        await takeDownDeleteChecks({ boot: (o) => ({ h: boot(o).h }), mod, user, settle, T, answers, toAuthor, tdPress, publishTrusted, richTo, APPROVED_GROUP, MOD_GROUP });
+
         // (r13) an expired listing can be taken down
         {
             const { h } = boot();
@@ -1476,7 +1480,7 @@ async function run() {
                 const toMod = () => callsTo(h, "sendMessage").filter((c) => Number(c.params.chat_id) === MOD_GROUP);
                 assert.strictEqual(toMod().length, 1);
                 const buttons = keyboard(toMod()[0]);
-                assert.deepStrictEqual(buttons.map((b) => [b.text, b.callback_data]), [[T("takeDownButton"), `td_${first.id}`]]);
+                assert.deepStrictEqual(buttons.map((b) => [b.text, b.callback_data]), [[T("takeDownButton"), `td_${first.id}`], [T("takeDownDeleteButton"), `tx_${first.id}_d`]]);
                 await addListing(ctrl, seller);
                 assert.strictEqual(toMod().length, 1, "no card for the second listing");
                 console.log("  [OK] (v2) a seller's first listing sends one take-down card.");
@@ -2256,7 +2260,7 @@ async function run() {
                 assert.strictEqual(await draftOf(u), null);
                 const toMod = h.calls.filter((c) => ["sendMessage", "sendRichMessage"].includes(c.method) && Number(c.params.chat_id) === MOD_GROUP);
                 assert.strictEqual(toMod.length, 1, "only the first-seller card");
-                assert.deepStrictEqual(buttons(toMod[0]).map((b) => b.callback_data), [`td_${id}`]);
+                assert.deepStrictEqual(buttons(toMod[0]).map((b) => b.callback_data), [`td_${id}`, `tx_${id}_d`]);
                 const mine = dms(h, u);
                 assert.ok(mine.some((c) => text(c) === T("capturePublished")), "capturePublished");
                 const card = mine.find((c) => c.params.reply_markup)!;

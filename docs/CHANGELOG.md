@@ -19,6 +19,14 @@ Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
     - Data: additive only. New collections `saved_searches` and `alert_log`; new optional fields `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. Rolling back to 3.1.0 leaves them as harmless leftovers; `al_` buttons fall to the stale toast and `s_` links to the greeting.
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead. The version is not bumped here; the owner picks the release order.
 
+Unreleased
+  - Added:
+    - **Take down and delete original post.** A group listing's take-down card has a second button (`tx_<listingId>_<d|y|n>`, moderators only) that also deletes the member's message and all its photos, after one confirm step that survives a restart. A double press acts once, the press is logged with the moderator, listing and message ids, and if Telegram refuses some deletions (48 h limit, missing right) the card says how many are left. The listing still ends and the seller is told as for a take-down. Bot listings keep the single button; a seller's Remove still never deletes anything.
+
+Unreleased - Dependency update.
+  - Changed:
+    - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
+
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
   - Added:
     - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of the same item (same text, or a near-identical text with the same title) refreshes the listing, which follows the newest repost (message, text, price, photos), and sends a short refresh note; a different item that reads alike gets its own note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
