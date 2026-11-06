@@ -113,14 +113,14 @@ export function buildHelpMessage(
         message
             .divider()
             .heading(heading("helpModSection"), 3)
-            .list(items(["helpPending", "helpClearPending", "helpAuth", "helpStats"]));
+            .list(items(["helpPending", "helpClearPending", "helpAuth", "helpStats", "helpVerify", "helpUnverify"]));
     }
 
     if (authLevel >= AuthLevel.ADMIN) {
         message
             .divider()
             .heading(heading("helpAdminSection"), 3)
-            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpVerify", "helpUnverify", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"]));
+            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"]));
     }
 
     return message.build();

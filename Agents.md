@@ -226,7 +226,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
-| `/verify`, `/unverify` | Admin | Set or clear the ✅ verified mark (`users.verifiedAt`); tiers pick the post layout |
+| `/verify`, `/unverify` | Mod | Set or clear the ✅ verified mark (`users.verifiedAt`); tiers pick the post layout |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 

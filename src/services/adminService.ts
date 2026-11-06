@@ -219,7 +219,7 @@ export class AdminService {
         const actor = await this._getUser(msg.from!.id);
         const locale = localeService.resolveUserLocale(actor);
 
-        if (!(await userService.hasAuthLevel(actorId, AuthLevel.ADMIN))) {
+        if (!(await userService.hasAuthLevel(actorId, AuthLevel.MOD))) {
             await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
             return;
         }

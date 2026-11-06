@@ -87,7 +87,7 @@ async function run() {
         // regular keeps the trust line, not a tier layout
         assert.strictEqual((await sellerLayout(plain, "he", "check")).stats, undefined);
 
-        // --- /verify and /unverify: admin only
+        // --- /verify and /unverify: moderators and admins
         const sendCmd = async (from: string, text: string) => {
             const f = fakeApi();
             const svc = new AdminService(f.api, config);
@@ -104,6 +104,12 @@ async function run() {
         assert.ok((await userRepository.findByUserId(fresh))?.verifiedAt, "a plain user cannot unverify");
         await sendCmd(admin, `/unverify ${fresh}`);
         assert.ok(!(await userRepository.findByUserId(fresh))?.verifiedAt, "an admin can unverify");
+        await User.updateOne({ userId: plain }, { $set: { authLevel: AuthLevel.MOD } }).exec();
+        await sendCmd(plain, `/verify ${fresh}`);
+        assert.ok((await userRepository.findByUserId(fresh))?.verifiedAt, "a moderator can verify");
+        await sendCmd(plain, `/unverify ${fresh}`);
+        assert.ok(!(await userRepository.findByUserId(fresh))?.verifiedAt, "a moderator can unverify");
+        await User.updateOne({ userId: plain }, { $set: { authLevel: AuthLevel.USER } }).exec();
         assert.ok(/not found|לא נמצא|не найден/i.test(await sendCmd(admin, "/verify 1")), "unknown user");
 
         // --- publish uses the seller's current tier; an old post rebuilds in it on bump/sold

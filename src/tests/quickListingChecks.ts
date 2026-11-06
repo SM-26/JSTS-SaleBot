@@ -825,6 +825,34 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             console.log("  [OK] (k29) every FAQ message carries the width padding.");
         }
 
+        // (k31) /pending: a refused photo falls back to text with the buttons, and the next post still goes
+        {
+            const { default: User } = await import("../models/User");
+            const { h } = boot({ responses: { sendRichMessage: (p: Record<string, unknown>) => JSON.stringify(p.rich_message).includes("BrokenPending") ? { ok: false, error_code: 400, description: "Bad Request: RICH_MESSAGE_PHOTO_INVALID" } : undefined } });
+            const u = user();
+            await h.sendText("hi", { userId: u });
+            await User.updateOne({ userId: String(u) }, { $set: { authLevel: 2 } }).exec();
+            await Post.deleteMany({ status: "pending" }).exec(); // the queue shows 10 at most; this is the throwaway test DB
+            const later = new Date();
+            for (const title of ["BrokenPending", "FinePending"]) {
+                const p = await Post.create({ userId: String(u), title, description: "d", price: "10", location: "l", media: [], status: "pending", createdAt: later });
+                postIds.push(String(p._id));
+            }
+            h.calls.length = 0;
+            await h.sendText("/pending", { userId: u });
+            await settle();
+            const pendingIds = await Post.find({ status: "pending", title: "BrokenPending", userId: String(u) }).exec();
+            const fallback = sent(h).find((c) => text(c).startsWith("BrokenPending"));
+            assert.ok(fallback, "the refused post goes as text");
+            assert.deepStrictEqual(buttons(fallback!).map((b) => b.callback_data), [`approve_${pendingIds[0]._id}`, `reject_${pendingIds[0]._id}`]);
+            assert.ok(h.calls.some((c) => c.method === "sendRichMessage" && JSON.stringify(c.params.rich_message).includes("FinePending")), "the next post still goes");
+            assert.ok(!sent(h).some((c) => text(c) === T("adminError")), "no error for the whole command");
+            await Post.deleteMany({ _id: { $in: postIds } }).exec();
+            await User.deleteOne({ userId: String(u) }).exec();
+            postIds.length = 0;
+            console.log("  [OK] (k31) /pending: a refused photo falls back to text.");
+        }
+
         // (k30) /myposts: a refused photo falls back to text with the buttons, the next post and the Relist row still go
         {
             const { default: listingRepository } = await import("../repositories/listingRepository");
