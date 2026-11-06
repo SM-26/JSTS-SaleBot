@@ -180,6 +180,8 @@
     "captureNoteIncomplete": "Добавить это на рынок? Не хватает некоторых данных, дополните в боте.",
     "captureAddButton": "✅ Добавить",
     "captureCompleteButton": "➕ Дополнить в боте",
+    "captureEditButton": "✏️ Изменить",
+    "captureNoteTrade": "Похоже на обмен. Измените данные в боте, чтобы добавить.",
     "captureNotNowButton": "Не сейчас",
     "captureNeverButton": "Больше не спрашивать",
     "captureNeverNote": "Хорошо, больше не спрошу. Чтобы изменить это, откройте /myposts в боте.",

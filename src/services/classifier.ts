@@ -11,6 +11,8 @@ export interface Parsed {
     location?: string;
     description?: string;
     isBundle: boolean;
+    /** a trade/swap post with no shekel price: its note offers Edit only */
+    trade?: boolean;
 }
 
 export interface ClassifyResult {
@@ -64,6 +66,15 @@ export function tokens(text: string): string[] {
     return s.split(/\s+/).filter(Boolean);
 }
 
+// a number followed by one of these is a quantity, not a price ("50 כדור", "2 מחסניות")
+const unitRe = new RegExp("^\\s*(?:" + data.units.map(escapeRe).join("|") + ")(?![\\p{L}])", "iu");
+const tradeWords = data.tradeWords.map(normalize).map(p => phraseRe(p));
+const shekelWords = data.shekelWords.map(normalize).map(p => phraseRe(p));
+const LEAD = /^(?:לטרייד|להחלפה|טרייד|החלפה|למכירה)\s*[:\-–]\s*/u;
+const FOLD_BACK: Record<string, string> = { כ: "[כך]", מ: "[מם]", נ: "[נן]", פ: "[פף]", צ: "[צץ]" };
+// the city as written in the raw text (final letters either way), with its prefix letter and a leading "אזור"
+const cityTitleRes = new Map(data.cities.map(c => [c, new RegExp("(?:אזור\\s+)?(?<![\\p{L}\\p{N}])[בלמה]?" + normalize(c).split("").map(ch => FOLD_BACK[ch] ?? (ch === " " ? "\\s+" : escapeRe(ch))).join("") + "(?![\\p{L}\\p{N}])", "u")]));
+
 const NUM = "\\d{1,3}(?:,\\d{3})+|\\d+";
 const NUM2 = "\\d{1,3}(?:,\\d{3})+|\\d{2,}"; // ב / bare prices need 2+ digits
 const CUR = '(?:₪|ש["״\'׳]?ח(?!\\p{L})|שקל(?:ים)?(?!\\p{L}))';
@@ -82,7 +93,7 @@ function findPrices(text: string, res: RegExp[], rule: (i: number) => string): P
     res.forEach((re, i) => {
         for (const m of text.matchAll(re)) {
             const digits = /\d{1,3}(?:,\d{3})+|\d+/.exec(m[0].replace(/^ב-?/, ""));
-            if (digits) out.push({ str: m[0], value: Number(digits[0].replace(/,/g, "")), index: m.index ?? 0, rule: rule(i) });
+            if (digits && !unitRe.test(text.slice((m.index ?? 0) + m[0].length))) out.push({ str: m[0], value: Number(digits[0].replace(/,/g, "")), index: m.index ?? 0, rule: rule(i) });
         }
     });
     out.sort((x, y) => x.index - y.index);
@@ -109,18 +120,27 @@ function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed
     const found = cities.map(c => ({ city: c.city, at: norm.search(c.re) })).filter(c => c.at >= 0).sort((x, y) => x.at - y.at)[0];
     const location = found?.city;
 
-    let title = price && price.index < first.length ? first.slice(0, price.index) + " " + first.slice(price.index + price.str.length) : first;
-    title = title.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
+    // ponytail: trade = keyword and no shekel word anywhere; a trade post's number is not a price
+    const trade = tradeWords.some(re => re.test(norm)) && !shekelWords.some(re => re.test(norm)) && !text.includes("₪");
+    let title = price && !trade && price.index < first.length ? first.slice(0, price.index) + " " + first.slice(price.index + price.str.length) : first;
+    if (location) title = title.replace(cityTitleRes.get(location)!, " ");
+    title = title.replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/([,.;:])(?:\s*[,;:])+/g, "$1")
+        .replace(/^[\s,.\-–:;]+|[\s,.\-–:;]+$/g, "").replace(LEAD, "");
+    if (title.length > 60) { // cut at a word, not in the middle of one
+        const cut = title.slice(0, 60);
+        title = cut.slice(0, title[60] !== " " && cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : 60).replace(/[\s,.\-–:;]+$/g, "");
+    }
     if (!title || (location && normalize(title) === normalize(location))) title = "";
 
     const description = rest.join("\n").trim();
     return {
-        title: title ? title.slice(0, 60).trim() : undefined,
-        price: price?.str,
-        priceValue: price?.value,
+        title: title || undefined,
+        price: trade ? undefined : price?.str,
+        priceValue: trade ? undefined : price?.value,
         location,
         description: description || undefined,
         isBundle: new Set(explicit.map(p => p.value)).size >= 2,
+        ...(trade ? { trade } : {}),
     };
 }
 

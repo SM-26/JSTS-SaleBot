@@ -30,17 +30,18 @@ export const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replac
 
 export function buildAskNote(t: Translate, capture: { id: string; parsed: Parsed }, botUsername: string): Card {
     const { parsed, id } = capture;
-    const complete = Boolean(parsed.title && parsed.price);
-    const first: InlineKeyboardButton = complete
-        ? { text: t("captureAddButton"), callback_data: captureActionData(id, "a"), style: "success" }
-        : { text: t("captureCompleteButton"), url: deepLink(botUsername, `c_${id}`), style: "success" };
+    const trade = Boolean(parsed.trade); // a swap without a shekel price: Edit only, no Add
+    const complete = Boolean(parsed.title && parsed.price) && !trade;
+    const edit: InlineKeyboardButton = { text: t(complete || trade ? "captureEditButton" : "captureCompleteButton"), url: deepLink(botUsername, `c_${id}`), style: complete ? undefined : "success" };
+    const first: InlineKeyboardButton[] = complete ? [{ text: t("captureAddButton"), callback_data: captureActionData(id, "a"), style: "success" }, edit] : [edit];
     return {
-        text: complete
-            ? t("captureNoteComplete", { title: parsed.title ?? "", details: [parsed.price, parsed.location].filter(Boolean).join(" · ") })
-            : t("captureNoteIncomplete"),
-        // Add on its own row, so the two longer labels get half a row each (three in a row cut "לא לשאול שוב").
+        text: trade ? t("captureNoteTrade")
+            : complete
+                ? t("captureNoteComplete", { title: parsed.title ?? "", details: [parsed.price, parsed.location].filter(Boolean).join(" · ") })
+                : t("captureNoteIncomplete"),
+        // Add and Edit share the first row; the two longer labels get half a row each (three in a row cut "לא לשאול שוב").
         keyboard: [
-            [first],
+            first,
             [
                 { text: t("captureNotNowButton"), callback_data: captureActionData(id, "n") },
                 { text: t("captureNeverButton"), callback_data: captureActionData(id, "x") },

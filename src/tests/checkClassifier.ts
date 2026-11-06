@@ -29,6 +29,19 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["dashed phone is no price", "למכירה וסט 050-1234567", true, "none", { priceValue: undefined }],
     ["phone number is not a price", "למכירה 0501234567", true, "none"],
     ["radio fixture, new in box", "מכשיר קשר\nבאופנג UV-5R\nחדש באריזה\n270 ₪ בית דגן", true, "strict", { priceValue: 270, location: "בית דגן", title: "מכשיר קשר" }],
+    // issue #123
+    ["hello kitty: no location left in title, 2 is not the price", "למכירה hello kitty 1911 במצב מעולה, כולל 2 מחסניות. 1,200 ₪, אזור המרכז", true, "strict", { title: "למכירה hello kitty 1911 במצב מעולה, כולל 2 מחסניות", priceValue: 1200, location: "מרכז" }],
+    ["trade, no price: a unit number is no price", "לטרייד: גלוק 19 (50 כדור) מחפש M4", true, "ask", { title: "גלוק 19 (50 כדור) מחפש M4", price: undefined, priceValue: undefined, trade: true }],
+    ["trade word variants", "החלפה M4 בגלוק", true, "none", { trade: true }],
+    ["trade with a real price is a normal post", "לטרייד או למכירה M4 1,500 ₪", true, "strict", { priceValue: 1500, trade: undefined }],
+    ["trade with שקלים is a normal post", "להחלפה M4, או 1500 שקלים", true, "ask", { priceValue: 1500, trade: undefined }],
+    ["trade with NIS is a normal post", "טרייד M4 or 1500 NIS", true, "ask", { trade: undefined }],
+    ["unit number is not a price", "למכירה גלוק 50 כדורים", true, "none", { priceValue: undefined }],
+    ["magazines are not a price", "למכירה M4 2 מחסניות 800", true, "ask", { priceValue: 800 }],
+    ["watts are not a price", "למכירה AEG 350 וואט 600", true, "ask", { priceValue: 600 }],
+    ["leading למכירה: is dropped", "למכירה: כוונת Holosun, 450₪", true, "strict", { title: "כוונת Holosun" }],
+    ["location with ה and אזור goes", "M4 למכירה 900₪ אזור המרכז", true, "strict", { title: "M4 למכירה", location: "מרכז" }],
+    ["long title cut at a word", "למכירה " + "מילה ".repeat(30) + "500₪", true, "strict", { title: "למכירה " + "מילה ".repeat(10).trim() }],
 ];
 
 let failed = 0;
