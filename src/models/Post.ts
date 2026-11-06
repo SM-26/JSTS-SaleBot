@@ -32,6 +32,7 @@ export interface IPost extends Document {
     moderationMessageId: number | null;
     rejectionReason?: string;
     rejectionNotifiedAt?: Date | null;
+    meetup?: boolean;
 }
 
 const mediaItemSchema = new Schema<IMediaItem>({
@@ -59,6 +60,7 @@ const postSchema = new Schema<IPost>({
     // default undefined: absent (not []) unless the description had formatting.
     descriptionEntities: { type: [entitySchema], default: undefined },
     location: { type: String, default: "" },
+    meetup: { type: Boolean },
     media: [mediaItemSchema],
     createdAt: { type: Date, default: Date.now },
     isExpired: { type: Boolean, default: false },

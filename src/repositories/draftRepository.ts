@@ -1,14 +1,14 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
 import type { IMediaItem } from "../models/Post";
 
-export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing">>;
+export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing" | "meetup">>;
 
 /** `timeOut` is minutes from config.json; 0 (or less) means drafts never expire. */
 export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes: number, now = Date.now()): boolean {
     return timeOutMinutes > 0 && draft.updatedAt.getTime() + timeOutMinutes * 60_000 < now;
 }
 
-const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1 };
+const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1, meetup: 1, quick: 1, collecting: 1, mediaGroupId: 1, caption: 1 };
 
 export type CaptureDraftInput = {
     userId: string;

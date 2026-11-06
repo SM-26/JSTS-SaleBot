@@ -101,6 +101,7 @@ console.log(`  [SUCCESS] ${generated.length} generated strings route correctly a
 const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     [`c_${ID}`, { kind: "c", id: ID }],
     [`l_${ID}`, { kind: "l", id: ID }],
+    ["faq_1", { kind: "faq", id: "1" }], ["faq_2", null], ["faq_", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
 ];
 for (const [args, expected] of PAYLOADS) {

@@ -77,6 +77,7 @@ export class PublishService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(author.userId),
             username: author.userName || undefined,
@@ -86,7 +87,7 @@ export class PublishService {
         // Only this send may throw. Once the message exists the post is public:
         // nothing below rejects, or a caller would release the claim / fall back
         // to moderation and publish it twice.
-        const messageId = await this.postService.sendToApproved(richMessage);
+        const messageId = await this.postService.sendToApproved(richMessage, post.meetup);
         if (messageId) {
             try {
                 await postRepository.setApprovedMessageId(postId, messageId);

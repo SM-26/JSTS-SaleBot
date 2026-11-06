@@ -2,6 +2,7 @@ import type { InlineKeyboardButton } from "node-telegram-bot-api/types";
 import type { IListing } from "../models/Listing";
 import type { Parsed } from "./classifier";
 import { deepLink } from "./deepLinks";
+import { isMeetupLocation, meetupLocationText } from "./meetup";
 
 export type Translate = (key: string, params?: Record<string, string | number | boolean>) => string;
 export type Surface = "n" | "c" | "l";
@@ -50,7 +51,7 @@ export function buildAskNote(t: Translate, capture: { id: string; parsed: Parsed
 
 type CardOptions = { surface: "n"; botUsername: string; refreshed?: boolean } | { surface: "c"; refreshed?: boolean };
 
-export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" | "title" | "price">, o: CardOptions): Card {
+export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" | "title" | "price" | "location" | "meetup">, o: CardOptions): Card {
     const id = String(listing._id);
     const params = { title: listing.title ?? "", price: listing.price ?? "" };
     // Two to a row: three in a row clip the labels on a phone.
@@ -62,7 +63,8 @@ export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" 
         [{ text: t("listingRemoveButton"), callback_data: listingActionData(id, "r", o.surface) }],
     ];
     if (o.surface === "n") keyboard[1].push({ text: t("listingManageButton"), url: deepLink(o.botUsername, `l_${id}`) });
-    return { text: t(o.refreshed ? "listingRefreshedCard" : "listingCard", params), keyboard };
+    const meetupLine = listing.meetup || isMeetupLocation(listing.location) ? `\n📍 ${meetupLocationText(listing.location, t("meetupPlace"))}` : "";
+    return { text: t(o.refreshed ? "listingRefreshedCard" : "listingCard", params) + meetupLine, keyboard };
 }
 
 export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | "title">): Card {

@@ -610,6 +610,32 @@ async function run() {
             console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
         }
 
+        // (m2) a meetup post publishes with the meeting-point button and a flagged listing; a plain one has no buttons
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const meetupId = await seedPost(seller, "Meet me");
+            await Post.updateOne({ _id: meetupId }, { $set: { meetup: true } });
+            const plainId = await seedPost(seller, "Plain");
+            for (const [id, msgId] of [[meetupId, 320], [plainId, 321]] as const) {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${id}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: msgId });
+                await settle();
+                const sent = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
+                const listing = (await Listing.findOne({ source: "bot", postId: id }))!;
+                if (id === meetupId) {
+                    const markup = sent.params.reply_markup as { inline_keyboard: { url?: string }[][] };
+                    assert.ok(markup.inline_keyboard[0][0].url!.endsWith("?start=faq_1"), "meeting-point button deep-links faq_1");
+                    assert.strictEqual(listing.meetup, true);
+                } else {
+                    assert.ok(!sent.params.reply_markup, "no buttons on a plain post");
+                    assert.ok(!("meetup" in listing.toObject()), "meetup is never written as false");
+                }
+            }
+            console.log("  [OK] (m2) the meeting-point button and flag follow the post.");
+        }
+
         // (n) a listing failure does not stop the author's DM; the card gets no Take down
         {
             const { h } = boot();

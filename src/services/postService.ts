@@ -6,6 +6,7 @@ import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
 import type { StoredEntity } from "../models/Post";
+import { meetupButton, meetupLocationText } from "./meetup";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 
@@ -15,6 +16,7 @@ export interface PostData {
     descriptionEntities?: StoredEntity[];
     price: string;
     location: string;
+    meetup?: boolean;
     media: MediaItem[];
     userId: number;
     username?: string;
@@ -24,7 +26,8 @@ export interface PostData {
 export class PostService {
     constructor(
         private api: Api,
-        private config: BotConfig
+        private config: BotConfig,
+        private botUsername: () => string = () => ""
     ) { }
 
     private get lang() {
@@ -56,13 +59,16 @@ export class PostService {
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
 
+        const place = localeService.t(this.lang, "meetupPlace");
+        const locationText = data.meetup ? meetupLocationText(data.location, place) : data.location;
+
+        message.heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2);
+        if (data.description) message.blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)));
         message
-            .heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2)
-            .blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)))
             .divider()
             .list([
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
-                richListItem(b => b.paragraph(`📍 ${data.location}`)),
+                ...(locationText ? [richListItem(b => b.paragraph(`📍 ${locationText}`))] : []),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
                 ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
@@ -125,13 +131,17 @@ export class PostService {
         return sent.message_id;
     }
 
-    async sendToApproved(richMessage: InputRichMessage): Promise<number | null> {
+    async sendToApproved(richMessage: InputRichMessage, meetup?: boolean): Promise<number | null> {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: Pick<SendRichMessageParams, "message_thread_id"> = {};
+        const options: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {};
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
+        }
+        const username = this.botUsername();
+        if (meetup === true && username) {
+            options.reply_markup = { inline_keyboard: [[meetupButton(localeService.t(this.lang, "meetupPlace"), username)]] };
         }
 
         const sent = await this.api.sendRichMessage({ chat_id: approvedGroupId, rich_message: richMessage, ...options });
@@ -172,6 +182,7 @@ export class PostService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,

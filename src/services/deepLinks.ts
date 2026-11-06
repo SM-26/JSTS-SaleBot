@@ -1,7 +1,8 @@
-export type StartPayload = { kind: "c" | "l"; id: string };
+export type StartPayload = { kind: "c" | "l"; id: string } | { kind: "faq"; id: "1" };
 
 // /start c_<captureId> or l_<listingId>; anything else is not ours.
 export function parseStartPayload(args: string): StartPayload | null {
+    if (args.trim() === "faq_1") return { kind: "faq", id: "1" }; // the meeting-point button on a group post
     const m = /^([cl])_([0-9a-f]{24})$/.exec(args.trim());
     return m ? { kind: m[1] as "c" | "l", id: m[2] } : null;
 }

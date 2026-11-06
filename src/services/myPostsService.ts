@@ -187,6 +187,7 @@ export class MyPostsService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(post.userId),
             username: user?.userName || undefined,
@@ -342,13 +343,14 @@ export class MyPostsService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
         }, { showCta: true, trustLine });
 
-        const newMessageId = await this.postService.sendToApproved(richMessage);
+        const newMessageId = await this.postService.sendToApproved(richMessage, post.meetup);
 
         // Update bump tracking and store new message ID
         await postRepository.updateBump(postId, bumpCount + 1);

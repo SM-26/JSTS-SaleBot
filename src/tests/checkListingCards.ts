@@ -66,6 +66,23 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert(r.text.startsWith("listingRefreshedCard"));
 }
 
+// meeting point line: flag or location, never when neither
+{
+    const base = { _id: new Types.ObjectId(ID), title: "גלוק", price: "100" };
+    const plain = buildManagementCard(t, base, { surface: "c" });
+    all.push(plain);
+    assert(!plain.text.includes("📍"));
+    const flagged = buildManagementCard(t, { ...base, meetup: true, location: "Haifa" }, { surface: "c" });
+    all.push(flagged);
+    assert.strictEqual(flagged.text, `${plain.text}
+📍 Haifa · meetupPlace`);
+    const byName = buildManagementCard(t, { ...base, location: "בית דגן" }, { surface: "c" });
+    all.push(byName);
+    assert.strictEqual(byName.text, `${plain.text}
+📍 בית דגן`);
+    assert.strictEqual(buildManagementCard(t, { ...base, location: "Haifa" }, { surface: "c" }).text, plain.text);
+}
+
 // ended card
 for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRemovedNote"], ["taken_down", "listingEnded"], ["expired", "listingEnded"]] as const) {
     const c = buildEndedCard(t, { status, title: "x" });

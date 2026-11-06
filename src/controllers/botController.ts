@@ -76,7 +76,7 @@ export class BotController {
         this.config = config;
 
         this.inputService = new InputService(api, this.config);
-        this.postService = new PostService(api, this.config);
+        this.postService = new PostService(api, this.config, () => this.botUsername);
         this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
         this.staleCheck = new StaleCheckService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
@@ -108,6 +108,7 @@ export class BotController {
                     descriptionEntities: post.descriptionEntities,
                     price: post.price,
                     location: post.location,
+                    meetup: post.meetup,
                     media: post.media,
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
@@ -142,6 +143,7 @@ export class BotController {
         // Deep links from capture notes; slices 4-6 add s_ and k_ here.
         const payload = parseStartPayload(args);
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "faq" && this.config.enableFaq !== false) { await this.faqService.showNode(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);

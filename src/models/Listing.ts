@@ -15,6 +15,7 @@ export interface IListing extends Document {
     price?: string;
     priceValue?: number;
     location?: string;
+    meetup?: boolean;
     text?: string;
     textHash?: string;
     media: IMediaItem[];
@@ -48,6 +49,7 @@ const listingSchema = new Schema<IListing>({
     price: { type: String },
     priceValue: { type: Number },
     location: { type: String },
+    meetup: { type: Boolean },
     text: { type: String },
     textHash: { type: String },
     media: { type: [mediaItemSchema], default: [] },

@@ -23,6 +23,12 @@ export interface IDraft extends Document {
     fixing?: boolean;
     // Set when the draft was started from a captured group message (opt-in note).
     captureId?: string;
+    // Slice 5 (all optional, absent unless set): meeting point, quick one-message listing, album/caption collection.
+    meetup?: boolean;
+    quick?: boolean;
+    collecting?: boolean;
+    mediaGroupId?: string;
+    caption?: string;
     startedAt: Date;
     updatedAt: Date;
 }
@@ -46,6 +52,11 @@ const draftSchema = new Schema<IDraft>({
     promptMessageId: { type: Number, required: true },
     fixing: { type: Boolean, default: undefined },
     captureId: { type: String },
+    meetup: { type: Boolean },
+    quick: { type: Boolean },
+    collecting: { type: Boolean },
+    mediaGroupId: { type: String },
+    caption: { type: String },
     startedAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true },
 }, { timestamps: false });

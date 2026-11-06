@@ -21,6 +21,17 @@ export class FaqService {
         }
     }
 
+    // One FAQ node as a new message (the start=faq_1 deep link from a meeting-point button).
+    async showNode(msg: Message, nodeId: string): Promise<void> {
+        try {
+            const user = await userRepository.findByUserId(String(msg.from!.id));
+            await this.renderNode(msg.chat.id, localeService.resolveUserLocale(user), nodeId);
+        } catch (err) {
+            console.error("[ERROR - FaqService.showNode]", (err as Error).message);
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
+        }
+    }
+
     async handleCallback(query: CallbackQuery): Promise<void> {
         const nodeId = query.data?.replace("faq_", "");
         if (!nodeId || !query.message) return;
