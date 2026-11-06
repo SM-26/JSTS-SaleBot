@@ -48,9 +48,10 @@ services:
       retries: 5
       start_period: 15s
 
-  # http://localhost:8082 (admin / pass). Host-only.
+  # On demand: --profile tools up -d mongo-express, then http://localhost:8082 (admin / pass). Host-only.
   mongo-express:
     image: mongo-express:latest
+    profiles: [ "tools" ]
     restart: unless-stopped
     ports:
       - "127.0.0.1:8082:8081"
