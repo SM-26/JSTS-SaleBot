@@ -4,7 +4,7 @@
 #   cp config.test.json.example config.test.json
 #   docker compose -f compose.test.yaml up -d --build
 #
-# Watch it in Docker Desktop under "jsts-salebot-test". See docs/README.md.
+# Watch it in Docker Desktop under "jsts-salebot-test". See docs/Running.md.
 name: jsts-salebot-test
 
 services:

@@ -26,8 +26,9 @@
     "check-dump": "ts-node src/tests/checkProdDump.ts",
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
     "check-tiers": "ts-node src/tests/checkTiers.ts",
+    "check-docs": "ts-node src/tests/checkDocs.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && pnpm run check-docs && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",
@@ -36,7 +37,7 @@
   "bugs": {
     "url": "https://github.com/SM-26/JSTS-SaleBot/issues"
   },
-  "homepage": "https://github.com/SM-26/JSTS-SaleBot/blob/master/docs/README.md",
+  "homepage": "https://github.com/SM-26/JSTS-SaleBot/wiki",
   "author": "SM26",
   "license": "ISC",
   "auditLevel": "low",
