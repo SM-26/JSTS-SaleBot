@@ -42,6 +42,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **`/stalecheck`** — Admin DM command: asks the sellers of legacy (held) listings whether each is still for sale. A dry run first, nothing is sent before **Send** is pressed; unanswered listings expire 7 days later
 - **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group or bot listing
 - **`/label` and `/stats`** — Admins hand-label would-list rows as sale / not sale (`/label`); moderators see tier counts, merge counts and label precision against the go/no-go gate (`/stats`)
+- **Catch-up Scan** — A one-off, owner-run way to offer posts members made before the bot was listening. A script reads a group export on the owner's machine and writes a review file; `/catchup import` stores it, and after `/catchup send` each seller gets one private note with a button into the bot, where they Add the items they want as group listings. Nothing is sent before the owner arms it, and delivery also needs `captureMode: "optin"`
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
 - **Role-Based Access Control (RBAC)** — Granular authorization with User, Moderator, and Admin roles, replacing simple `isAdmin` flags.
 
@@ -112,10 +113,26 @@ Every published post card carries **🚫 Take down** (when its listing exists). 
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/stalecheck` | DM only. Dry run of the legacy-listing check, then **Send** to ask the sellers (`/stalecheck <userId ...>` limits it to those sellers). |
 | `/label` | Label a random unlabeled would-list row as sale / not sale (or skip) to measure the shadow classifier. With matches logged it also asks whether a match was useful. |
+| `/catchup` | Catch-up offers (private chat). Alone: counts. Send `catchup.json` as a file with the caption `/catchup import` to store the offers; `/catchup send` arms them. See the runbook below. |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
 | `/broadcast` | Send a message to the approved channel, either by replying to an existing message or by typing a new message. |
 | `/broadcastUsers` | Send a direct message (PM) to every active user and every author of a pending or approved post (de-duplicated, excluding you). Text only; reports per-recipient delivery failures. |
 
+
+### 🕰️ Catch-up runbook (owner)
+
+One-off. Each step needs you; the bot sends nothing to any member until step 8.
+
+1. Export the group history from Telegram Desktop as JSON. Keep it off the repo.
+2. `pnpm run catchup -- <export.json> [--topic N] [--exclude <botUserId>]` on your machine. The default sale topic is General; `--topic` picks another. It writes `catchup.json` and prints counts only; check them against what you expect.
+3. Review `catchup.json` yourself. Nothing moves on until you are happy with it.
+4. Send it to the bot in a private chat as a file with the caption `/catchup import`. The bot replies with counts and deletes your message.
+5. Delete `catchup.json` and the export copy. Both hold member text.
+6. On the test bot, run `/test` "Catch-up offer to me" and read the note and the DM.
+7. Approve the final note text.
+8. `/catchup send` on the production bot, with `/config captureMode optin` set (a separate switch: with `shadow` armed offers wait, and their 30-day clock keeps running).
+
+Offers expire on their own (30 days after `/catchup send`). A re-import replaces offers not yet sent. A member is never offered twice, and "Don't ask again" members are skipped.
 
 ---
 
@@ -286,6 +303,8 @@ src/
 │   ├── savedSearchService.ts # /alerts, the s_ link, the one-reply fix and the al_ buttons
 │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
 │   ├── captureNoteService.ts # Private opt-in capture notes: ask, refresh, Add / Not now / Don't ask again (mk_)
+│   ├── catchupScan.ts        # Pure scan of a group export into a catch-up file (also used by `scripts/catchup.ts`)
+│   ├── catchupService.ts     # `/catchup` import and send, held offer note, `k_` DM and `ck_` buttons
 │   ├── lifecycleService.ts   # Refresh / sold / remove for any listing, 7-day nudge, 30-day expiry, lc_ buttons
 │   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
 │   ├── groupListingService.ts # Group listings: Add, Sold / Refresh / Remove (ls_), edit sync, /myposts section
@@ -324,6 +343,7 @@ src/
 └── types/
     └── index.ts              # TypeScript interfaces (BotConfig, LocaleStrings…)
 scripts/
+├── catchup.ts                # Scans a group export into catchup.json (no database, no network)
 └── census.js                 # Read-only database census (see docs/BACKUP.md)
 ```
 

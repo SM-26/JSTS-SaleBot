@@ -31,6 +31,8 @@ function outcomeOf(err: unknown): Outcome {
 const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const query = (s: ISavedSearch) => ({ terms: s.terms, maxPrice: s.maxPrice, meetup: s.meetup ?? false });
 // A listing /stalecheck just asked about is not news until its seller confirms it (a confirm moves refreshedAt past staleSentAt).
+// A catch-up listing keeps its old post date as refreshedAt: it is news from when it joined the market.
+const newsAt = (l: IListing) => Math.max(l.refreshedAt.getTime(), l.origin === "catchup" ? l.createdAt.getTime() : 0);
 const unconfirmed = (l: IListing) => l.staleSentAt !== undefined && l.refreshedAt <= l.staleSentAt;
 const alertable = (l: IListing) => !findBlockedWord(l.title ?? "") && !unconfirmed(l);
 
@@ -88,7 +90,7 @@ export class AlertService {
         for (const s of searches) {
             if (gone.has(s.userId)) continue;
             const from = Math.max(s.createdAt.getTime(), s.scannedAt.getTime() - SCAN_OVERLAP_MS);
-            const candidates = live.filter(l => l.refreshedAt.getTime() >= from && l.sellerId !== s.userId);
+            const candidates = live.filter(l => newsAt(l) >= from && l.sellerId !== s.userId);
             const searchId = String(s._id);
             let delivered = false;
             let blocked = false;

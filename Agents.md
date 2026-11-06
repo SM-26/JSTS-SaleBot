@@ -60,6 +60,8 @@
 │   │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
 │   │   ├── meetup.ts             # Beit Dagan meeting point: isMeetupLocation, meetupLocationText, the faq_1 link and button
 │   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
+│   │   ├── catchupScan.ts        # Pure scan of a group export into a catch-up file; parseCatchupFile()
+│   │   ├── catchupService.ts     # /catchup import and send, held offer note, k_ DM and ck_ buttons
 │   │   ├── lifecycleService.ts   # Refresh / sold / remove for any listing (lc_), 7-day nudge, 30-day expiry, held nudges
 │   │   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
 │   │   ├── groupListingService.ts # Group listings: Add, Sold/Refresh/Remove (ls_), edit sync, /myposts section
@@ -93,6 +95,7 @@
 │   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
 │   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
 │   │   ├── fixtures.ts           # seedCapture(): a classified capture straight through the model
+│   │   ├── checkCatchup.ts       # `pnpm run check-catchup`: export scan (windows, tiers, merge, parse)
 │   │   ├── checkListingCards.ts  # `pnpm run check-cards`: card builders, mk_/ls_ formats, start payloads
 │   │   ├── syntheticCapture.ts   # Manual (not in `pnpm test`): 20 messages through the controller on the TEST bot/group
 │   │   ├── lifecycleFakes.ts     # Fakes for the lifecycle checks
@@ -110,6 +113,7 @@
 │       └── ru/
 │           └── common.json       # Russian locale strings
 ├── scripts/
+│   ├── catchup.ts                # Scans a group export into catchup.json (no DB, no network)
 │   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
 ├── config.test.json.example      # Config for compose.test.yaml (test groups, every feature on)
@@ -204,6 +208,7 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **Slice 5 fields** are optional and additive: `drafts.quick`, `drafts.collecting`, `drafts.mediaGroupId`, `drafts.caption` and `meetup` on `drafts`, `posts` and `listings`. The album preview timer is in memory and holds only the user id: a restart loses only the send, and `/newpost` then Continue resends (the draft is in Mongo, `claimCollecting` is the guard). After a rollback to 3.1.0 the fields are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
 - **Slice 4 fields** are optional and additive: new collections `saved_searches` (60-day TTL on `expiresAt`, in every mode) and `alert_log` (unique per search and listing), plus `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. A saved search holds the parsed query, never the original message; it stays and resumes when `buyerMatches` goes back to `on`, except that a 403 (the buyer blocked the bot) deletes that buyer's searches, and the 60-day TTL deletes the rest. After a rollback the `al_` buttons answer "expired" and `s_` links fall to the greeting.
 - **Slice 3 fields** are optional and additive: `listings.nudgeHeld` (a nudge was claimed but could not be delivered; it waits for the seller's next sale-topic message) and `listings.staleSentAt` (set by `/stalecheck`, starts the 7-day answer window). `posts` and `users` are unchanged. After a rollback to 3.1.0 the `lc_`/`sc_` buttons do nothing and nothing expires or nudges; the fields are ignored.
+- **Slice 6 fields** are optional and additive: `members.pendingCatchup` (a seller's offered items) and `members.catchup` (`importedAt`, `armedAt`, `sentAt`, the held note), and `listings.origin: "catchup"`. Stamps outlive the items: `sentAt` alone blocks a second offer. `catchup.json` and the export hold member text and never enter the repo (gitignored). After a rollback to an older image, `ck_` falls to the stale catch-all, `k_` falls to the greeting, `members.catchup` is ignored and added listings stay.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -225,6 +230,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
 | `/stalecheck` | Admin | DM only: dry run, then ask legacy-listing sellers if each is still for sale (`sc_go`/`sc_no`) |
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
+| `/catchup`| Admin     | DM only: catch-up offers. Alone: counts. Caption `/catchup import` on a `catchup.json` file; `/catchup send` arms delivery |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
 | `/verify`, `/unverify` | Mod | Set or clear the ✅ verified mark (`users.verifiedAt`); tiers pick the post layout |
@@ -269,6 +275,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-locals` | Locale files: JSON syntax, no empty values, key parity across `en`/`he`/`ru`, FAQ structure | no |
 | `pnpm run check-config` | `/config` value parsing per key (`configSchema`) | no |
 | `pnpm run check-classifier` | Classifier fixtures: tiers, price/title parsing, blocked words | no |
+| `pnpm run check-catchup` | Export scan: windows, tiers, merge, `parseCatchupFile` | no |
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
@@ -314,8 +321,8 @@ Never run the bot, or a check, against the production token or database.
 - **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
-- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. The one deliberate exception to "a member's own message is never touched" is a moderator's **Take down and delete original post** (`tx_`) on a group listing's take-down card: it ends the listing and deletes every id in `listing.messageIds` (photos included). It is moderators only and behind a confirm step; a seller's Remove still never deletes anything, and a bot listing's card has no such button.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 5 adds `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>` and the `faq_1` start payload (the meeting-point button; it must keep opening FAQ node 1), frozen the same way. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
+- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. The one deliberate exception to "a member's own message is never touched" is a moderator's **Take down and delete original post** (`tx_`) on a group listing's take-down card: it ends the listing and deletes every id in `listing.messageIds` (photos included). It is moderators only and behind a confirm step; a seller's Remove still never deletes anything, and a bot listing's card has no such button. Catch-up offers (`/catchup`) reach no member before an admin runs `/catchup send`, and then only under `captureMode: optin`.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 5 adds `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>` and the `faq_1` start payload (the meeting-point button; it must keep opening FAQ node 1), frozen the same way. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.

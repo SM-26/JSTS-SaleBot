@@ -544,6 +544,14 @@ async function checkAlerts() {
         await svc.tick(new Date());
         assert.strictEqual(to(h, u1).length, 1, "two overlapping searches send once");
 
+        // a catch-up listing with an old post date is news when it joins the market
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await search(u1);
+        await mkListing(`al-${U}-k`, "Glock 17 catchup", { origin: "catchup", createdAt: new Date(), refreshedAt: new Date(created.getTime() - 10 * 24 * 3600_000) });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "a catch-up listing alerts");
+
         // a meetup listing: place in the text, faq_1 button; a bot-less service sends no row
         for (const [username, rows] of [["testbot", 1], ["", 0]] as const) {
             await reset();

@@ -11,6 +11,8 @@
     "check-locals": "ts-node src/tests/checkLocals.ts",
     "check-config": "ts-node src/tests/configSchema.check.ts",
     "check-classifier": "ts-node src/tests/checkClassifier.ts",
+    "check-catchup": "ts-node src/tests/checkCatchup.ts",
+    "catchup": "ts-node scripts/catchup.ts",
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
     "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
@@ -25,7 +27,7 @@
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
     "check-tiers": "ts-node src/tests/checkTiers.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",

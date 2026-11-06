@@ -51,6 +51,7 @@ export interface LocaleStrings {
     dmSellHint: string;
     dmWantedOff: string;
     trustLine: string;
+    trustLineOne: string;
     enterDescription: string;
     enterPrice: string;
     expectedText: string;

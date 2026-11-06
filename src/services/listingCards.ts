@@ -1,6 +1,7 @@
 import type { InlineKeyboardButton } from "node-telegram-bot-api/types";
 import type { IListing } from "../models/Listing";
 import type { Parsed } from "./classifier";
+import type { CatchupItem } from "./catchupScan";
 import { deepLink } from "./deepLinks";
 import { isMeetupLocation, meetupLocationText } from "./meetup";
 
@@ -77,6 +78,37 @@ export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | 
 
 export function buildNeverNote(t: Translate, botUsername: string): Card {
     return { text: t("captureNeverNote"), keyboard: [[{ text: t("captureOpenBotButton"), url: `https://t.me/${botUsername}` }]] };
+}
+
+export const catchupActionData = (memberId: string, action: "x" | number): string => `ck_${memberId}_${action}`;
+
+export function parseCatchupArg(arg: string): { memberId: string; action: "x" } | { memberId: string; action: "add"; messageId: number } | null {
+    const m = /^([0-9a-f]{24})_(x|[1-9]\d*)$/.exec(arg);
+    if (!m) return null;
+    return m[2] === "x" ? { memberId: m[1], action: "x" } : { memberId: m[1], action: "add", messageId: Number(m[2]) };
+}
+
+export function buildCatchupNote(t: Translate, o: { memberId: string; count: number }, botUsername: string): Card {
+    return {
+        text: t("catchupOfferNote", { n: o.count }),
+        keyboard: [
+            [{ text: t("catchupPickButton"), url: deepLink(botUsername, `k_${o.memberId}`), style: "success" }],
+            [{ text: t("catchupNoThanksButton"), callback_data: catchupActionData(o.memberId, "x") }],
+        ],
+    };
+}
+
+// ponytail: capped at 15 so the text stays under Telegram's 4096 characters; the rest appear as earlier ones are added.
+const CATCHUP_LIST_MAX = 15;
+
+export function buildCatchupList(t: Translate, o: { memberId: string; items: CatchupItem[] }): Card {
+    const items = o.items.slice(0, CATCHUP_LIST_MAX);
+    if (!items.length) return { text: t("catchupAllDone"), keyboard: [] };
+    const lines = items.map((it, i) => `${i + 1}. ${[it.title, it.price, it.location].filter(Boolean).join(" · ")}`);
+    return {
+        text: [t("catchupListTitle"), "", ...lines].join("\n"),
+        keyboard: items.map((it, i) => [{ text: [...`➕ ${i + 1}. ${it.title}`].slice(0, 32).join(""), callback_data: catchupActionData(o.memberId, it.messageId) }]),
+    };
 }
 
 // The nudge keyboard: two to a row. A bot listing never gets Remove; the DM omits the Manage link.

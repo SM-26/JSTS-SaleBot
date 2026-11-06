@@ -24,6 +24,7 @@ import { StaleCheckService, parseSellerIds, renderStaleDm } from "../services/st
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
 import { seedCapture } from "./fixtures";
+import { catchupMarketChecks } from "./catchupMarketChecks";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
 // are atomic updates and index behaviour (TTL, partial unique), which a mock
@@ -33,6 +34,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const RUN = `mkt-${Date.now()}`;
 const CHAT = -1000000000 - (Date.now() % 1000000);
 const SEC = 1000;
+const odIds: string[] = []; // numeric member ids of the offer-delivery section
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -588,6 +590,8 @@ async function run() {
         assert.ok(d3 && d3.captureId === undefined && d3.step === "title", "start over a capture draft leaves no captureId");
         assert.ok(!("captureId" in (await Draft.collection.findOne({ userId: du }))!), "captureId is gone from the document");
         console.log("[OK] draft startFromCapture.");
+
+        await catchupMarketChecks(RUN, CHAT, odIds);
 
         // slice 3: lifecycle clock fields and atomic claims (fake clock, nothing calls new Date())
         {
@@ -1262,6 +1266,7 @@ async function run() {
             console.log("[OK] /stalecheck service.");
         }
     } finally {
+        await Member.deleteMany({ userId: { $in: odIds } });
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
             Capture.deleteMany({ chatId: CHAT }),

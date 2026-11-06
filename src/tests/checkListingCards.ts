@@ -1,9 +1,10 @@
 import assert from "assert";
 import { Types } from "mongoose";
 import {
-    buildAskNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
-    nudgeKeyboard, parseCaptureArg, parseListingArg, type Card,
+    buildAskNote, buildCatchupList, buildCatchupNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
+    catchupActionData, nudgeKeyboard, parseCaptureArg, parseCatchupArg, parseListingArg, type Card,
 } from "../services/listingCards";
+import type { CatchupItem } from "../services/catchupScan";
 import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildDmMatches, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
 
 /** Pure card builders and callback_data codecs; no Mongo, no config. Run: pnpm run check-cards */
@@ -28,6 +29,42 @@ const urls = (c: Card): Array<string | undefined> => c.keyboard.flat().map((b) =
     assert.strictEqual(urls(c)[1], `https://t.me/${BOT}?start=c_${ID}`);
     assert.strictEqual(c.keyboard[0][1].text, "captureEditButton");
     assert.strictEqual(c.keyboard[0][0].style, "success"); // green Add (a ➕ alone was hard to see)
+}
+
+// catch-up note and list (synthetic items)
+{
+    const n = buildCatchupNote(t, { memberId: ID, count: 3 }, BOT);
+    all.push(n);
+    assert.strictEqual(n.text, 'catchupOfferNote{"n":3}');
+    assert.deepStrictEqual(n.keyboard.map((r) => r.length), [1, 1]);
+    assert.deepStrictEqual(urls(n), [`https://t.me/${BOT}?start=k_${ID}`, undefined]);
+    assert.deepStrictEqual(datas(n), [undefined, `ck_${ID}_x`]);
+    assert.strictEqual(n.keyboard[0][0].style, "success");
+    assert.strictEqual((n.keyboard[0][0] as { text: string }).text, "catchupPickButton");
+    assert.strictEqual((n.keyboard[1][0] as { text: string }).text, "catchupNoThanksButton");
+
+    assert.strictEqual(catchupActionData(ID, "x"), `ck_${ID}_x`);
+    assert.strictEqual(catchupActionData(ID, 1234567), `ck_${ID}_1234567`);
+    assert.deepStrictEqual(parseCatchupArg(`${ID}_x`), { memberId: ID, action: "x" });
+    assert.deepStrictEqual(parseCatchupArg(`${ID}_42`), { memberId: ID, action: "add", messageId: 42 });
+    for (const bad of [`${ID}_0`, `${ID}_a`, `${ID}_`, `${ID}_01`, "abc123_x", `${ID}x_5`, ""]) assert.strictEqual(parseCatchupArg(bad), null, bad);
+
+    const item = (i: number, title = `Item ${i}`): CatchupItem => ({ messageId: 1000 + i, date: "2026-10-20T10:00:00", title, price: `${i}00₪`, location: "Center", text: "x", tier: "strict" });
+    const l = buildCatchupList(t, { memberId: ID, items: [item(1), item(2, "ציוד טקטי ארוך מאוד מאוד מאוד מאוד מאוד מאוד מאוד מאוד")] });
+    all.push(l);
+    assert.deepStrictEqual(datas(l), [`ck_${ID}_1001`, `ck_${ID}_1002`]);
+    assert(l.text.startsWith("catchupListTitle"));
+    assert(l.text.includes("1. Item 1 · 100₪ · Center") && l.text.includes("2. "));
+    const labels = l.keyboard.flat().map((b) => b.text);
+    assert.strictEqual(labels[0], "➕ 1. Item 1");
+    assert(labels.every((x) => [...x].length <= 32), "labels trimmed to 32");
+    const many = buildCatchupList(t, { memberId: ID, items: Array.from({ length: 20 }, (_, i) => item(i + 1)) });
+    all.push(many);
+    assert.strictEqual(many.keyboard.flat().length, 15);
+    assert(many.text.length < 4096);
+    const none = buildCatchupList(t, { memberId: ID, items: [] });
+    assert.strictEqual(none.text, "catchupAllDone");
+    assert.strictEqual(none.keyboard.length, 0);
 }
 
 // ask note incomplete (no title, or no price)

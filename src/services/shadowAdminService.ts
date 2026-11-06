@@ -154,6 +154,7 @@ export class ShadowAdminService {
                 prec7: pct(s7.sale, s7.sale + s7.notSale, 1), prec30: pct(s30.sale, s30.sale + s30.notSale, 1),
                 gate7: gate(s7), gate30: gate(s30),
             });
+            const catchupN = await listingRepository.countCatchupSince(new Date(now - 30 * DAY_MS)).catch(() => 0);
             // captures expire after 7 days, so there is no 30-day opt-in figure
             let optin = "";
             try {
@@ -164,6 +165,8 @@ export class ShadowAdminService {
             } catch (err) {
                 console.error("[ERROR - stats.notes]", (err as Error).message);
             }
+            if (catchupN > 0) optin += `
+${localeService.t(locale, "statsCatchup", { n: catchupN })}`;
             let buyer = "";
             try {
                 const since = new Date(now - 7 * DAY_MS);

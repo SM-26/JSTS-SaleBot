@@ -17,7 +17,8 @@ import { PublishService } from "../services/publishService";
 import listingRepository from "../repositories/listingRepository";
 import { GroupListingService } from "../services/groupListingService";
 import { CaptureNoteService } from "../services/captureNoteService";
-import { seedCapture } from "./fixtures";
+import { CatchupService } from "../services/catchupService";
+import { seedCapture, seedCatchupOffer } from "./fixtures";
 import { rankMatches } from "../services/matchService";
 import { AlertService } from "../services/alertService";
 import { StaleCheckService } from "../services/staleCheckService";
@@ -54,6 +55,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
     capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
+    catchup_offer: { label: "🛒 Catch-up offer to me", run: testCase_CatchupOffer },
     match_for_text: { label: "🔎 Match for text", run: testCase_MatchForText },
     alert_me_now: { label: "🔔 Alert me now", run: testCase_AlertMeNow },
     age_listing_7: { label: "⏩ Age my test listing 7 days", run: (...a) => ageTestListing(7, ...a) },
@@ -959,5 +961,48 @@ async function testCase_StaleDryRun(
     } catch (err) {
         console.error("[ERROR - testCase_StaleDryRun]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Stale dry run failed: " + (err as Error).message });
+    }
+}
+
+/**
+ * Sends the presser a real catch-up note for two synthetic items. Fixture only: a tap in the
+ * DM makes listings that point at fake message ids (the test bot only, like testCase_CaptureNote).
+ */
+async function testCase_CatchupOffer(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ The catch-up test runs only on the test bot." });
+        return;
+    }
+    try {
+        const username = (await api.getMe()).username ?? "";
+        const service = new CatchupService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, new PostService(api, config), () => username)), () => username);
+        const now = new Date();
+        const userId = String(msg.from.id);
+        await listingRepository.deleteBySellerTitle(userId, "גלוק 17"); // repeatable: clear what an earlier run added
+        await listingRepository.deleteBySellerTitle(userId, "וסט טקטי");
+        await seedCatchupOffer(userId, [
+            { messageId: 1, date: now.toISOString(), title: "גלוק 17", price: "1,300₪", location: "מרכז", text: "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", tier: "strict" },
+            { messageId: 2, date: now.toISOString(), title: "וסט טקטי", price: "250₪", text: "וסט טקטי למכירה 250₪", tier: "strict" },
+        ], now);
+        const sent = await service.deliver(userId, now);
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: sent
+                ? `✅ Catch-up note sent to you in group ${config.approvedGroupId}, topic ${config.approvedTopicId ?? "none"}`
+                : `❌ The catch-up note was not sent (group ${config.approvedGroupId}); see the log`,
+        });
+    } catch (err) {
+        console.error("[ERROR - testCase_CatchupOffer]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Catch-up offer failed: " + (err as Error).message });
     }
 }

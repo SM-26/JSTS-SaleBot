@@ -1,5 +1,6 @@
 import Listing, { IListing } from "../models/Listing";
 import type { IMediaItem } from "../models/Post";
+import type { CatchupItem } from "../services/catchupScan";
 import { textHash } from "../services/classifier";
 import type { Post } from "../types";
 
@@ -101,6 +102,32 @@ class ListingRepository {
         });
     }
 
+    // A past message found by the catch-up scan; the clock starts at its post date, so slice 3's expiry sees its real age.
+    createFromCatchup(input: { chatId: number; messageId: number; sellerId: string; sellerName: string; item: CatchupItem; isBundle: boolean }, now: Date): Promise<IListing> {
+        const { item } = input;
+        const priceValue = priceValueOf(item.price);
+        return Listing.create({
+            chatId: input.chatId,
+            messageIds: item.messageIds ?? [input.messageId],
+            sellerId: input.sellerId,
+            sellerName: input.sellerName,
+            title: item.title,
+            price: item.price,
+            ...(item.location ? { location: item.location } : {}),
+            text: item.text,
+            media: [],
+            isBundle: input.isBundle,
+            ...(priceValue !== undefined ? { priceValue } : {}),
+            textHash: textHash(item.text),
+            source: "group",
+            origin: "catchup",
+            status: "live",
+            hold: false,
+            createdAt: now,
+            refreshedAt: new Date(item.date),
+        });
+    }
+
     findLiveByMessage(chatId: number, messageId: number): Promise<IListing | null> {
         return Listing.findOne({ source: "group", status: "live", chatId, messageIds: messageId }).exec();
     }
@@ -191,7 +218,7 @@ class ListingRepository {
     // Ended = sold + expired + removed (live and taken-down listings do not count); the top-seller rule reads this.
     async countEnded(sellerId: string): Promise<{ sold: number; ended: number }> {
         const rows = await Listing.aggregate<{ _id: string; n: number }>([
-            { $match: { sellerId, status: { $in: ["sold", "expired", "removed"] } } },
+            { $match: { sellerId, status: { $in: ["sold", "expired", "removed"] }, $nor: [{ origin: "catchup", status: "expired" }] } },
             { $group: { _id: "$status", n: { $sum: 1 } } },
         ]).exec();
         const sold = rows.find(r => r._id === "sold")?.n ?? 0;
@@ -227,11 +254,17 @@ class ListingRepository {
     }
 
     findLiveRefreshedSince(since: Date): Promise<IListing[]> {
-        return Listing.find({ status: "live", hold: false, refreshedAt: { $gte: since } }).exec();
+        // a catch-up listing keeps its old post date as refreshedAt: it is news from when it joined the market
+        return Listing.find({ status: "live", hold: false, $or: [{ refreshedAt: { $gte: since } }, { origin: "catchup", createdAt: { $gte: since } }] }).exec();
     }
 
     findByIds(ids: string[]): Promise<IListing[]> {
         return Listing.find({ _id: { $in: ids } }).exec();
+    }
+
+    // Every listing of the seller, any status: the keys a catch-up item is checked against.
+    async findSellerKeys(sellerId: string): Promise<{ chatId: number; textHash?: string; messageIds: number[] }[]> {
+        return Listing.find({ sellerId }, { chatId: 1, textHash: 1, messageIds: 1 }).lean<{ chatId: number; textHash?: string; messageIds: number[] }[]>().exec();
     }
 
     findSellerRecent(sellerId: string, since: Date): Promise<IListing[]> {
@@ -333,10 +366,14 @@ class ListingRepository {
         return Listing.countDocuments({ hold: true, status: "live" }).exec();
     }
 
+    countCatchupSince(since: Date): Promise<number> {
+        return Listing.countDocuments({ origin: "catchup", createdAt: { $gte: since } }).exec();
+    }
+
     // Listings created since `since` (all time when omitted), grouped by status.
     async countByStatus(since?: Date): Promise<Record<string, number>> {
         const rows = await Listing.aggregate<{ _id: string; n: number }>([
-            ...(since ? [{ $match: { createdAt: { $gte: since } } }] : []),
+            { $match: { origin: { $ne: "catchup" }, ...(since ? { createdAt: { $gte: since } } : {}) } }, // catch-up listings have their own line
             { $group: { _id: "$status", n: { $sum: 1 } } },
         ]).exec();
         return Object.fromEntries(rows.map(r => [r._id, r.n]));

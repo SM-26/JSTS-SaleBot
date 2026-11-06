@@ -23,6 +23,7 @@ import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
+import { CatchupService } from "../services/catchupService";
 import { AlertService } from "../services/alertService";
 import { BuyerNoteService } from "../services/buyerNoteService";
 import { SavedSearchService } from "../services/savedSearchService";
@@ -36,8 +37,11 @@ import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richM
 import { localeService } from "../services/localeService";
 import { sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
+import memberRepository from "../repositories/memberRepository";
+import captureRepository from "../repositories/captureRepository";
+import { classify } from "../services/classifier";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
-import { command, ParsedCommand } from "./commands";
+import { command, parseCommand, ParsedCommand } from "./commands";
 import { ensureUserMiddleware, sessionKey, staleButtonCatchAll } from "./middleware";
 import { TEST_CASES } from "../tests/testCases"; // Comment out to disable tests
 
@@ -74,6 +78,7 @@ export class BotController {
     private staleCheck: StaleCheckService;
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
+    readonly catchupService: CatchupService;
     readonly buyerNotes: BuyerNoteService;
     readonly alerts: AlertService;
     private savedSearches: SavedSearchService;
@@ -90,6 +95,7 @@ export class BotController {
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername, this.lifecycle);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
+        this.catchupService = new CatchupService(api, this.config, this.groupListings, () => this.botUsername);
         this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.alerts = new AlertService(api, this.config, this.groupListings, () => this.botUsername);
         this.savedSearches = new SavedSearchService(api, this.config);
@@ -156,6 +162,7 @@ export class BotController {
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
         if (payload?.kind === "faq" && this.config.enableFaq !== false) { await this.faqService.showNode(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
+        if (payload?.kind === "k" && await this.catchupService.handleStart(msg, payload.id, new Date())) return;
         if (payload?.kind === "s" && this.config.buyerMatches === "on") {
             await this.savedSearches.handleStartLink(msg, payload.id, ctx && this.session.find(ctx)?.data);
             return;
@@ -394,6 +401,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "catchup") {
+            await this.catchupService.handleCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "listing") {
             await this.groupListings.handleListingCallback(query, route.arg);
             return;
@@ -538,8 +550,20 @@ export class BotController {
             }
 
             // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
-            if (this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
-                await this.captureService.handleGroupMessage(msg);
+            if (this.captureService.isSaleTopicMessage(msg)) {
+                // one sale post must not get a capture note and a catch-up note: hold the offer while a window is open
+                // or this message will open one (a sale-like text, or media alone); the sweeper delivers it once the window settles (releaseHeld)
+                let holdOffer = false;
+                if (this.captureOn()) {
+                    const heldAt = new Date(); // before the capture row, so its lastAt is later
+                    const text = msg.text ?? msg.caption ?? "";
+                    holdOffer = await captureRepository.hasOpen(msg.chat.id, String(msg.from!.id)).catch(() => false)
+                        || !text || classify(text, Boolean(msg.photo || msg.video)).tier !== "none";
+                    await this.captureService.handleGroupMessage(msg);
+                    if (holdOffer && this.config.captureMode === "optin") await memberRepository.holdCatchup(String(msg.from!.id), heldAt).catch(() => undefined);
+                }
+                // after capture, so a blocked or failed capture never stops the offer; the mode check lives in the service
+                if (!holdOffer) await this.catchupService.onSaleTopicMessage(String(msg.from!.id), new Date());
             }
 
             return next();
@@ -633,6 +657,22 @@ export class BotController {
             }
             return this.shadowAdminService.handleLabel(msg, args);
         }));
+        const catchupAdmin = async (msg: Message): Promise<boolean> => {
+            if (await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) return true;
+            this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+            return false;
+        };
+        bot.use(cmd("catchup", async (msg, args) => {
+            if (!isPrivate(msg) || !await catchupAdmin(msg)) return;
+            return this.catchupService.handleCommand(msg, args);
+        }));
+        // The export file itself: a document with the caption `/catchup import`.
+        bot.use(async (ctx, next) => {
+            const msg = ctx.message;
+            const parsed = msg?.document && msg.caption ? parseCommand(msg.caption, botUsername) : null;
+            if (!msg || parsed?.name !== "catchup" || parsed.args.toLowerCase() !== "import" || !isPrivate(msg)) return next();
+            if (await catchupAdmin(msg)) await this.catchupService.handleImportDocument(msg);
+        });
         bot.use(cmd("stalecheck", async (msg, args, ctx) => {
             if (!isPrivate(msg)) return;
             if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {

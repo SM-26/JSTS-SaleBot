@@ -39,6 +39,21 @@ Unreleased - Test stack.
 Unreleased - Numbered stale-check results.
   - Changed:
     - On a multi-item `/stalecheck` DM, each result line now starts with the item's number ("1 · Refreshed"). `lcItemResult` is a new locale string; a stale button's label must keep starting with `{i}`, which `check-routes` enforces.
+
+Unreleased - Catch-up scan (slice 6 of "the market", #104).
+  - Added:
+    - **Catch-up scan.** A one-off way to offer the sale-topic posts members already made, before the bot was listening, as group listings. The owner exports the group history and runs `pnpm run catchup -- <export.json>` on their own machine (no database, no network). It reads the last 30 days, groups posts the way the live capture does, keeps the `strict` and `ask` tiers, merges reposts and writes `catchup.json` (gitignored) plus a counts-only summary. Posts without a title are dropped and counted.
+    - **`/catchup`** (admin, private chat). `/catchup` shows counts. Sending `catchup.json` as a file with the caption `/catchup import` stores each seller's items on their `members` record and deletes the file message; a re-import replaces unsent offers. `/catchup send` arms them. Nothing reaches a member before that.
+    - **One private note per seller.** After `/catchup send`, a seller's next message in the sale topic gets a held private note (the same ephemeral kind as slice 2) with a button into the bot (`?start=k_<memberId>`). The DM lists their items with an Add button each (`ck_<memberId>_<x|messageId>`, `x` = skip the rest); Add makes a group listing. An item matching a live or recently expired listing of theirs is not added twice. Only items up to 30 days old are offered. "Don't ask again" members are never offered, and a member is never offered twice. A failed send tries again on their next message.
+    - Offers that go unsent drop 30 days after `/catchup send` (never-armed imports 30 days after the import); sent offers keep their items 30 days so the link works. An hourly purge removes them; the sent stamp stays.
+    - Review fixes: an item the seller already has in any status (even ended) or declined within 30 days is not offered or added again; the offer goes out at most once (only a definite API refusal frees the claim); behind a sale post it is held and a sweeper job sends it once the capture window settles (no further message needed; same rules: optin, armed, once, 30 days); expired catch-up listings do not count as ended for the top-seller tier; `/stats` shows catch-up listings on their own line; the scan summary counts `noPrice`; `scripts/catchup.ts` rejects unknown flags.
+    - Tests: `check-catchup` (new, in `pnpm test`), plus coverage in `check-callbacks`, `check-cards`, `check-market`, `check-flows` and `check-routes`. `/test` gained "Catch-up offer to me" (test bot only).
+  - Notes:
+    - Data: additive only. `members` gains the optional `pendingCatchup` and `catchup` (stamps `importedAt`, `armedAt`, `sentAt`, `heldAt`); `listings` gets an optional `origin: "catchup"`; `posts` and `users` are unchanged. `catchup.json` and the export hold member text: delete both after the import.
+    - **Rollback caveat:** to 3.2.0 or older. `ck_` buttons fall to the stale-button catch-all, `k_` links fall to the greeting, and `members.catchup` is ignored. Listings members already added stay. Stamps are harmless leftovers.
+    - **Owner gates:** (1) the owner reviews `catchup.json` before the import; (2) the owner approves the final note text, as sent by "Catch-up offer to me" on the test bot; (3) `/catchup send` needs the owner's go-ahead. Delivery also needs `captureMode: optin`, which is a separate switch: with `shadow` armed offers wait (their clock keeps running).
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead.
+
 Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
   - Added:
     - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
