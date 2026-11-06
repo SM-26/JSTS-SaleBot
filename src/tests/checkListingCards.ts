@@ -46,12 +46,12 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert(n.text.startsWith("listingCard"));
     assert.strictEqual(n.keyboard.length, 2);
     assert.deepStrictEqual(datas(n).slice(0, 3), [`ls_${ID}_s_n`, `ls_${ID}_f_n`, `ls_${ID}_r_n`]);
-    assert.strictEqual(n.keyboard[1].length, 1);
+    assert.deepStrictEqual(n.keyboard.map((r) => r.length), [2, 2]);
     assert.strictEqual(urls(n)[3], `https://t.me/${BOT}?start=l_${ID}`);
     assert.strictEqual(datas(n)[3], undefined);
     const c = buildManagementCard(t, listing, { surface: "c" });
     all.push(c);
-    assert.strictEqual(c.keyboard.length, 1);
+    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [2, 1]);
     assert(datas(c).every((d) => d?.endsWith("_c")));
     const r = buildManagementCard(t, listing, { surface: "c", refreshed: true });
     all.push(r);
