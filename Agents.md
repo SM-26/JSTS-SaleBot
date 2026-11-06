@@ -111,10 +111,12 @@
 ├── scripts/
 │   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
+├── config.test.json.example      # Config for compose.test.yaml (test groups, every feature on)
 ├── .env.example                  # Environment variable template (copy to .env)
 ├── dockerfile                    # Multi-stage Docker build (development + production targets)
 ├── docker-compose.yaml           # Dev stack: bot + MongoDB + mongo-express services
 ├── compose.prod.yaml             # Production stack: pulls the GHCR image, ports bound to 127.0.0.1
+├── compose.test.yaml             # Local test stack (test bot, own database), for Docker Desktop
 ├── tsconfig.json
 ├── eslint.config.mjs
 └── package.json

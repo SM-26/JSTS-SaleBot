@@ -398,6 +398,22 @@ docker compose -f compose.prod.yaml logs -f bot
 
 Backups, restores and the read-only database census are in [BACKUP.md](BACKUP.md).
 
+#### 3. Test stack — `compose.test.yaml`
+
+For trying the bot with admins on the **test bot and test groups**. It builds the production image from your checkout and keeps its own database, so it never touches prod or dev data. It refuses to start with any token but the test bot's. The `.env` next to it must hold the test token (the database setting there is ignored). Point it at another file with `TEST_ENV_FILE`.
+
+```bash
+cp config.test.json.example config.test.json   # once; every feature is on, in Hebrew
+docker compose -f compose.test.yaml up -d --build
+```
+
+- **Watch it:** Docker Desktop → Containers → `jsts-salebot-test`, for logs and start/stop.
+- **Update to new code:** `git pull`, then run the `up -d --build` command again. Data stays.
+- **Make someone an admin:** they send `/start` to the test bot first. Then open `http://localhost:8082` (`admin` / `pass`), go to `SalesBotTestDemo` → `users`, and set their `authLevel` to `2` (`1` for a moderator).
+- **Start over with empty data:** `docker compose -f compose.test.yaml down -v`.
+
+> Only one thing can poll a bot token at a time. Stop this stack before running the bot or a synthetic script on the test token some other way.
+
 ## Dev build  
 ### Prerequisites
 

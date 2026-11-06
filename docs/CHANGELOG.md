@@ -19,6 +19,10 @@ Unreleased (slice 5) - One-message listing and the Beit Dagan meeting point (#10
     - Data: additive only. New optional draft fields `quick`, `collecting`, `mediaGroupId`, `caption`, `meetup`; new optional `meetup` on posts and listings. After a rollback to 3.1.0 they are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
     - The version is not bumped here; the owner picks the release order.
 
+Unreleased - Test stack.
+  - Added:
+    - `compose.test.yaml`: a local stack for trying the bot on the test bot and test groups, from Docker Desktop. It has its own database and refuses any token but the test bot's.
+
 Unreleased - Numbered stale-check results.
   - Changed:
     - On a multi-item `/stalecheck` DM, each result line now starts with the item's number ("1 · Refreshed"). `lcItemResult` is a new locale string; a stale button's label must keep starting with `{i}`, which `check-routes` enforces.
