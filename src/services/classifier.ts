@@ -98,7 +98,7 @@ function findPrices(text: string, res: RegExp[], rule: (i: number) => string): P
     return merged;
 }
 
-const phoneRe = /(?<![\d,.])(?:0\d{1,2}-?\d{7}|\d{9,10})(?!\d)/gu;
+export const phoneRe = /(?<![\d,.])(?:0\d{1,2}-?\d{7}|\d{9,10})(?!\d)/gu;
 
 function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed {
     // ponytail: bare numbers are noisy ("glock 17 ... 900"), so the largest wins

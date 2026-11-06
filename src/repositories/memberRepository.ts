@@ -126,6 +126,10 @@ class MemberRepository {
         return { imported, armed, sent, items: sum[0]?.n ?? 0 };
     }
 
+    async setLastBuyerNote(userId: string, now: Date): Promise<void> {
+        await Member.updateOne({ userId }, { $set: { lastBuyerNoteAt: now }, $setOnInsert: { firstSeenAt: now, askMode: "ask" } }, { upsert: true }).exec();
+    }
+
     async wasAskedRecently(userId: string, hash: string, now: Date): Promise<boolean> {
         const since = new Date(now.getTime() - ASKED_MEMORY_MS);
         return (await Member.exists({ userId, declined: { $elemMatch: { hash, at: { $gte: since } } } })) !== null;

@@ -22,10 +22,11 @@
     "check-routes": "ts-node src/tests/checkRoutes.ts",
     "check-flows": "ts-node src/tests/checkFlows.ts",
     "check-market": "ts-node src/tests/checkMarket.ts",
+    "check-buyer": "ts-node src/tests/checkBuyerMatches.ts",
     "check-dump": "ts-node src/tests/checkProdDump.ts",
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-rich && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",

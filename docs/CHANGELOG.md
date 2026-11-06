@@ -16,6 +16,21 @@ Unreleased - Catch-up scan (slice 6 of "the market", #104).
     - **Rollback caveat:** to 3.2.0 or older. `ck_` buttons fall to the stale-button catch-all, `k_` links fall to the greeting, and `members.catchup` is ignored. Listings members already added stay. Stamps are harmless leftovers.
     - **Owner gates:** (1) the owner reviews `catchup.json` before the import; (2) the owner approves the final note text, as sent by "Catch-up offer to me" on the test bot; (3) `/catchup send` needs the owner's go-ahead. Delivery also needs `captureMode: optin`, which is a separate switch: with `shadow` armed offers wait (their clock keeps running).
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead.
+Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
+  - Added:
+    - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
+    - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a 403, meaning the buyer blocked the bot, deletes all of that buyer's saved searches). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.
+    - `buyerMatches` accepts `on` besides `off` and `shadow`. The code default stays `off` and `config.json.example` stays `shadow`; `/config buyerMatches shadow` is the kill switch.
+    - `/label` also labels buyer matches as useful or not (`lb_<id>_<u|d|m>`), and `/stats` gained a buyer line.
+    - Tests: `check-buyer` (new, in `pnpm test`, needs `MONGO_URI`), plus coverage in `check-callbacks`, `check-cards`, `check-routes`, `check-classifier` and `check-rich`. `/test` gained buyer cases. `src/tests/syntheticBuyer.ts` is manual (not in `pnpm test`), TEST bot and groups only.
+  - Notes:
+    - `s_` carries a capture id, and captures live 7 days, so an `s_` link stops working after 7 days. `/alerts <text>` has no such limit.
+    - A listing `/stalecheck` just asked about does not alert until its seller confirms it; the confirm alerts once.
+    - A "wanted" post the bot cannot search (no model name, only a ceiling (`עד 800`) or a phone number) gets no note.
+    - Private notes are best effort: they reach only apps online when sent. The alert DMs are ordinary messages.
+    - The `saved_searches` TTL deletes a search at 60 days in every mode, including `shadow` and `off`.
+    - Data: additive only. New collections `saved_searches` and `alert_log`; new optional fields `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. Rolling back to 3.2.0 or 3.1.0 leaves them as harmless leftovers; `al_` buttons fall to the stale toast and `s_` links to the greeting.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead. The version is not bumped here; the owner picks the release order.
 
 3.2.0 - Listing lifecycle (slice 3 of "the market", #104).
   - Added:
