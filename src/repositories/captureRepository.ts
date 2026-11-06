@@ -1,4 +1,4 @@
-import Capture, { ICapture, ICapturePart } from "../models/Capture";
+import Capture, { ICapture, ICapturePart, CaptureState } from "../models/Capture";
 import type { IMediaItem, StoredEntity } from "../models/Post";
 import type { Parsed, Tier } from "../services/classifier";
 
@@ -142,6 +142,38 @@ class CaptureRepository {
             },
             REBUILD,
         ], { returnDocument: "after", updatePipeline: true }).exec();
+    }
+
+    findById(id: string): Promise<ICapture | null> {
+        return Capture.findById(id).exec();
+    }
+
+    // Atomic state change: null when the capture is no longer in one of the `from` states.
+    transition(id: string, from: CaptureState[], to: CaptureState): Promise<ICapture | null> {
+        return Capture.findOneAndUpdate({ _id: id, state: { $in: from } }, { $set: { state: to } }, { returnDocument: "after" }).exec();
+    }
+
+    async setNote(id: string, note: NonNullable<ICapture["note"]>): Promise<void> {
+        await Capture.updateOne({ _id: id }, { $set: { note } }).exec();
+    }
+
+    async setListing(id: string, listingId: string): Promise<void> {
+        await Capture.updateOne({ _id: id }, { $set: { listingId } }).exec();
+    }
+
+    // Notes (either kind) sent to this seller since `since`: the per-seller daily cap.
+    countNotesSince(senderId: string, since: Date): Promise<number> {
+        return Capture.countDocuments({ senderId, "note.sentAt": { $gte: since } }).exec();
+    }
+
+    // /stats: first-ask notes since `since` and how they ended.
+    async noteStats(since: Date): Promise<{ notes: number; added: number; declined: number }> {
+        const rows = await Capture.aggregate<{ _id: CaptureState; n: number }>([
+            { $match: { "note.kind": "ask", "note.sentAt": { $gte: since } } },
+            { $group: { _id: "$state", n: { $sum: 1 } } },
+        ]).exec();
+        const n = (state: CaptureState) => rows.find(r => r._id === state)?.n ?? 0;
+        return { notes: rows.reduce((sum, r) => sum + r.n, 0), added: n("added"), declined: n("declined") };
     }
 }
 

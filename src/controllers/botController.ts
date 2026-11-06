@@ -22,6 +22,9 @@ import { FaqService } from "../services/faqService";
 import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
+import { CaptureNoteService } from "../services/captureNoteService";
+import { GroupListingService } from "../services/groupListingService";
+import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -60,6 +63,8 @@ export class BotController {
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
+    readonly groupListings: GroupListingService;
+    readonly captureNotes: CaptureNoteService;
 
     constructor(api: Api) {
         this.api = api;
@@ -69,10 +74,12 @@ export class BotController {
         this.postService = new PostService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService);
+        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
+        this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(api, this.config, this.postService);
-        this.takeDownService = new TakeDownService(api, this.config);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
+        this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
         this.paymentService = new PaymentService(api, this.config);
@@ -124,7 +131,11 @@ export class BotController {
         }
     }
 
-    async HandleStart(msg: Message): Promise<void> {
+    async HandleStart(msg: Message, args = ""): Promise<void> {
+        // Deep links from capture notes; slices 4-6 add s_ and k_ here.
+        const payload = parseStartPayload(args);
+        if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
@@ -342,6 +353,18 @@ export class BotController {
             return;
         }
 
+        if (route.action === "capture") {
+            // set_ask / set_never are the /myposts settings row; the capture parser rejects them.
+            if (route.arg.startsWith("set_")) await this.myPostsService.handleAskToggle(query, route.arg);
+            else await this.captureNotes.handleCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "listing") {
+            await this.groupListings.handleListingCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -474,6 +497,8 @@ export class BotController {
             if (msg && this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
                 await this.captureService.handleEdit(msg);
             }
+            // Existing group listings are kept in step in every captureMode.
+            if (msg && msg.chat.id === this.config.approvedGroupId) await this.groupListings.handleEdit(msg);
             return next();
         });
 
@@ -481,7 +506,7 @@ export class BotController {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
             if (args === "sell") return this.wizardService.handleNewPost(msg);
-            return this.HandleStart(msg);
+            return this.HandleStart(msg, args);
         }));
         bot.use(cmd("newpost", (msg) => {
             if (!isPrivate(msg)) return;

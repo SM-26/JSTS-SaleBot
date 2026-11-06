@@ -14,6 +14,9 @@ import { classify } from "../services/classifier";
 import { isTestBotToken } from "./testBot";
 import { PublishService } from "../services/publishService";
 import listingRepository from "../repositories/listingRepository";
+import { GroupListingService } from "../services/groupListingService";
+import { CaptureNoteService } from "../services/captureNoteService";
+import { seedCapture } from "./fixtures";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -44,6 +47,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
+    capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
 };
 
 /**
@@ -612,4 +616,48 @@ async function testCase_NewSellerPost(
     msg: Message
 ): Promise<void> {
     await radioPostAs(false, api, config, postService, userService, msg);
+}
+
+/**
+ * Sends the presser a real opt-in capture note for a fixture sale post. Fixture only:
+ * Add makes a listing that points at message 1 (the test bot only, like radioPostAs).
+ */
+async function testCase_CaptureNote(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    // Add creates a listing: on any other bot it would touch the production group.
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ The capture-note test runs only on the test bot." });
+        return;
+    }
+    try {
+        const username = (await api.getMe()).username ?? "";
+        const groupListings = new GroupListingService(api, config, () => username);
+        const notes = new CaptureNoteService(api, config, groupListings, () => username);
+        const capture = await seedCapture({
+            chatId: config.approvedGroupId,
+            senderId: String(msg.from.id),
+            messageIds: [1],
+            text: "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז",
+            media: [TEST_MEDIA[0]],
+        });
+        const sent = capture.parsed ? await notes.sendAskNote(capture, capture.parsed, new Date()) : false;
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: sent
+                ? `✅ Capture note sent to you in group ${config.approvedGroupId}, topic ${config.approvedTopicId ?? "none"}`
+                : `❌ The capture note was not sent (group ${config.approvedGroupId}); see the log`,
+        });
+    } catch (err) {
+        console.error("[ERROR - testCase_CaptureNote]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Capture note failed: " + (err as Error).message });
+    }
 }

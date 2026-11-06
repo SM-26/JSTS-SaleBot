@@ -1,20 +1,24 @@
 import assert from "assert";
 import mongoose from "mongoose";
 import Capture from "../models/Capture";
+import Draft from "../models/Draft";
 import Listing from "../models/Listing";
 import Member from "../models/Member";
 import PostModel from "../models/Post";
 import ShadowLog from "../models/ShadowLog";
 import captureRepository from "../repositories/captureRepository";
-import listingRepository from "../repositories/listingRepository";
+import draftRepository from "../repositories/draftRepository";
+import listingRepository, { priceValueOf } from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
+import { textHash } from "../services/classifier";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
 import { isTrustedSeller, TRUST_REVOKE_MS } from "../services/trustService";
 import { tick } from "../services/shadowService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
+import { seedCapture } from "./fixtures";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
 // are atomic updates and index behaviour (TTL, partial unique), which a mock
@@ -437,6 +441,148 @@ async function run() {
         assert.strictEqual(await trust("revg", new Date(NOW.getTime() + day)), false, "a group take-down revokes too");
         assert.strictEqual(await trust("rm"), true, "a seller's own removal does not revoke");
         console.log("[OK] isTrustedSeller.");
+
+        // ---- slice 2 data layer ----
+        const HOUR = 3600 * SEC;
+        const S2 = new Date();
+        const ago = (ms: number) => new Date(S2.getTime() - ms);
+        const mkCap = (seller: string, extra: Partial<Parameters<typeof seedCapture>[0]> = {}) =>
+            seedCapture({ senderId: `${RUN}-s2-${seller}`, chatId: CHAT, text: "Glock 17 למכירה 900 ש\"ח", media: [{ fileId: "f", type: "photo" }], ...extra });
+        const note = (sentAt: Date, kind: "ask" | "refresh" = "ask") => ({ ephemeralMessageId: 1, sentAt, kind });
+
+        const tr = await mkCap("tr");
+        assert.strictEqual(tr.tier, "strict", "seedCapture classifies");
+        const trRace = await Promise.all([
+            captureRepository.transition(String(tr._id), ["classified"], "added"),
+            captureRepository.transition(String(tr._id), ["classified"], "added"),
+        ]);
+        assert.strictEqual(trRace.filter(Boolean).length, 1, "transition is atomic: exactly one wins");
+        assert.strictEqual(trRace.find(Boolean)!.state, "added");
+        assert.strictEqual((await captureRepository.findById(String(tr._id)))!.state, "added");
+        assert.strictEqual(await captureRepository.transition(String(tr._id), ["asked"], "declined"), null, "wrong from-state: null");
+        console.log("[OK] transition is atomic.");
+
+        const ns = `${RUN}-s2-ns`;
+        for (const h of [1, 23, 25]) await mkCap("ns", { senderId: ns, note: note(ago(h * HOUR)) });
+        assert.strictEqual(await captureRepository.countNotesSince(ns, ago(24 * HOUR)), 2, "notes in the last 24 h");
+        assert.strictEqual(await captureRepository.countNotesSince(`${RUN}-s2-nobody`, ago(24 * HOUR)), 0);
+        console.log("[OK] countNotesSince.");
+
+        const stats0 = await captureRepository.noteStats(ago(HOUR));
+        await mkCap("st1", { state: "added", note: note(S2) });
+        await mkCap("st2", { state: "declined", note: note(S2) });
+        await mkCap("st3", { state: "added", note: note(S2, "refresh") });
+        const stats1 = await captureRepository.noteStats(ago(HOUR));
+        assert.deepStrictEqual(
+            { notes: stats1.notes - stats0.notes, added: stats1.added - stats0.added, declined: stats1.declined - stats0.declined },
+            { notes: 2, added: 1, declined: 1 }, "noteStats counts ask notes only");
+        console.log("[OK] noteStats.");
+
+        // the capture's note is set, its listing linked
+        await captureRepository.setNote(String(tr._id), note(S2));
+        await captureRepository.setListing(String(tr._id), "lst1");
+        const trRow = await captureRepository.findById(String(tr._id));
+        assert.ok(trRow?.note?.kind === "ask" && trRow.note.ephemeralMessageId === 1 && trRow.listingId === "lst1", "setNote and setListing");
+
+        // decline memory: remembers every text a note was sent for (30 days, 20 hashes)
+        const dm = `${RUN}-s2-dm`;
+        for (let i = 0; i < 22; i++) await memberRepository.rememberAsked(dm, `h${i}`, new Date(S2.getTime() + i));
+        const dmRow = (await memberRepository.findByUserId(dm))!;
+        assert.strictEqual(dmRow.declined?.length, 20, "at most 20 hashes");
+        assert.deepStrictEqual(dmRow.declined?.map(d => d.hash).slice(0, 2), ["h2", "h3"], "the oldest are dropped");
+        assert.strictEqual(dmRow.askMode, "ask", "rememberAsked on an unseen user creates it with askMode ask");
+        assert.ok(dmRow.firstSeenAt instanceof Date);
+        const DAY30 = 30 * 24 * HOUR;
+        assert.strictEqual(await memberRepository.wasAskedRecently(dm, "h21", new Date(S2.getTime() + 21)), true, "asked just now");
+        assert.strictEqual(await memberRepository.wasAskedRecently(dm, "h21", new Date(S2.getTime() + 21 + DAY30 - HOUR)), true, "still inside 30 days");
+        assert.strictEqual(await memberRepository.wasAskedRecently(dm, "h21", new Date(S2.getTime() + 21 + DAY30 + HOUR)), false, "forgotten after 30 days");
+        assert.strictEqual(await memberRepository.wasAskedRecently(dm, "h0", S2), false, "a dropped hash is forgotten");
+        assert.strictEqual(await memberRepository.wasAskedRecently(`${RUN}-s2-nobody`, "h21", S2), false, "unknown member");
+        await memberRepository.setAskMode(dm, "never", S2);
+        await memberRepository.touch(dm, S2);
+        assert.strictEqual((await memberRepository.findByUserId(dm))!.askMode, "never", "touch keeps never");
+        const fresh = `${RUN}-s2-fresh`;
+        await memberRepository.setAskMode(fresh, "never", S2);
+        const freshRow = (await memberRepository.findByUserId(fresh))!;
+        assert.ok(freshRow.askMode === "never" && freshRow.firstSeenAt.getTime() === S2.getTime(), "setAskMode creates an unseen member");
+        assert.strictEqual(await memberRepository.findByUserId(`${RUN}-s2-nobody`), null);
+        console.log("[OK] decline memory.");
+
+        // listings of a group capture
+        const grpL = await listingRepository.createFromCapture({
+            chatId: CHAT, messageIds: [501, 502], sellerId: `${RUN}-s2-g`, sellerName: "G", title: "Glock", price: "1,300₪", text: "Glock 17 1,300₪",
+            media: [{ fileId: "f", type: "photo" }], isBundle: false, note: { ephemeralMessageId: 9, sentAt: S2 },
+        }, S2);
+        assert.ok(grpL.source === "group" && grpL.origin === "capture" && grpL.status === "live" && grpL.hold === false, "createFromCapture shape");
+        assert.strictEqual(grpL.priceValue, 1300, "priceValue from 1,300₪");
+        assert.strictEqual(grpL.textHash, textHash("Glock 17 1,300₪"));
+        assert.ok(grpL.note?.ephemeralMessageId === 9 && grpL.createdAt.getTime() === S2.getTime() && grpL.refreshedAt.getTime() === S2.getTime());
+        assert.strictEqual(priceValueOf("2,500"), 2500, "priceValueOf is exported");
+        const noNote = await listingRepository.createFromCapture({
+            chatId: CHAT, messageIds: [503], sellerId: `${RUN}-s2-g`, sellerName: "G", title: "x", text: "x", price: "", media: [], isBundle: true,
+        }, ago(HOUR));
+        assert.strictEqual(noNote.note, undefined, "no note when none given");
+        console.log("[OK] createFromCapture.");
+
+        assert.strictEqual(String((await listingRepository.findLiveByMessage(CHAT, 502))?._id), String(grpL._id), "found by its second messageId");
+        assert.strictEqual(await listingRepository.findLiveByMessage(CHAT, 999), null);
+        assert.strictEqual(await listingRepository.findLiveByMessage(CHAT + 1, 502), null, "another chat");
+        const byG = await listingRepository.findGroupBySeller(`${RUN}-s2-g`);
+        assert.deepStrictEqual(byG.map(l => String(l._id)), [String(grpL._id), String(noNote._id)], "findGroupBySeller: newest first");
+        await listingRepository.markSold(String(grpL._id), S2);
+        assert.strictEqual(await listingRepository.findLiveByMessage(CHAT, 502), null, "a sold listing is not live");
+        await mkListing("cnt-legacy", { source: "bot", origin: "legacy", chatId: undefined, postId: `${RUN}-cnt-p`, status: "live" });
+        const cntSeller = `${RUN}-s2-g`;
+        await Listing.updateOne({ postId: `${RUN}-cnt-p` }, { $set: { sellerId: cntSeller } });
+        assert.strictEqual(await listingRepository.countBySeller(cntSeller), 3, "countBySeller: any source, any status");
+        assert.strictEqual((await listingRepository.findGroupBySeller(cntSeller)).length, 2, "findGroupBySeller skips bot listings");
+        console.log("[OK] findLiveByMessage, findGroupBySeller, countBySeller.");
+
+        const ex = await mkListing("ex", { status: "expired", nudgedAt: S2, endedAt: S2, endedBy: "system", messageIds: [1] });
+        const refreshed = await listingRepository.refresh(String(ex._id), at(50), { messageIds: [7, 8], text: "new text", media: [], isBundle: false, price: "90₪", priceValue: 90 });
+        assert.ok(refreshed?.status === "live" && refreshed.refreshedAt.getTime() === at(50).getTime(), "refresh from expired");
+        assert.deepStrictEqual(refreshed.messageIds, [7, 8], "messageIds replaced when given");
+        assert.deepStrictEqual([refreshed.text, refreshed.price, refreshed.priceValue, refreshed.title], ["new text", "90₪", 90, ex.title], "a repost brings text and price; an undefined title keeps the old one");
+        const exRaw = await Listing.collection.findOne({ _id: ex._id });
+        assert.ok(exRaw && !("nudgedAt" in exRaw) && !("endedAt" in exRaw) && !("endedBy" in exRaw), "nudgedAt, endedAt and endedBy are unset");
+        const kept = await listingRepository.refresh(String(ex._id), at(51));
+        assert.deepStrictEqual(kept?.messageIds, [7, 8], "messageIds kept when not given");
+        const soldEx = await mkListing("exsold", { status: "sold" });
+        assert.strictEqual(await listingRepository.refresh(String(soldEx._id), at(50)), null, "a sold listing cannot be refreshed");
+        console.log("[OK] refresh from expired.");
+
+        const rm = await mkListing("rm");
+        const removed = await listingRepository.markRemoved(String(rm._id), "seller", at(60));
+        assert.strictEqual(removed?.status, "removed");
+        const rmRaw = await Listing.collection.findOne({ _id: rm._id });
+        assert.ok(rmRaw?.status === "removed" && rmRaw.endedBy === "seller" && +rmRaw.endedAt === +at(60), "removed by seller");
+        assert.ok(!("text" in rmRaw) && !("title" in rmRaw) && !("media" in rmRaw), "text, title and media are unset");
+        assert.strictEqual(await listingRepository.markRemoved(String(rm._id), "seller", at(61)), null, "second markRemoved loses");
+        assert.strictEqual(await listingRepository.markSold(String(rm._id), at(62)), null, "markSold on a removed listing");
+        console.log("[OK] markRemoved unsets text.");
+
+        const ed = await mkListing("ed", { price: "100", priceValue: 100, textHash: "old" });
+        assert.strictEqual(await listingRepository.applyEdit(String(soldEx._id), { text: "x", isBundle: false }), null, "applyEdit on a sold listing");
+        const edited2 = await listingRepository.applyEdit(String(ed._id), { price: "200", priceValue: 200, text: "new text", isBundle: true });
+        assert.ok(edited2?.price === "200" && edited2.priceValue === 200 && edited2.isBundle === true && edited2.text === "new text", "applyEdit updates");
+        assert.strictEqual(edited2.textHash, textHash("new text"));
+        assert.strictEqual(edited2.title, "t", "title untouched when the patch has none");
+        await listingRepository.setNote(String(ed._id), { ephemeralMessageId: 4, sentAt: S2 });
+        assert.strictEqual((await listingRepository.findById(String(ed._id)))!.note?.ephemeralMessageId, 4, "setNote");
+        console.log("[OK] applyEdit, setNote.");
+
+        // draft from a capture, and a normal start over it drops captureId
+        const du = `${RUN}-s2-draft`;
+        const d1 = await draftRepository.startFromCapture({
+            userId: du, chatId: 5, locale: "en", step: "price", promptMessageId: 70, captureId: "c1", title: "T", media: [{ fileId: "m1", type: "photo" }],
+        });
+        assert.ok(d1.captureId === "c1" && d1.step === "price" && d1.title === "T" && d1.media.length === 1 && d1.promptMessageId === 70, "startFromCapture");
+        const d2 = await draftRepository.startFromCapture({ userId: du, chatId: 5, locale: "en", step: "title", promptMessageId: 71, captureId: "c2", media: [] });
+        assert.ok(d2.captureId === "c2" && d2.title === undefined && d2.media.length === 0, "startFromCapture replaces the draft");
+        const d3 = await draftRepository.start(du, 5, "en", 72);
+        assert.ok(d3 && d3.captureId === undefined && d3.step === "title", "start over a capture draft leaves no captureId");
+        assert.ok(!("captureId" in (await Draft.collection.findOne({ userId: du }))!), "captureId is gone from the document");
+        console.log("[OK] draft startFromCapture.");
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
@@ -444,6 +590,7 @@ async function run() {
             Listing.deleteMany({ sellerId: like }),
             PostModel.deleteMany({ userId: like }),
             Member.deleteMany({ userId: like }),
+            Draft.deleteMany({ userId: like }),
             ShadowLog.deleteMany({ chatId: CHAT }),
         ]);
         await mongoose.disconnect();

@@ -52,7 +52,12 @@
 │   │   ├── matchService.ts       # Ranks live listings for a "wanted" message
 │   │   ├── marketService.ts      # Reconciles bot posts into listings (LEGACY_CUTOFF)
 │   │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
-│   │   └── shadowAdminService.ts # /label and /stats
+│   │   ├── shadowAdminService.ts # /label and /stats
+│   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
+│   │   ├── groupListingService.ts # Group listings: Add, Sold/Refresh/Remove (ls_), edit sync, /myposts section
+│   │   ├── listingCards.ts       # Pure card builders and the mk_/ls_/start-payload helpers
+│   │   ├── ephemeralNotes.ts     # The only caller of the ephemeral Bot API methods (send/edit/delete a note)
+│   │   └── deepLinks.ts          # start=c_/l_ payload parser, bot and group message links
 │   ├── models/
 │   │   ├── Post.ts               # Mongoose schema: Post (pending/approved/rejected/sold)
 │   │   ├── User.ts               # Mongoose schema: User (userId, username, authLevel)
@@ -75,7 +80,10 @@
 │   ├── tests/
 │   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
 │   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
+│   │   ├── fixtures.ts           # seedCapture(): a classified capture straight through the model
+│   │   ├── checkListingCards.ts  # `pnpm run check-cards`: card builders, mk_/ls_ formats, start payloads
 │   │   ├── syntheticCapture.ts   # Manual (not in `pnpm test`): 20 messages through the controller on the TEST bot/group
+│   │   ├── syntheticOptin.ts     # Manual (not in `pnpm test`): one real private note + one moderation card on the TEST bot/groups, cleaned up after
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
 │       ├── en/
@@ -162,6 +170,7 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag and the moderator's pending reject-reason prompts (`pendingRejects`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
 - **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
 - **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
+- **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -227,6 +236,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
+| `pnpm run check-cards` | Listing and note card builders, `mk_`/`ls_` callback_data and `start=c_`/`l_` payload formats | no |
 | `pnpm run check-platform` | Command matcher and middleware (offline harness) | no |
 | `pnpm run check-store` | `MongoSessionStore` (TTL, expiry on read) | yes |
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
@@ -265,8 +275,8 @@ Never run the bot, or a check, against the production token or database.
 - **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
-- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths.
-- **Don't change the `rr_<postId>_<n>` or `td_<listingId>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes.
+- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
@@ -302,6 +312,9 @@ Never run the bot, or a check, against the production token or database.
 | `src/services/publishService.ts` | submitPost(): trusted sellers publish at once, others go to moderation |
 | `src/services/trustService.ts` | isTrustedSeller(): approved or sold post, no moderator take-down in 90 days |
 | `src/services/takeDownService.ts` | Moderator take-down (td_) |
+| `src/services/captureNoteService.ts` | Opt-in capture notes and the `mk_` buttons |
+| `src/services/groupListingService.ts` | Group listings, the `ls_` buttons, edit sync |
+| `src/services/ephemeralNotes.ts` | Send/edit/delete a private note (ephemeral Bot API) |
 | `src/services/adminService.ts` | Runtime config command |
 | `src/services/paymentService.ts` | Handles Telegram Stars donations |
 | `src/models/Post.ts` | Post Mongoose schema |

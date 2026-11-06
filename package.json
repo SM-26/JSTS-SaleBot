@@ -1,6 +1,6 @@
 {
   "name": "sales-bot",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "packageManager": "pnpm@11.13.1",
   "main": "dist/bot.js",
   "description": "JSTS-SaleBot implementation",
@@ -14,6 +14,7 @@
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
     "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
+    "check-cards": "ts-node src/tests/checkListingCards.ts",
     "check-platform": "ts-node src/tests/checkPlatform.ts",
     "check-store": "ts-node src/tests/checkSessionStore.ts",
     "check-routes": "ts-node src/tests/checkRoutes.ts",
@@ -22,7 +23,7 @@
     "check-dump": "ts-node src/tests/checkProdDump.ts",
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-rich && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",

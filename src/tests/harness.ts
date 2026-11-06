@@ -11,7 +11,7 @@ export interface RecordedCall {
 type ResponseFn = (params: Record<string, unknown>) => unknown;
 
 export interface HarnessOptions {
-    /** Override the result for a method: a value or a function of the request params. */
+    /** Override the result for a method: a value or a function of the request params. A function returning `undefined` falls back to the default result. */
     responses?: Record<string, unknown | ResponseFn>;
 }
 
@@ -42,6 +42,8 @@ export interface PressButtonOptions {
     userId?: number;
     messageId?: number;
     chatType?: "private" | "group" | "supergroup";
+    /** Omits `message` from the callback_query (like a press on an ephemeral note). */
+    noMessage?: boolean;
 }
 
 export const BOT_USERNAME = "JSTS_testing_bot";
@@ -66,6 +68,7 @@ async function decodeBody(body: RequestInit["body"]): Promise<Record<string, unk
 export function createHarness(options: HarnessOptions = {}) {
     const calls: RecordedCall[] = [];
     let nextMessageId = 100;
+    let nextEphemeralId = 5000;
     let nextUpdateId = 1;
 
     const fakeFetch: typeof fetch = async (input, init) => {
@@ -77,15 +80,21 @@ export function createHarness(options: HarnessOptions = {}) {
 
         let result: unknown = true;
         const override = options.responses?.[method];
-        if (override !== undefined) {
-            result = typeof override === "function" ? (override as ResponseFn)(params) : override;
+        const overridden = override === undefined ? undefined : typeof override === "function" ? (override as ResponseFn)(params) : override;
+        if (overridden !== undefined) {
+            result = overridden;
         } else if (method === "getMe") {
             result = { id: 1000, is_bot: true, first_name: "Test", username: BOT_USERNAME };
         } else if (["sendMessage", "sendRichMessage", "sendPhoto"].includes(method)) {
+            const ephemeral = method === "sendMessage" ? params.ephemeral_message_parameters as { receiver_user_id?: number } | undefined : undefined;
             result = {
                 message_id: nextMessageId++,
                 chat: { id: Number(params.chat_id), type: "private" },
-                date: Math.floor(Date.now() / 1000)
+                date: Math.floor(Date.now() / 1000),
+                ...(ephemeral ? {
+                    ephemeral_message_id: nextEphemeralId++,
+                    receiver_user: { id: Number(ephemeral.receiver_user_id), is_bot: false, first_name: "Tester" }
+                } : {})
             };
         }
         call.result = result;
@@ -136,7 +145,7 @@ export function createHarness(options: HarnessOptions = {}) {
     const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>
         message({ photo: [{ file_id: fileId, file_unique_id: fileId, width: 10, height: 10 }] }, options);
 
-    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private" }: PressButtonOptions = {}) => {
+    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false }: PressButtonOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             callback_query: {
@@ -144,11 +153,13 @@ export function createHarness(options: HarnessOptions = {}) {
                 chat_instance: "ci",
                 from: { id: userId, is_bot: false, first_name: "Tester" },
                 data,
-                message: {
-                    message_id: messageId,
-                    date: Math.floor(Date.now() / 1000),
-                    chat: { id: chat, type: chatType }
-                }
+                ...(noMessage ? {} : {
+                    message: {
+                        message_id: messageId,
+                        date: Math.floor(Date.now() / 1000),
+                        chat: { id: chat, type: chatType }
+                    }
+                })
             }
         });
     };

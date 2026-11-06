@@ -9,6 +9,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import ShadowLog from "../models/ShadowLog";
 import { createHarness, BOT_USERNAME } from "./harness";
+import { seedCapture } from "./fixtures";
 import { AuthLevel, BotConfig } from "../types";
 import type { Message } from "node-telegram-bot-api/types";
 
@@ -58,6 +59,7 @@ async function run() {
     const controller = new BotController(h.bot.api);
     controller.registerRoutes(h.bot, BOT_USERNAME);
     const senderBase = userId + 100; // capture senders, cleaned up in finally
+    const optinSenders = [String(senderBase + 50), String(senderBase + 51)]; // /stats opt-in seeds, cleaned in their own finally
 
     const expectCalls = async (label: string, send: () => Promise<void>) => {
         h.calls.length = 0;
@@ -86,7 +88,16 @@ async function run() {
             await expectCalls(text, () => h.sendText(text, { userId }));
         }
 
-        await expectSilence("/start@someotherbot", () => h.sendText("/start@someotherbot", { userId }));
+        // A payload that is not ours answers the plain greeting.
+        const greetingOf = async (text: string) => {
+            await expectCalls(text, () => h.sendText(text, { userId }));
+            return String(h.calls.find((c) => c.method === "sendMessage")?.params.text);
+        };
+        const plainGreeting = await greetingOf("/start");
+        assert.strictEqual(await greetingOf("/start garbage"), plainGreeting, "/start garbage answers the greeting");
+        assert.strictEqual(await greetingOf("/start c_xyz"), plainGreeting, "/start c_xyz answers the greeting");
+
+        await expectSilence("/start@someotherbot",() => h.sendText("/start@someotherbot", { userId }));
         await expectSilence("a URL", () => h.sendText("see http://x.com/test", { userId }));
 
         // A group message in the approved group that replies to nothing is not ours to answer.
@@ -162,6 +173,45 @@ async function run() {
             await h.sendText("/stats", { userId: modId });
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
             assert.ok(/\d+\.\d%/.test(lastText()), "/stats shows precision with one decimal");
+
+            // Opt-in rate: last 7 days, first-ask notes only. The line shows when captureMode is optin or a note exists.
+            const { default: captureRepository } = await import("../repositories/captureRepository");
+            const optinLine = (n: number, a: number) => localeService.t(config.lang, "statsOptin", { notes: n, added: a, rate: n ? `${Math.round(100 * a / n)}%` : "—" });
+            const optinKey = localeService.t(config.lang, "statsOptin").split("{")[0];
+            const statsText = async () => {
+                h.calls.length = 0;
+                await h.sendText("/stats", { userId: modId });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
+                return lastText();
+            };
+            const savedMode = controller.config.captureMode;
+            try {
+                const base = await captureRepository.noteStats(new Date(Date.now() - 7 * 24 * 3600 * 1000));
+                if (base.notes === 0) { // a shared database may hold notes; the checks below need none
+                    controller.config.captureMode = "shadow";
+                    assert.ok(!(await statsText()).includes(optinKey), "shadow with no notes: no opt-in line");
+                    controller.config.captureMode = "optin";
+                    assert.ok((await statsText()).includes(optinLine(0, 0)), "optin with no notes: line with a dash rate");
+                }
+                controller.config.captureMode = "shadow";
+                const ask = { ephemeralMessageId: 1, sentAt: new Date(), kind: "ask" as const };
+                await seedCapture({ senderId: optinSenders[0], text: "bike 100", state: "added", note: ask });
+                await seedCapture({ senderId: optinSenders[1], text: "bike 100", state: "asked", note: ask });
+                assert.ok((await statsText()).includes(optinLine(base.notes + 2, base.added + 1)), "/stats shows the 7-day opt-in rate");
+                // M6: a noteStats failure drops the opt-in line, not the whole /stats answer
+                controller.config.captureMode = "optin";
+                const realNoteStats = captureRepository.noteStats;
+                captureRepository.noteStats = () => Promise.reject(new Error("boom"));
+                try {
+                    const degraded = await statsText();
+                    assert.ok(/\d+\.\d%/.test(degraded) && !degraded.includes(optinKey), "/stats survives a noteStats failure");
+                } finally {
+                    captureRepository.noteStats = realNoteStats;
+                }
+            } finally {
+                controller.config.captureMode = savedMode;
+                await Capture.deleteMany({ senderId: { $in: optinSenders } });
+            }
 
             // /test shadow_last5: a row without message ids shows a dash, not "undefined"
             await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [], senderId: "last5-test", at: new Date(Date.now() + 60_000), tier: "none", rules: [], wouldList: false });

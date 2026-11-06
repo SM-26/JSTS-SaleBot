@@ -1,12 +1,38 @@
 import Listing, { IListing } from "../models/Listing";
+import type { IMediaItem } from "../models/Post";
 import { textHash } from "../services/classifier";
 import type { Post } from "../types";
 
 // First number in the price as written ("2,500" -> 2500); undefined when there is none.
-function priceValueOf(price: string | undefined): number | undefined {
+export function priceValueOf(price: string | undefined): number | undefined {
     const m = price?.match(/\d[\d,]*/);
     return m ? Number(m[0].replace(/,/g, "")) : undefined;
 }
+
+export type NewGroupListing = {
+    chatId: number;
+    messageIds: number[];
+    sellerId: string;
+    sellerName: string;
+    title: string;
+    price: string;
+    location?: string;
+    text: string;
+    media: IMediaItem[];
+    isBundle: boolean;
+    note?: { ephemeralMessageId: number; sentAt: Date };
+};
+
+export type RepostPatch = {
+    messageIds: number[];
+    text: string;
+    media?: IMediaItem[];
+    isBundle: boolean;
+    title?: string;
+    price?: string;
+    priceValue?: number;
+    location?: string;
+};
 
 class ListingRepository {
     findByPostId(postId: string): Promise<IListing | null> {
@@ -50,6 +76,74 @@ class ListingRepository {
             },
             { upsert: true, returnDocument: "after" }
         ).exec() as Promise<IListing>;
+    }
+
+    // A member's own group message that they said yes to.
+    createFromCapture(input: NewGroupListing, now: Date): Promise<IListing> {
+        const priceValue = priceValueOf(input.price);
+        return Listing.create({
+            ...input,
+            ...(priceValue !== undefined ? { priceValue } : {}),
+            textHash: textHash(input.text),
+            source: "group",
+            origin: "capture",
+            status: "live",
+            hold: false,
+            createdAt: now,
+            refreshedAt: now,
+        });
+    }
+
+    findLiveByMessage(chatId: number, messageId: number): Promise<IListing | null> {
+        return Listing.findOne({ source: "group", status: "live", chatId, messageIds: messageId }).exec();
+    }
+
+    findGroupBySeller(sellerId: string): Promise<IListing[]> {
+        return Listing.find({ source: "group", sellerId }).sort({ createdAt: -1 }).limit(50).exec();
+    }
+
+    countBySeller(sellerId: string): Promise<number> {
+        return Listing.countDocuments({ sellerId }).exec();
+    }
+
+    // live|expired -> live, with a fresh clock. A repost of the same item also brings the newest
+    // message ids, text, media and parsed fields (fields left undefined are not touched).
+    refresh(id: string, now: Date, repost?: RepostPatch): Promise<IListing | null> {
+        const $set: Record<string, unknown> = { status: "live", refreshedAt: now };
+        if (repost) {
+            $set.textHash = textHash(repost.text);
+            for (const [key, value] of Object.entries(repost)) if (value !== undefined) $set[key] = value;
+        }
+        return Listing.findOneAndUpdate(
+            { _id: id, status: { $in: ["live", "expired"] } },
+            { $set, $unset: { nudgedAt: "", endedAt: "", endedBy: "" } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    // Only to undo a listing whose capture bookkeeping failed right after it was created.
+    async deleteById(id: string): Promise<void> {
+        await Listing.deleteOne({ _id: id }).exec();
+    }
+
+    // The member removes their own group listing; the content goes, as for takeDown.
+    markRemoved(id: string, by: "seller" | "system", now: Date): Promise<IListing | null> {
+        return Listing.findOneAndUpdate(
+            { _id: id, status: { $in: ["live", "expired"] } },
+            { $set: { status: "removed", endedAt: now, endedBy: by }, $unset: { text: "", media: "", title: "" } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    async setNote(id: string, note: { ephemeralMessageId: number; sentAt: Date }): Promise<void> {
+        await Listing.updateOne({ _id: id }, { $set: { note } }).exec();
+    }
+
+    // Edit sync: only while live. Fields left undefined in the patch are not touched.
+    applyEdit(id: string, patch: { title?: string; price?: string; priceValue?: number; location?: string; text: string; isBundle: boolean }): Promise<IListing | null> {
+        const $set: Record<string, unknown> = { textHash: textHash(patch.text) };
+        for (const [key, value] of Object.entries(patch)) if (value !== undefined) $set[key] = value;
+        return Listing.findOneAndUpdate({ _id: id, status: "live" }, { $set }, { returnDocument: "after" }).exec();
     }
 
     // Final state; only a live or expired listing can be sold.
