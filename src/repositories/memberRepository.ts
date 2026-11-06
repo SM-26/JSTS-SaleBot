@@ -1,5 +1,6 @@
 import Member, { IMember } from "../models/Member";
 import type { CatchupItem } from "../services/catchupScan";
+import { isDuplicateKey } from "./captureRepository";
 
 const ASKED_MEMORY_MS = 30 * 24 * 3600 * 1000;
 const ASKED_MEMORY_MAX = 20;
@@ -35,14 +36,18 @@ class MemberRepository {
 
     // Replaces the offer of an unsent member and clears armedAt (needs a new arm). Never twice, never "never".
     async importCatchup(userId: string, items: CatchupItem[], now: Date): Promise<boolean> {
-        const m = await Member.findOne({ userId }).exec();
-        if (m?.catchup?.sentAt || m?.askMode === "never") return false;
-        await Member.updateOne(
-            { userId },
-            { $set: { pendingCatchup: items, catchup: { importedAt: now } }, $setOnInsert: { firstSeenAt: now, askMode: "ask" } },
-            { upsert: true }
-        ).exec();
-        return true;
+        // one write: a sent or "never" member fails the filter, so the upsert collides on userId
+        try {
+            await Member.updateOne(
+                { userId, askMode: { $ne: "never" }, "catchup.sentAt": { $exists: false } },
+                { $set: { pendingCatchup: items, catchup: { importedAt: now } }, $setOnInsert: { firstSeenAt: now, askMode: "ask" } },
+                { upsert: true }
+            ).exec();
+            return true;
+        } catch (err) {
+            if (isDuplicateKey(err)) return false;
+            throw err;
+        }
     }
 
     async armCatchup(now: Date): Promise<number> {

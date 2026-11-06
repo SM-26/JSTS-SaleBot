@@ -6,7 +6,7 @@ import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord } from "./blockedWords";
 import { parseCatchupFile, type CatchupFile, type CatchupItem } from "./catchupScan";
-import { classify } from "./classifier";
+import { classify, textHash, tokenOverlap, tokens } from "./classifier";
 import { deleteNote, sendNote } from "./ephemeralNotes";
 import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildCatchupList, buildCatchupNote, parseCatchupArg, type Translate } from "./listingCards";
@@ -68,16 +68,19 @@ export class CatchupService {
                 console.error("[ERROR - CatchupService.import]", (err as Error).name);
             }
         }
-        if (!file) return this.reply(msg, "catchupBadFile");
         try {
-            await this.reply(msg, "catchupImported", await this.importFile(file, new Date()));
-        } catch (err) {
-            console.error("[ERROR - CatchupService.import]", (err as Error).name);
-            return this.reply(msg, "catchupBadFile");
+            if (!file) return await this.reply(msg, "catchupBadFile");
+            try {
+                await this.reply(msg, "catchupImported", await this.importFile(file, new Date()));
+            } catch (err) {
+                console.error("[ERROR - CatchupService.import]", (err as Error).name);
+                await this.reply(msg, "catchupBadFile");
+            }
+        } finally {
+            // the file may hold member data: on every outcome take it out of the chat (the admin keeps a copy)
+            await this.api.deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id })
+                .catch((err: unknown) => console.warn("[WARN - CatchupService.import]", "delete failed:", (err as Error).message));
         }
-        // the file holds member data: take it out of the chat
-        await this.api.deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id })
-            .catch((err: unknown) => console.warn("[WARN - CatchupService.import]", "delete failed:", (err as Error).message));
     }
 
     // `skipped` counts sellers: already offered, "don't ask again", or nothing to offer.
@@ -108,12 +111,10 @@ export class CatchupService {
         if (!member) return false;
         const memberId = String(member._id);
         let sent = false;
-        let dropped = false;
         try {
             const fresh = (member.pendingCatchup ?? []).filter(i => isFresh(i, now));
             if (!fresh.length) {
-                dropped = true;
-                await memberRepository.dropCatchup(memberId); // R5: nothing fresh, no note; sentAt stays so no re-offer
+                await memberRepository.dropCatchup(memberId); // R5: nothing fresh, no note; the claim is released below
                 return false;
             }
             const card = buildCatchupNote(await this.translatorFor(userId), { memberId, count: fresh.length }, this.botUsername());
@@ -126,7 +127,7 @@ export class CatchupService {
             console.error("[ERROR - CatchupService.deliver]", (err as Error).message);
             return sent;
         } finally {
-            if (!sent && !dropped) await memberRepository.releaseCatchupDelivery(userId).catch(() => undefined); // R8
+            if (!sent) await memberRepository.releaseCatchupDelivery(userId).catch(() => undefined); // R8
         }
     }
 
@@ -175,24 +176,36 @@ export class CatchupService {
             // atomic: a double press has one winner; the item stays gone on every refusal below
             const item = await memberRepository.takeCatchupItem(parsed.memberId, parsed.messageId);
             if (!item) return await answer("captureAlreadyAdded");
-            if (findBlockedWord([item.title, item.price, item.location, item.text].filter(Boolean).join("\n")) || !isFresh(item, now)) return await answer("staleButton");
-            const parsedItem = classify(item.text, false).parsed;
-            const recent = await listingRepository.findSellerRecent(from, new Date(now.getTime() - FRESH_MS));
-            if (recent.some(l => isSameItem(l, item.text, parsedItem))) return await answer("captureAlreadyAdded");
-
+            // the item was taken: every ending below re-renders the DM list, so no dead button stays
+            const rerender = async (): Promise<void> => {
+                if (query.message?.chat.type !== "private") return;
+                const remaining = ((await memberRepository.findById(parsed.memberId))?.pendingCatchup ?? []).filter(i => isFresh(i, now));
+                const card = buildCatchupList(await this.translatorFor(from), { memberId: parsed.memberId, items: remaining });
+                await this.api.editMessageText({ chat_id: query.message.chat.id, message_id: query.message.message_id, text: card.text, reply_markup: { inline_keyboard: card.keyboard } });
+            };
+            if (findBlockedWord([item.title, item.price, item.location, item.text].filter(Boolean).join("\n")) || !isFresh(item, now)) {
+                await answer("staleButton");
+                return await rerender();
+            }
+            // the item is gone from the offer: any failure up to the listing puts it back
             try {
-                await this.groupListings.addCatchupItem({ userId: from, name: [query.from.first_name, query.from.last_name].filter(Boolean).join(" ") }, item, now);
+                const parsedItem = classify(item.text, false).parsed;
+                const hash = textHash(item.text);
+                const tk = tokens(item.text);
+                const recent = await listingRepository.findSellerRecent(from, new Date(now.getTime() - FRESH_MS));
+                // isSameItem alone is title equality: it needs the texts to overlap first (as in shadowService)
+                if (recent.some(l => (l.textHash === hash || tokenOverlap(tk, tokens(l.text ?? "")) >= 0.8) && isSameItem(l, item.text, parsedItem))) {
+                    await answer("captureAlreadyAdded");
+                } else {
+                    await this.groupListings.addCatchupItem({ userId: from, name: [query.from.first_name, query.from.last_name].filter(Boolean).join(" ") }, item, now);
+                    await answer("captureAddedToast");
+                }
             } catch (err) {
                 console.error("[ERROR - CatchupService.handleCallback]", { memberId: parsed.memberId }, (err as Error).message);
                 await memberRepository.restoreCatchupItem(parsed.memberId, item);
                 return await answer("staleButton");
             }
-            await answer("captureAddedToast");
-            if (query.message?.chat.type === "private") {
-                const remaining = ((await memberRepository.findById(parsed.memberId))?.pendingCatchup ?? []).filter(i => isFresh(i, now));
-                const card = buildCatchupList(await this.translatorFor(from), { memberId: parsed.memberId, items: remaining });
-                await this.api.editMessageText({ chat_id: query.message.chat.id, message_id: query.message.message_id, text: card.text, reply_markup: { inline_keyboard: card.keyboard } });
-            }
+            await rerender();
         } catch (err) {
             console.error("[ERROR - CatchupService.handleCallback]", (err as Error).message);
             await answer("staleButton");

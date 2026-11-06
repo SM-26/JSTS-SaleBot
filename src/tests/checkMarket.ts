@@ -764,6 +764,7 @@ async function run() {
             await svc.onSaleTopicMessage(u, now());
             assert.strictEqual(notes(h).length, 0, "stale items: no note");
             assert.strictEqual((await stamps(u)).pendingCatchup, undefined, "stale items dropped");
+            assert.ok(!(await stamps(u)).catchup.sentAt, "nothing sent: the claim is released");
         }
 
         // a failing send releases the claim; the next message delivers once

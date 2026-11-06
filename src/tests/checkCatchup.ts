@@ -1,4 +1,6 @@
 import assert from "assert";
+import fs from "fs";
+import { BLOCKED_WORDS_PATH } from "../services/blockedWords";
 import { scanExport, formatSummary, parseCatchupFile } from "../services/catchupScan";
 
 let failed = 0;
@@ -122,8 +124,9 @@ check("exclude drops that user", () => {
 check("parseCatchupFile round-trips and rejects bad rows", () => {
     const { file } = scan([sale(1, 0, P)]);
     assert.deepStrictEqual(parseCatchupFile(JSON.parse(JSON.stringify(file))), file);
-    const bad = (mut: (f: any) => void) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-        const f = JSON.parse(JSON.stringify(file));
+    type F = Record<string, unknown> & { sellers: (Record<string, unknown> & { items: Record<string, unknown>[] })[] };
+    const bad = (mut: (f: F) => void) => {
+        const f = JSON.parse(JSON.stringify(file)) as F;
         mut(f);
         return parseCatchupFile(f);
     };
@@ -134,6 +137,50 @@ check("parseCatchupFile round-trips and rejects bad rows", () => {
     assert.strictEqual(bad(f => (f.sellers[0].items[0].messageId = "5")), null);
     assert.strictEqual(bad(f => (f.sellers[0].items[0].title = "")), null);
     assert.strictEqual(bad(f => (f.sellers[0].items[0].tier = "wtb")), null);
+});
+
+check("same title with overlap over 0.8 merges to the newest", () => {
+    const a = sale(1, 0, "גלוק 17 למכירה 1,300₪\nמרכז במצב מצוין כולל תיק ושני מגזינים");
+    const b = sale(1, 3600, "גלוק 17 למכירה 1,300₪\nמרכז במצב מצוין כולל תיק ושני מגזינים ומחסנית");
+    const r = scan([a, b]);
+    assert.strictEqual(r.file.sellers[0].items.length, 1);
+    assert.strictEqual(r.file.sellers[0].items[0].messageId, b.id);
+    assert.strictEqual(r.summary.merged, 1);
+});
+
+check("a forward from a deleted account (null) is skipped", () => {
+    assert.strictEqual(scan([sale(1, 0, P, { forwarded_from: null })]).summary.messages, 0);
+});
+
+check("media is photo or video only: stickers, animations and video messages are not", () => {
+    for (const media_type of ["sticker", "animation", "video_message"]) {
+        assert.strictEqual(scan([msg(nextId++, 1, 0, { text: "", mime_type: "video/mp4", media_type })]).summary.messages, 0, media_type);
+    }
+    assert.strictEqual(scan([msg(nextId++, 1, 0, { text: "", mime_type: "video/mp4", media_type: "video_file" })]).summary.messages, 1);
+    const r = scan([msg(nextId++, 1, 0, { text: P, mime_type: "video/mp4", media_type: "sticker" })]);
+    assert.strictEqual(r.summary.byTier.strict, 0, "a sticker is not media for the tier");
+});
+
+check("a message with no text and no media neither opens nor extends a window", () => {
+    assert.strictEqual(scan([msg(nextId++, 1, 0, { text: "" })]).summary.windows, 0);
+    const r = scan([sale(1, 0, P), msg(nextId++, 1, 20, { text: "" }), sale(1, 45, "כוונת אדומה למכירה 300₪")]);
+    assert.strictEqual(r.summary.windows, 2, "the empty message did not extend the first window");
+});
+
+check("topic 1 means General", () => {
+    const r = scan([sale(1, 0, P), sale(2, 0, P, { reply_to_message_id: 73 })], { topicId: 1 });
+    assert.deepStrictEqual(r.file.sellers.map(s => s.userId), ["1"]);
+});
+
+check("a blocked word in a hidden link makes the window tier none", () => {
+    const word = (JSON.parse(fs.readFileSync(BLOCKED_WORDS_PATH, "utf8")) as string[]).find(w => !w.includes("*"));
+    assert.ok(word, "the blocklist has a plain entry");
+    const text = ["גלוק 17 למכירה 1,300₪ ", { type: "text_link", text: "link", href: `https://x.test/${word}` }];
+    const r = scan([sale(1, 0, text as unknown as string)]);
+    assert.strictEqual(r.summary.byTier.none, 1);
+    assert.strictEqual(r.summary.items, 0);
+    const ok = scan([sale(1, 0, ["גלוק 17 למכירה 1,300₪ ", { type: "text_link", text: "link", href: "https://x.test/fine" }] as unknown as string)]);
+    assert.strictEqual(ok.summary.items, 1);
 });
 
 check("formatSummary has counts only", () => {

@@ -1,3 +1,4 @@
+import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { classify, normalize, textHash, tokenOverlap, tokens } from "./classifier";
 
 export type CatchupItem = { messageId: number; date: string; title: string; price: string; location?: string; text: string; tier: "strict" | "ask" };
@@ -18,7 +19,7 @@ const QUIET_MS = 30_000;
 const WINDOW_MS = 90_000;
 const OVERLAP = 0.8;
 
-type Msg = { id: number; at: number; userId: string; name: string; text: string; media: boolean };
+type Msg = { id: number; at: number; userId: string; name: string; text: string; media: boolean; links: { url: string }[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -28,10 +29,16 @@ function flatten(text: unknown): string {
     return text.map(p => (typeof p === "string" ? p : isObj(p) && typeof p.text === "string" ? p.text : "")).join("");
 }
 
+// hidden link URLs: inline text parts and text_entities of the export both carry an href
+function linksOf(m: Record<string, unknown>): { url: string }[] {
+    const parts = [...(Array.isArray(m.text) ? m.text : []), ...(Array.isArray(m.text_entities) ? m.text_entities : [])];
+    return parts.flatMap(p => (isObj(p) && typeof p.href === "string" ? [{ url: p.href }] : []));
+}
+
 function readMessage(m: unknown, now: Date, topicId?: number): Msg | null {
     if (!isObj(m) || m.type === "service" || typeof m.id !== "number") return null;
     const from = typeof m.from_id === "string" ? /^user(\d+)$/.exec(m.from_id) : null;
-    if (!from || m.forwarded_from) return null;
+    if (!from || m.forwarded_from !== undefined) return null // a deleted account exports null;
     // General has no reply_to_message_id; any other topic carries its id
     if (m.reply_to_message_id !== topicId) return null;
     const unix = Number(m.date_unixtime);
@@ -39,15 +46,18 @@ function readMessage(m: unknown, now: Date, topicId?: number): Msg | null {
     if (!Number.isFinite(at) || at < now.getTime() - MAX_AGE_MS) return null;
     const text = flatten(m.text);
     if (text.trimStart().startsWith("/")) return null;
-    const media = m.photo !== undefined || (typeof m.mime_type === "string" && m.mime_type.startsWith("video/"));
-    return { id: m.id, at, userId: from[1], name: typeof m.from === "string" ? m.from : "", text, media };
+    // live capture counts photos and videos only: not stickers, animations or video messages
+    const media = m.photo !== undefined || (typeof m.mime_type === "string" && m.mime_type.startsWith("video/") && !["sticker", "animation", "video_message"].includes(String(m.media_type)));
+    if (!text.trim() && !media) return null; // live isSaleTopicMessage refuses it
+    return { id: m.id, at, userId: from[1], name: typeof m.from === "string" ? m.from : "", text, media, links: linksOf(m) };
 }
 
 export function scanExport(raw: unknown, opts: { now: Date; topicId?: number; exclude?: string[] }): { file: CatchupFile; summary: ScanSummary } {
     const summary: ScanSummary = { messages: 0, windows: 0, byTier: { strict: 0, ask: 0, wtb: 0, none: 0 }, noTitle: 0, merged: 0, items: 0, sellers: 0 };
     const sellers = new Map<string, { userId: string; name: string; items: CatchupItem[] }>();
     const list = isObj(raw) && Array.isArray(raw.messages) ? raw.messages : [];
-    const msgs = list.flatMap(m => readMessage(m, opts.now, opts.topicId) ?? []).filter(m => !opts.exclude?.includes(m.userId));
+    const topicId = opts.topicId === 1 ? undefined : opts.topicId; // --topic 1 is General
+    const msgs = list.flatMap(m => readMessage(m, opts.now, topicId) ?? []).filter(m => !opts.exclude?.includes(m.userId));
     msgs.sort((a, b) => a.at - b.at || a.id - b.id);
     summary.messages = msgs.length;
 
@@ -72,15 +82,17 @@ export function scanExport(raw: unknown, opts: { now: Date; topicId?: number; ex
         // the way captureRepository REBUILD joins: texts in message order, newline between, empty ones skipped
         const text = w.parts.map(p => p.text).filter(Boolean).join("\n");
         const r = classify(text, w.parts.some(p => p.media));
-        summary.byTier[r.tier]++;
-        if (r.tier !== "strict" && r.tier !== "ask") continue;
+        // as live capture: a blocked word hidden behind a link makes the window tier none
+        const tier = r.tier !== "none" && findBlockedWord(withLinkUrls(text, w.parts.flatMap(p => p.links))) ? "none" : r.tier;
+        summary.byTier[tier]++;
+        if (tier !== "strict" && tier !== "ask") continue;
         const { title, price, location } = r.parsed;
         if (!title) {
             summary.noTitle++;
             continue;
         }
         if (!price) continue; // ponytail: a priced post is the contract; a tier without a price is dropped uncounted
-        const item: CatchupItem = { messageId: w.first.id, date: new Date(w.first.at).toISOString(), title, price, text, tier: r.tier };
+        const item: CatchupItem = { messageId: w.first.id, date: new Date(w.first.at).toISOString(), title, price, text, tier };
         if (location) item.location = location;
         let s = sellers.get(w.first.userId);
         if (!s) sellers.set(w.first.userId, (s = { userId: w.first.userId, name: w.first.name, items: [] }));

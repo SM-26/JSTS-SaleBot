@@ -2938,6 +2938,8 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await importDoc(big.h, admin, { file_size: 6_000_000 });
                     assert.ok(big.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("catchupBadFile")));
                     assert.ok(!big.h.calls.some((c) => c.method === "getFile"), "an oversized file is refused before getFile");
+                    assert.ok(bad.h.calls.some((c) => c.method === "deleteMessage"), "a bad file's message is deleted too");
+                    assert.ok(big.h.calls.some((c) => c.method === "deleteMessage"), "an oversized file's message is deleted too");
 
                     const plainBoot = boot({ responses: getFileOk });
                     await importDoc(plainBoot.h, user());
@@ -3070,6 +3072,35 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await settle();
                     assert.strictEqual(text(sends(h)[0]), T("catchupNothingLeft"));
                     console.log("  [OK] (k7) No thanks drops the items, deletes the note; the link then says nothing is left.");
+                }
+
+                // (k8) two different items opening with the same line are both added
+                {
+                    const { h } = boot();
+                    const u = await deliveredSeller(h, [item(51, "למכירה", "למכירה\nGlock 17 100"), item(52, "למכירה", "למכירה\nVest tactical 250")]);
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_51`, { userId: u, messageId: 55 });
+                    await h.pressButton(`ck_${id}_52`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("captureAddedToast"), T("captureAddedToast")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), origin: "catchup" }), 2, "same first line, different text: two listings");
+                    console.log("  [OK] (k8) items sharing a first line but not their text are both listed.");
+                }
+
+                // (k9) a forged ck_ button against an offer that was never delivered changes nothing
+                {
+                    const { h } = boot();
+                    const u = user();
+                    await memberRepository.importCatchup(String(u), [item(61, "Glock", "Glock 17 100")], new Date());
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_61`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("staleButton")]);
+                    assert.strictEqual((await memberOf(u))!.pendingCatchup?.length, 1, "the item is still offered");
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0, "no listing");
+                    console.log("  [OK] (k9) a forged add against an undelivered offer is refused.");
                 }
             } finally {
                 globalThis.fetch = realFetch;
