@@ -39,8 +39,3 @@ Without Docker, the production stack and the test stack are in [Running](Running
 | Developers | [Architecture](Architecture.md), [Testing](Testing.md), [Localization](Localization.md), [Version](VERSION.md), [Changelog](CHANGELOG.md) |
 
 These pages live in `docs/` in the repo and are copied to the wiki on every merge to master. Change them through a PR; edits made on the wiki are overwritten.
-
-## To do
-
-- [ ] Make a logo for this project
-- [ ] Rework the FAQ with Rich Messages
