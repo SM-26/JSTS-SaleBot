@@ -3155,6 +3155,80 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0, "no listing");
                     console.log("  [OK] (cu9) a forged add against an undelivered offer is refused.");
                 }
+                // (cu10) an ended listing, or a declined text, is never offered or added again
+                {
+                    const { default: listingRepo } = await import("../repositories/listingRepository");
+                    const { textHash } = await import("../services/classifier");
+                    const { h } = boot();
+                    const u = user();
+                    const endedItem = item(71, "Glock", "Glock 17 100");
+                    const declinedItem = item(72, "Vest", "Vest tactical 250");
+                    const freshItem = item(73, "Scope", "Red scope 300");
+                    await memberRepository.importCatchup(String(u), [endedItem, declinedItem, freshItem], new Date());
+                    const ended = await listingRepo.createFromCatchup({ chatId: APPROVED_GROUP, messageId: 71, sellerId: String(u), sellerName: "S", item: endedItem, isBundle: false }, new Date());
+                    await Listing.updateOne({ _id: ended._id }, { $set: { status: "removed" } });
+                    await Member.updateOne({ userId: String(u) }, { $set: { declined: [{ hash: textHash(declinedItem.text), at: new Date() }] } });
+                    await memberRepository.armCatchup(new Date());
+                    await h.sendText("anyone here", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "the seller still has one fresh item, so one note");
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.sendText(`/start k_${id}`, { userId: u });
+                    await settle();
+                    assert.deepStrictEqual(keyboard(sends(h)[0]).map((b) => b.callback_data), [`ck_${id}_73`], "the list hides ended and declined items");
+                    // a button for the ended item (still stored) creates nothing
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_71`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("captureAlreadyAdded")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 1, "only the ended one exists");
+                    console.log("  [OK] (cu10) ended and declined items are not offered or added again.");
+                }
+
+                // (cu11) a send that may have gone out keeps the claim; a definite refusal frees it
+                {
+                    const cases: [string, Record<string, unknown>, boolean][] = [
+                        ["403 refused", { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { ok: false, error_code: 403, description: "Forbidden" } : undefined }, false],
+                        ["network error", { sendMessage: (p: Record<string, unknown>) => { if (p.ephemeral_message_parameters) throw new Error("socket hang up"); return undefined; } }, true],
+                        ["came out public", { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { message_id: 1, chat: { id: APPROVED_GROUP, type: "supergroup" }, date: 1 } : undefined }, true],
+                    ];
+                    for (const [label, responses, kept] of cases) {
+                        const { h } = boot({ responses });
+                        const u = user();
+                        await memberRepository.importCatchup(String(u), [item(81, "Glock", `Glock 17 100 ${label}`)], new Date());
+                        await memberRepository.armCatchup(new Date());
+                        await h.sendText("anyone here", { ...GROUP, userId: u });
+                        await settle();
+                        assert.strictEqual(Boolean((await memberOf(u))!.catchup?.sentAt), kept, `${label}: claim ${kept ? "kept" : "released"}`);
+                        if (kept) {
+                            const before = ephemerals(h).length;
+                            await h.sendText("again", { ...GROUP, userId: u });
+                            await settle();
+                            assert.strictEqual(ephemerals(h).length, before, `${label}: never sent twice`);
+                        }
+                    }
+                    console.log("  [OK] (cu11) an unclear send keeps the claim, a definite refusal releases it.");
+                }
+
+                // (cu12) one sale post gets one note: the catch-up note waits while a capture window is open
+                {
+                    const { h } = boot();
+                    const u = user();
+                    await memberRepository.importCatchup(String(u), [item(91, "Glock", "Glock 17 100")], new Date());
+                    await memberRepository.armCatchup(new Date());
+                    await h.sendText("Glock 19 למכירה 1,300₪", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 0, "a sale post is held back from the catch-up note");
+                    await h.sendText("just chatting", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 0, "still held while the window is open");
+                    await Capture.updateMany({ senderId: String(u) }, { $set: { state: "closed" } });
+                    await h.sendText("just chatting again", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "delivered on the first message once no window is open");
+                    console.log("  [OK] (cu12) the catch-up note waits for the capture window.");
+                }
             } finally {
                 globalThis.fetch = realFetch;
                 if (realToken === undefined) delete process.env.BOT_TOKEN;

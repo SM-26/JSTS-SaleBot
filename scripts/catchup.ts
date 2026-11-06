@@ -14,7 +14,13 @@ for (let i = 0; i < args.length; i++) {
     else if (a === "--topic") topicId = Number(args[++i]);
     else if (a === "--exclude") exclude.push(args[++i]);
     else if (a === "--now") now = new Date(args[++i]);
+    else if (a === "--") continue; // pnpm passes a bare --
     else if (!a.startsWith("--")) input = a;
+    else {
+        console.error(`unknown flag ${a}
+${usage}`);
+        process.exit(1);
+    }
 }
 if (!input || !out || Number.isNaN(now.getTime()) || (topicId !== undefined && !Number.isInteger(topicId))) {
     console.error(usage);

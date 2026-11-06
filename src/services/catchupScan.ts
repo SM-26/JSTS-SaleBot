@@ -9,6 +9,7 @@ export type ScanSummary = {
     windows: number;
     byTier: { strict: number; ask: number; wtb: number; none: number };
     noTitle: number;
+    noPrice: number;
     merged: number;
     items: number;
     sellers: number;
@@ -39,7 +40,7 @@ function linksOf(m: Record<string, unknown>): { url: string }[] {
 function readMessage(m: unknown, now: Date, topicId?: number): Msg | null {
     if (!isObj(m) || m.type === "service" || typeof m.id !== "number") return null;
     const from = typeof m.from_id === "string" ? /^user(\d+)$/.exec(m.from_id) : null;
-    if (!from || m.forwarded_from !== undefined) return null // a deleted account exports null;
+    if (!from || m.forwarded_from !== undefined) return null; // a deleted account exports null
     // General has no reply_to_message_id; any other topic carries its id
     if (m.reply_to_message_id !== topicId) return null;
     const unix = Number(m.date_unixtime);
@@ -54,7 +55,7 @@ function readMessage(m: unknown, now: Date, topicId?: number): Msg | null {
 }
 
 export function scanExport(raw: unknown, opts: { now: Date; topicId?: number; exclude?: string[] }): { file: CatchupFile; summary: ScanSummary } {
-    const summary: ScanSummary = { messages: 0, windows: 0, byTier: { strict: 0, ask: 0, wtb: 0, none: 0 }, noTitle: 0, merged: 0, items: 0, sellers: 0 };
+    const summary: ScanSummary = { messages: 0, windows: 0, byTier: { strict: 0, ask: 0, wtb: 0, none: 0 }, noTitle: 0, noPrice: 0, merged: 0, items: 0, sellers: 0 };
     const sellers = new Map<string, { userId: string; name: string; items: CatchupItem[] }>();
     const list = isObj(raw) && Array.isArray(raw.messages) ? raw.messages : [];
     const topicId = opts.topicId === 1 ? undefined : opts.topicId; // --topic 1 is General
@@ -92,7 +93,10 @@ export function scanExport(raw: unknown, opts: { now: Date; topicId?: number; ex
             summary.noTitle++;
             continue;
         }
-        if (!price) continue; // ponytail: a priced post is the contract; a tier without a price is dropped uncounted
+        if (!price) { // a priced post is the contract; trade posts and bare units land here
+            summary.noPrice++;
+            continue;
+        }
         const item: CatchupItem = { messageId: w.first.id, messageIds: w.parts.map(p => p.id), date: new Date(w.first.at).toISOString(), title, price, text, tier };
         if (location) item.location = location;
         let s = sellers.get(w.first.userId);
@@ -117,7 +121,7 @@ export function formatSummary(s: ScanSummary): string {
     return [
         `messages ${s.messages}, windows ${s.windows}`,
         `tiers: strict ${s.byTier.strict}, ask ${s.byTier.ask}, wtb ${s.byTier.wtb}, none ${s.byTier.none}`,
-        `dropped (no title) ${s.noTitle}, merged ${s.merged}`,
+        `dropped (no title) ${s.noTitle}, (no price or a trade) ${s.noPrice}, merged ${s.merged}`,
         `items ${s.items} from ${s.sellers} sellers`,
     ].join("\n");
 }

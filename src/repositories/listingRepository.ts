@@ -210,7 +210,7 @@ class ListingRepository {
     // Ended = sold + expired + removed (live and taken-down listings do not count); the top-seller rule reads this.
     async countEnded(sellerId: string): Promise<{ sold: number; ended: number }> {
         const rows = await Listing.aggregate<{ _id: string; n: number }>([
-            { $match: { sellerId, status: { $in: ["sold", "expired", "removed"] } } },
+            { $match: { sellerId, status: { $in: ["sold", "expired", "removed"] }, $nor: [{ origin: "catchup", status: "expired" }] } },
             { $group: { _id: "$status", n: { $sum: 1 } } },
         ]).exec();
         const sold = rows.find(r => r._id === "sold")?.n ?? 0;
@@ -252,6 +252,11 @@ class ListingRepository {
 
     findByIds(ids: string[]): Promise<IListing[]> {
         return Listing.find({ _id: { $in: ids } }).exec();
+    }
+
+    // Every listing of the seller, any status: the keys a catch-up item is checked against.
+    async findSellerKeys(sellerId: string): Promise<{ chatId: number; textHash?: string; messageIds: number[] }[]> {
+        return Listing.find({ sellerId }, { chatId: 1, textHash: 1, messageIds: 1 }).lean<{ chatId: number; textHash?: string; messageIds: number[] }[]>().exec();
     }
 
     findSellerRecent(sellerId: string, since: Date): Promise<IListing[]> {
@@ -353,10 +358,14 @@ class ListingRepository {
         return Listing.countDocuments({ hold: true, status: "live" }).exec();
     }
 
+    countCatchupSince(since: Date): Promise<number> {
+        return Listing.countDocuments({ origin: "catchup", createdAt: { $gte: since } }).exec();
+    }
+
     // Listings created since `since` (all time when omitted), grouped by status.
     async countByStatus(since?: Date): Promise<Record<string, number>> {
         const rows = await Listing.aggregate<{ _id: string; n: number }>([
-            ...(since ? [{ $match: { createdAt: { $gte: since } } }] : []),
+            { $match: { origin: { $ne: "catchup" }, ...(since ? { createdAt: { $gte: since } } : {}) } }, // catch-up listings have their own line
             { $group: { _id: "$status", n: { $sum: 1 } } },
         ]).exec();
         return Object.fromEntries(rows.map(r => [r._id, r.n]));

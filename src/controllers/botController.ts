@@ -37,6 +37,8 @@ import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richM
 import { localeService } from "../services/localeService";
 import { sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
+import captureRepository from "../repositories/captureRepository";
+import { classify } from "../services/classifier";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
 import { command, parseCommand, ParsedCommand } from "./commands";
 import { ensureUserMiddleware, sessionKey, staleButtonCatchAll } from "./middleware";
@@ -543,9 +545,17 @@ export class BotController {
 
             // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
             if (this.captureService.isSaleTopicMessage(msg)) {
-                if (this.captureOn()) await this.captureService.handleGroupMessage(msg);
+                // one sale post must not get a capture note and a catch-up note: hold the offer while a window is open
+                // or this message will open one (a sale-like text, or media alone); the member's next message delivers it
+                let holdOffer = false;
+                if (this.captureOn()) {
+                    const text = msg.text ?? msg.caption ?? "";
+                    holdOffer = await captureRepository.hasOpen(msg.chat.id, String(msg.from!.id)).catch(() => false)
+                        || !text || classify(text, Boolean(msg.photo || msg.video)).tier !== "none";
+                    await this.captureService.handleGroupMessage(msg);
+                }
                 // after capture, so a blocked or failed capture never stops the offer; the mode check lives in the service
-                await this.catchupService.onSaleTopicMessage(String(msg.from!.id), new Date());
+                if (!holdOffer) await this.catchupService.onSaleTopicMessage(String(msg.from!.id), new Date());
             }
 
             return next();

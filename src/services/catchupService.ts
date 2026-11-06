@@ -7,7 +7,8 @@ import type { BotConfig } from "../types";
 import { findBlockedWord } from "./blockedWords";
 import { parseCatchupFile, type CatchupFile, type CatchupItem } from "./catchupScan";
 import { classify, textHash, tokenOverlap, tokens } from "./classifier";
-import { deleteNote, sendNote } from "./ephemeralNotes";
+import type { IMember } from "../models/Member";
+import { deleteNote, sendNoteResult } from "./ephemeralNotes";
 import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildCatchupList, buildCatchupNote, parseCatchupArg, type Translate } from "./listingCards";
 import { localeService } from "./localeService";
@@ -95,6 +96,20 @@ export class CatchupService {
         return out;
     }
 
+    // Fresh items the seller may still be offered: not already listed in any status (an ended one stays ended),
+    // and not a text they declined within 30 days.
+    private async offerable(member: IMember, items: CatchupItem[], now: Date): Promise<CatchupItem[]> {
+        const keys = await listingRepository.findSellerKeys(member.userId);
+        const hashes = new Set(keys.map(k => k.textHash).filter(Boolean));
+        const ids = new Set(keys.filter(k => k.chatId === this.config.approvedGroupId).flatMap(k => k.messageIds));
+        const since = now.getTime() - FRESH_MS;
+        const declined = new Set((member.declined ?? []).filter(d => d.at.getTime() >= since).map(d => d.hash));
+        return items.filter(i => {
+            const h = textHash(i.text);
+            return isFresh(i, now) && !hashes.has(h) && !declined.has(h) && !(i.messageIds ?? [i.messageId]).some(id => ids.has(id));
+        });
+    }
+
     // Kill switch: only `optin` delivers (R3). Held offers wait. Never throws.
     async onSaleTopicMessage(senderId: string, now: Date): Promise<void> {
         if (this.config.captureMode !== "optin") return;
@@ -110,24 +125,27 @@ export class CatchupService {
         const member = await memberRepository.claimCatchupDelivery(userId, now);
         if (!member) return false;
         const memberId = String(member._id);
-        let sent = false;
+        let keepClaim = false; // at most once: only a definite API refusal frees the claim
         try {
-            const fresh = (member.pendingCatchup ?? []).filter(i => isFresh(i, now));
+            const fresh = await this.offerable(member, member.pendingCatchup ?? [], now);
             if (!fresh.length) {
                 await memberRepository.dropCatchup(memberId); // R5: nothing fresh, no note; the claim is released below
                 return false;
             }
             const card = buildCatchupNote(await this.translatorFor(userId), { memberId, count: fresh.length }, this.botUsername());
-            const ephemeralMessageId = await sendNote(this.api, this.config, Number(userId), card);
-            if (ephemeralMessageId === null) return false;
-            sent = true;
-            await memberRepository.setCatchupNote(userId, ephemeralMessageId);
+            const res = await sendNoteResult(this.api, this.config, Number(userId), card);
+            if (res.kind !== "sent") {
+                keepClaim = res.kind !== "rejected"; // unknown or public: it may have gone out, so never repeat
+                return false;
+            }
+            keepClaim = true;
+            await memberRepository.setCatchupNote(userId, res.id);
             return true;
         } catch (err) {
             console.error("[ERROR - CatchupService.deliver]", (err as Error).message);
-            return sent;
+            return keepClaim;
         } finally {
-            if (!sent) await memberRepository.releaseCatchupDelivery(userId).catch(() => undefined); // R8
+            if (!keepClaim) await memberRepository.releaseCatchupDelivery(userId).catch(() => undefined); // R8
         }
     }
 
@@ -137,7 +155,7 @@ export class CatchupService {
         const member = await memberRepository.findById(memberId);
         if (!member || member.userId !== String(msg.from.id) || !member.catchup?.sentAt) return false;
         const t = await this.translatorFor(member.userId);
-        const items = (member.pendingCatchup ?? []).filter(i => isFresh(i, now));
+        const items = await this.offerable(member, member.pendingCatchup ?? [], now);
         const card = items.length ? buildCatchupList(t, { memberId, items }) : { text: t("catchupNothingLeft"), keyboard: [] };
         await this.api.sendMessage({ chat_id: msg.chat.id, text: card.text, ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
         return true;
@@ -179,7 +197,8 @@ export class CatchupService {
             // the item was taken: every ending below re-renders the DM list, so no dead button stays
             const rerender = async (): Promise<void> => {
                 if (query.message?.chat.type !== "private") return;
-                const remaining = ((await memberRepository.findById(parsed.memberId))?.pendingCatchup ?? []).filter(i => isFresh(i, now));
+                const fresh = await memberRepository.findById(parsed.memberId);
+                const remaining = fresh ? await this.offerable(fresh, fresh.pendingCatchup ?? [], now) : [];
                 const card = buildCatchupList(await this.translatorFor(from), { memberId: parsed.memberId, items: remaining });
                 await this.api.editMessageText({ chat_id: query.message.chat.id, message_id: query.message.message_id, text: card.text, reply_markup: { inline_keyboard: card.keyboard } });
             };
@@ -193,6 +212,11 @@ export class CatchupService {
                 // a trade post (or an offer stored before the parsing fixes) has no one-tap Add, as in capture notes
                 if (parsedItem.trade || !parsedItem.price) {
                     await answer("staleButton");
+                    return await rerender();
+                }
+                // an item the seller already has in any status (even ended or removed) is not listed again
+                if (!(await this.offerable(member, [item], now)).length) {
+                    await answer("captureAlreadyAdded");
                     return await rerender();
                 }
                 const hash = textHash(item.text);
