@@ -59,6 +59,7 @@ export class PendingService {
                     descriptionEntities: post.descriptionEntities,
                     price: post.price,
                     location: post.location,
+                    meetup: post.meetup,
                     media: post.media,
                     userId: Number(post.userId),
                     username: user?.userName || undefined,

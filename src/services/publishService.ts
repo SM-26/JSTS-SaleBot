@@ -77,6 +77,7 @@ export class PublishService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(author.userId),
             username: author.userName || undefined,

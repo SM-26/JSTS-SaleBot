@@ -36,6 +36,7 @@ export interface BotConfig {
     buyerMatches?: "off" | "shadow" | "on";
     nudges?: boolean;
     rulesUrl?: string;
+    quickListing?: boolean;
 }
 
 export interface LocaleStrings {
@@ -43,12 +44,21 @@ export interface LocaleStrings {
     welcome: string;
     wizardStep: string;
     contactSellerCta: string;
+    meetupPlace: string;
+    quickSellHint: string;
+    quickPhotoHint: string;
+    dmAlertHint: string;
+    dmSellHint: string;
+    dmWantedOff: string;
     trustLine: string;
     enterDescription: string;
     enterPrice: string;
     expectedText: string;
     enterMedia: string;
     doneMediaButton: string;
+    editTitleButton: string;
+    editPriceButton: string;
+    editLocationButton: string;
     enterLocation: string;
     postCreated: string;
     postApproved: string;
@@ -196,6 +206,7 @@ export interface Post {
     lastBumpAt?: Date | null;
     rejectionReason?: string | null;
     rejectionNotifiedAt?: Date | null;
+    meetup?: boolean;
 }
 
 export interface User {

@@ -8,6 +8,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
+import { quickListingChecks } from "./quickListingChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -608,6 +609,31 @@ async function run() {
             assert.strictEqual(text(card), T("statusApproved"));
             assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
             console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
+        // (m2) a meetup post publishes with the meeting-point button and a flagged listing; a plain one has no buttons
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const meetupId = await seedPost(seller, "Meet me");
+            await Post.updateOne({ _id: meetupId }, { $set: { meetup: true } });
+            const plainId = await seedPost(seller, "Plain");
+            for (const [id, msgId] of [[meetupId, 320], [plainId, 321]] as const) {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${id}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: msgId });
+                await settle();
+                const sent = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
+                const listing = (await Listing.findOne({ source: "bot", postId: id }))!;
+                assert.ok(!sent.params.reply_markup, "no button under a group post");
+                if (id === meetupId) {
+                    assert.ok(JSON.stringify(sent.params.rich_message).includes("?start=faq_1"), "the meeting point's words link to faq_1");
+                    assert.strictEqual(listing.meetup, true);
+                } else {
+                    assert.ok(!("meetup" in listing.toObject()), "meetup is never written as false");
+                }
+            }
+            console.log("  [OK] (m2) the meeting-point link and flag follow the post.");
         }
 
         // (n) a listing failure does not stop the author's DM; the card gets no Take down
@@ -2866,6 +2892,9 @@ async function run() {
                 console.log("  [OK] (z6) listing titles are HTML-escaped.");
             }
         })();
+
+        // (k1)..(k26): quickListing buttons, the meetup toggle and the one-message quick draft
+        await quickListingChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP, MOD_GROUP });
 
         console.log("[OK] persistent flows.");
     } finally {

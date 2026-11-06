@@ -4,7 +4,7 @@ import {
     buildAskNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
     nudgeKeyboard, parseCaptureArg, parseListingArg, type Card,
 } from "../services/listingCards";
-import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
+import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildDmMatches, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
 
 /** Pure card builders and callback_data codecs; no Mongo, no config. Run: pnpm run check-cards */
 
@@ -67,6 +67,23 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert(r.text.startsWith("listingRefreshedCard"));
 }
 
+// meeting point line: flag or location, never when neither
+{
+    const base = { _id: new Types.ObjectId(ID), title: "גלוק", price: "100" };
+    const plain = buildManagementCard(t, base, { surface: "c" });
+    all.push(plain);
+    assert(!plain.text.includes("📍"));
+    const flagged = buildManagementCard(t, { ...base, meetup: true, location: "Haifa" }, { surface: "c" });
+    all.push(flagged);
+    assert.strictEqual(flagged.text, `${plain.text}
+📍 Haifa · meetupPlace`);
+    const byName = buildManagementCard(t, { ...base, location: "בית דגן" }, { surface: "c" });
+    all.push(byName);
+    assert.strictEqual(byName.text, `${plain.text}
+📍 בית דגן`);
+    assert.strictEqual(buildManagementCard(t, { ...base, location: "Haifa" }, { surface: "c" }).text, plain.text);
+}
+
 // ended card
 for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRemovedNote"], ["taken_down", "listingEnded"], ["expired", "listingEnded"]] as const) {
     const c = buildEndedCard(t, { status, title: "x" });
@@ -82,6 +99,25 @@ for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRe
     assert(c.text.startsWith("captureNeverNote"));
     assert.strictEqual(c.keyboard.length, 1);
     assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}`]);
+}
+
+// meeting point on buyer cards
+{
+    const plain = [{ title: "Hi-capa", price: "500", location: "Haifa", date: "2026-10-30" }];
+    const meet = [{ title: "Glock", location: "Haifa", date: "2026-11-01", meetup: true }, ...plain];
+    const bn = buildBuyerNote(t, meet, ID, BOT);
+    assert(bn.text.includes("Haifa · meetupPlace"), bn.text);
+    assert.strictEqual(bn.keyboard.length, 2);
+    assert(urls(bn)[1]!.endsWith("?start=faq_1"));
+    const dm = buildDmMatches(t, meet, undefined, BOT);
+    assert(dm.text.includes("Haifa · meetupPlace") && dm.keyboard.length === 1 && urls(dm)[0]!.endsWith("?start=faq_1"));
+    const ac = buildAlertCard(t, "q", meet[0], BOT);
+    assert(ac.text.includes("Haifa · meetupPlace") && urls(ac)[0]!.endsWith("?start=faq_1"));
+    assert.strictEqual(buildAlertCard(t, "q", meet[0]).keyboard.length, 0, "no bot username, no row");
+    assert.strictEqual(buildAlertCard(t, "q", plain[0], BOT).keyboard.length, 0);
+    assert.strictEqual(buildDmMatches(t, plain, undefined, BOT).keyboard.length, 0);
+    assert.strictEqual(buildBuyerNote(t, plain, ID, BOT).keyboard.length, 1);
+    assert(!buildBuyerNote(t, plain, ID, BOT).text.includes("meetupPlace"));
 }
 
 // parse round trip

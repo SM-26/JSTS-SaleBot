@@ -35,6 +35,7 @@ export const CONFIG_SCHEMA: Record<string, ConfigFieldSpec> = {
     donationsEnabled: { kind: "boolean" },
     enableFaq: { kind: "boolean" },
     nudges: { kind: "boolean" },
+    quickListing: { kind: "boolean" },
 
     // ponytail: these three live in config.json but nothing reads them yet;
     // typed here so /config still validates rather than accepting anything.

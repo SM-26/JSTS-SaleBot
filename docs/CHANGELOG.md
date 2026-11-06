@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased (slice 5) - One-message listing and the Beit Dagan meeting point (#104).
+  - Added:
+    - **`quickListing`** (boolean, default off; `config.json.example` ships `false`). With it on, a photo, video or album with a caption sent in DM, with no draft in progress, starts a quick draft. The caption is parsed by the classifier; missing title, price or `minimumPhotos` go to that wizard step, otherwise the preview comes straight away. Album items are collected into one draft and the preview goes out 1.5 s after the last item (an in-memory timer holding only the user id: a restart loses only the send, and `/newpost` then Continue resends). A caption-less album is dropped silently. A `wtb` caption gets no draft: with `buyerMatches: "on"` it gets the list of matches, a hint to use `/alerts <query>` and a "Selling this? Send /newpost" line; otherwise one line pointing to the group and `/newpost`. A first line over 60 characters is kept whole in the description; a bare number under 100 stays in the title, not the price. Blocked words and moderation work as before.
+    - **Field-edit buttons and the Beit Dagan toggle** on every preview, and the toggle on the location step (with `quickListing` on). Buttons: `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>`, all frozen and pinned in `check-callbacks`.
+    - **`/start sell`** (with `quickListing` on): a live draft gets Continue / Start over, otherwise a hint on how to post in one message.
+    - **Meeting point.** Optional `meetup` flag on listings, drafts and posts. Display `📍 {location} · בית דגן`; a location of בית דגן counts as a meetup. On a post the words of the meeting point in the location line link to `start=faq_1`, which opens FAQ node 1 (works whatever `quickListing` says); the link survives a Sold edit. Buyer notes, alert DMs and DM match lists show the place and carry a button to that link when any listed listing is a meetup; with no meetup listing their text and keyboards are unchanged. New file `src/services/meetup.ts`.
+    - **`/myposts` survives a photo Telegram refuses.** That post goes as plain text with its Sold and Bump buttons, and the next posts and the Relist section still go.
+    - **A single photo with no caption** (with `quickListing` on, no draft) gets a one-line hint; an album item stays silent.
+    - **Quick draft description** is only what the title, price and location left.
+    - **FAQ messages** carry one line of invisible padding, so their buttons are wide.
+    - Tests: new `src/tests/quickListingChecks.ts` (run from `check-flows`), plus coverage in `check-cards`, `check-buyer`, `check-callbacks` and `check-routes`.
+  - Notes:
+    - Data: additive only. New optional draft fields `quick`, `collecting`, `mediaGroupId`, `caption`, `meetup`; new optional `meetup` on posts and listings. After a rollback to 3.1.0 they are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
+    - The version is not bumped here; the owner picks the release order.
+
 Unreleased - Test stack.
   - Added:
     - `compose.test.yaml`: a local stack for trying the bot on the test bot and test groups, from Docker Desktop. It has its own database and refuses any token but the test bot's.
@@ -14,7 +29,7 @@ Unreleased - Numbered stale-check results.
 Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
   - Added:
     - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
-    - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a 403, meaning the buyer blocked the bot, deletes all of that buyer's saved searches). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.
+    - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. Only a Telegram reply to the prompt changes a search; a plain next message never does. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a 403, meaning the buyer blocked the bot, deletes all of that buyer's saved searches). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.
     - `buyerMatches` accepts `on` besides `off` and `shadow`. The code default stays `off` and `config.json.example` stays `shadow`; `/config buyerMatches shadow` is the kill switch.
     - `/label` also labels buyer matches as useful or not (`lb_<id>_<u|d|m>`), and `/stats` gained a buyer line.
     - Tests: `check-buyer` (new, in `pnpm test`, needs `MONGO_URI`), plus coverage in `check-callbacks`, `check-cards`, `check-routes`, `check-classifier` and `check-rich`. `/test` gained buyer cases. `src/tests/syntheticBuyer.ts` is manual (not in `pnpm test`), TEST bot and groups only.

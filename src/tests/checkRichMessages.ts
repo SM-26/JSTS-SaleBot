@@ -335,6 +335,36 @@ function checkPostsWithTrust(): number {
     return cases;
 }
 
+// Meeting point, empty location and empty description (new behaviour; the matrix above has none of them).
+function checkMeetup(): number {
+    const service = new PostService({} as unknown as Api, { ...baseConfig, lang: "en" });
+    const place = localeService.t("en", "meetupPlace");
+    const base: PostData = { title: "T", description: "D", price: "1", location: "L", media: [], userId: 1, firstName: "A" };
+    const items = (d: PostData) => {
+        const msg = service.formatPostRichMessage(d) as unknown as { blocks: { type: string; items?: { blocks: { text: unknown }[] }[] }[] };
+        return msg.blocks.find(b => b.type === "list")!.items!.map(i => i.blocks[0].text);
+    };
+    const pins = (d: PostData) => items(d).filter(x => typeof x === "string" && x.startsWith("📍"));
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "Haifa" }), [`📍 Haifa · ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "בית דגן" }), ["📍 בית דגן"]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "" }), [`📍 ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: place }), [`📍 ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, location: "" }), []);
+    assert.deepStrictEqual(pins({ ...base, meetup: false, location: "Haifa" }), ["📍 Haifa"]);
+    const bare = service.formatPostRichMessage({ ...base, description: "" }) as unknown as { blocks: { type: string }[] };
+    assert.ok(!bare.blocks.some(b => b.type === "blockquote"), "no blockquote without a description");
+    assert.ok(bare.blocks.some(b => b.type === "heading") && bare.blocks.some(b => b.type === "list"));
+    // with a bot name the meeting point's words are the link; nothing else in the line is
+    const linked = new PostService({} as unknown as Api, { ...baseConfig, lang: "en" }, () => "bot");
+    const url = "https://t.me/bot?start=faq_1";
+    const line = (d: PostData) => (linked.formatPostRichMessage(d) as unknown as { blocks: { type: string; items?: { blocks: { text: unknown }[] }[] }[] }).blocks.find(b => b.type === "list")!.items![1].blocks[0].text;
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "Haifa" }), ["📍 Haifa · ", { type: "url", text: place, url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "בית דגן" }), ["📍 ", { type: "url", text: "בית דגן", url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "" }), ["📍 ", { type: "url", text: place, url }]);
+    assert.strictEqual(line({ ...base, location: "Haifa" }), "📍 Haifa");
+    return 11;
+}
+
 function run() {
     console.log("[INFO] Checking rich message wire JSON against the hand-built reference...");
     const posts = checkPosts();
@@ -342,6 +372,8 @@ function run() {
     const help = checkHelp();
     const reports = checkReport();
     const entities = checkEntities();
+    const meetup = checkMeetup();
+    console.log(`[SUCCESS] ${meetup} meetup / empty-field cases.`);
     console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${trusted} trust-line, ${help} help, ${reports} report cases; ${entities} entity cases).`);
 }
 

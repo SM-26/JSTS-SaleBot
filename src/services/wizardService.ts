@@ -14,12 +14,23 @@ import type { GroupListingService } from "./groupListingService";
 import type { Parsed } from "./classifier";
 import { buildManagementCard } from "./listingCards";
 import captureRepository from "../repositories/captureRepository";
-import { findBlockedField, withLinkUrls, BlockedFieldName } from "./blockedWords";
+import { isApiError } from "../config/telegramErrors";
+import { isMeetupLocation } from "./meetup";
+import { findBlockedField, findBlockedWord, withLinkUrls, BlockedFieldName } from "./blockedWords";
+import { classify, normalize } from "./classifier";
+import { isSearchable, matchListings, parseQuery } from "./matchService";
+import { buildDmMatches, displayQuery } from "./buyerCards";
+import { listingLines } from "./buyerNoteService";
+import listingRepository from "../repositories/listingRepository";
 
 type TextStep = "title" | "description" | "price" | "location";
-type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
+type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editPrice" | "editLocation" | "meetup";
+type EditAction = "editTitle" | "editPrice" | "editLocation";
+const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editPrice: "price", editLocation: "location" };
 
 const TOTAL_STEPS = 5;
+/** How long after the last album item the quick draft is finished (an album arrives as separate updates). */
+export const QUICK_ALBUM_DELAY_MS = 1500;
 const PROMPTS: Record<TextStep | "media", { key: string; index: number }> = {
     title: { key: "welcome", index: 1 },
     description: { key: "enterDescription", index: 2 },
@@ -38,9 +49,46 @@ const CALLBACKS: { prefix: string; action: WizardAction }[] = [
     { prefix: "cancel_", action: "cancel" },
     { prefix: "draft_continue_", action: "continue" },
     { prefix: "draft_restart_", action: "restart" },
+    { prefix: "draft_edit_title_", action: "editTitle" },
+    { prefix: "draft_edit_price_", action: "editPrice" },
+    { prefix: "draft_edit_location_", action: "editLocation" },
+    { prefix: "draft_meetup_", action: "meetup" },
 ];
 // The step a press must find the draft in; continue/restart work on any step.
-const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm" };
+const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm", editTitle: "confirm", editPrice: "confirm", editLocation: "confirm" };
+
+const FIELD_LABEL_ONLY = /^(?:מחיר|מיקום|איפה|אזור|איזור|price|location|цена|место)\s*[:\-–]?$/iu;
+
+// Removes the first run of words that spells the city (with a Hebrew prefix letter, like the classifier's match).
+function removeCity(line: string, city: string): string {
+    const target = normalize(city);
+    const words = line.trim().split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+        for (let n = 1; n <= target.split(" ").length && i + n <= words.length; n++) {
+            const got = normalize(words.slice(i, i + n).join(" "));
+            if (got === target || (/^[בלמה]/.test(got) && got.slice(1) === target)) return [...words.slice(0, i), ...words.slice(i + n)].join(" ");
+        }
+    }
+    return line;
+}
+
+// What a caption says beyond the title, price and location it was parsed into; undefined when nothing is left.
+function quickDescription(caption: string, title: string | undefined, price: string | undefined, location: string | undefined): string | undefined {
+    const priceRe = price && new RegExp(`(?<![\\d,.])${price.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`, "u");
+    const [first = "", ...rest] = (priceRe ? caption.replace(priceRe, " ") : caption).split("\n");
+    // The title is cut at 60 characters: what the cut left of its line (from a whole word) stays, the rest is the title.
+    const flat = first.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
+    const cut = title && flat.startsWith(title) ? title.length : flat.length;
+    const tail = /\S/.test(flat[cut - 1] ?? "") && /\S/.test(flat[cut] ?? "") ? flat.slice(flat.lastIndexOf(" ", cut) + 1) : flat.slice(cut);
+    const original = caption.split("\n");
+    const lines = [tail, ...rest].flatMap((raw, i) => {
+        const line = location ? removeCity(raw, location) : raw;
+        if (line === original[i]) return [line]; // untouched: as the seller wrote it
+        const clean = line.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
+        return normalize(clean) && !FIELD_LABEL_ONLY.test(clean) ? [clean] : [];
+    });
+    return lines.join("\n").trim() || undefined;
+}
 
 export function parseWizardCallback(data: string): { action: WizardAction; userId: string } | null {
     for (const { prefix, action } of CALLBACKS) {
@@ -49,7 +97,7 @@ export function parseWizardCallback(data: string): { action: WizardAction; userI
     return null;
 }
 
-type PromptTarget = Pick<IDraft, "userId" | "chatId" | "locale" | "step">;
+type PromptTarget = Pick<IDraft, "userId" | "chatId" | "locale" | "step"> & Partial<Pick<IDraft, "meetup">>;
 
 // The /newPost wizard as a step machine over the `drafts` collection: every
 // update reads the user's draft, so a restart loses nothing.
@@ -60,8 +108,13 @@ export class WizardService {
         private inputService: InputService,
         private postService: PostService,
         private publishService: PublishService,
-        private groupListings: GroupListingService
+        private groupListings: GroupListingService,
+        private botUsername: () => string = () => ""
     ) { }
+
+    // ponytail: in-memory timer holding only the user id (spec 8.1): a restart only loses the send,
+    // /newpost then Continue resends. The draft itself is in Mongo; claimCollecting is the guard.
+    private timers = new Map<string, NodeJS.Timeout>();
 
     private t(locale: string, key: string, params?: Record<string, string | number | boolean>): string {
         return localeService.t(locale, key, params);
@@ -92,33 +145,67 @@ export class WizardService {
         await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "draftExpired") });
     }
 
-    private async sendPreview(draft: IDraft, from: TelegramUser): Promise<number> {
+    // quickListing: field-edit buttons and the Beit Dagan toggle. Off, the wizard is exactly the old one.
+    private quickOn(): boolean {
+        return this.config.quickListing === true;
+    }
+
+    private meetupButton(locale: string, userId: string, on: boolean | undefined) {
+        const label = `📍 ${this.t(locale, "meetupPlace")}`;
+        return { text: on ? `✅ ${label}` : label, callback_data: `draft_meetup_${userId}` };
+    }
+
+    private previewParts(draft: IDraft, from: TelegramUser) {
         const stamp = Date.now();
-        const replyMarkup: InlineKeyboardMarkup = {
-            inline_keyboard: [[
-                { text: this.t(draft.locale, "confirmButton"), callback_data: `confirm_${draft.userId}_${stamp}` },
-                { text: this.t(draft.locale, "cancelButton"), callback_data: `cancel_${draft.userId}_${stamp}` },
-            ]],
-        };
-        // Preview & confirm as one message (buttons attached to the preview).
-        const sent = await this.api.sendRichMessage({
-            chat_id: draft.chatId,
+        const inline_keyboard: InlineKeyboardMarkup["inline_keyboard"] = [[
+            { text: this.t(draft.locale, "confirmButton"), callback_data: `confirm_${draft.userId}_${stamp}` },
+            { text: this.t(draft.locale, "cancelButton"), callback_data: `cancel_${draft.userId}_${stamp}` },
+        ]];
+        if (this.quickOn()) {
+            inline_keyboard.push(
+                [
+                    { text: this.t(draft.locale, "editTitleButton"), callback_data: `draft_edit_title_${draft.userId}` },
+                    { text: this.t(draft.locale, "editPriceButton"), callback_data: `draft_edit_price_${draft.userId}` },
+                ],
+                [
+                    { text: this.t(draft.locale, "editLocationButton"), callback_data: `draft_edit_location_${draft.userId}` },
+                    this.meetupButton(draft.locale, draft.userId, draft.meetup),
+                ]
+            );
+        }
+        return {
             rich_message: this.postService.formatPostRichMessage(this.postData(draft, from), { previewLabel: this.t(draft.locale, "preview") }),
-            reply_markup: replyMarkup,
-        });
+            reply_markup: { inline_keyboard } as InlineKeyboardMarkup,
+        };
+    }
+
+    private async sendPreview(draft: IDraft, from: TelegramUser): Promise<number> {
+        // Preview & confirm as one message (buttons attached to the preview).
+        const sent = await this.api.sendRichMessage({ chat_id: draft.chatId, ...this.previewParts(draft, from) });
         return sent.message_id;
     }
 
+    // Redraws the live preview in place (after the meetup toggle). "Not modified" is fine.
+    private async refreshPreview(draft: IDraft, from: TelegramUser): Promise<void> {
+        try {
+            await this.api.editMessageText({ chat_id: draft.chatId, message_id: draft.promptMessageId, ...this.previewParts(draft, from) });
+        } catch (err) {
+            if (!isApiError(err, 400, "message is not modified")) throw err;
+        }
+    }
+
     // Sends the prompt for `draft.step` (the preview for "confirm") and returns its message id.
-    private async sendStep(draft: PromptTarget & Partial<IDraft>, from: TelegramUser): Promise<number> {
+    private async sendStep(draft: PromptTarget & Partial<IDraft>, from: TelegramUser, opts: { indicator?: boolean } = {}): Promise<number> {
         if (draft.step === "confirm") return this.sendPreview(draft as IDraft, from);
 
         const { key, index } = PROMPTS[draft.step];
         const markup: InlineKeyboardMarkup | undefined = draft.step === "media"
             ? { inline_keyboard: [[{ text: this.t(draft.locale, "doneMediaButton"), callback_data: `done_media_${draft.userId}` }]] }
-            : undefined;
-        // A capture draft skips most steps, so a "n of 5" indicator would lie.
-        const indicator = draft.captureId ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
+            : draft.step === "location" && this.quickOn()
+                ? { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, draft.meetup)]] }
+                : undefined;
+        // A capture draft skips most steps, and a field edit is one step: a "n of 5" indicator would lie.
+        const indicator = draft.captureId || draft.quick || opts.indicator === false ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
         const sent = await this.inputService.sendPrompt(draft.chatId, this.t(draft.locale, key), indicator, markup);
         return sent.message_id;
     }
@@ -132,7 +219,7 @@ export class WizardService {
                 chat_id: draft.chatId,
                 text: localeService.t(draft.locale, "blockedWordNotice", { field: this.t(draft.locale, FIELD_LABEL[hit.field]), word: hit.word }),
             });
-            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field, captureId: draft.captureId }, from);
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field, captureId: draft.captureId, quick: draft.quick, meetup: draft.meetup }, from);
             await draftRepository.update(draft.userId, { step: hit.field, promptMessageId: messageId, fixing: true });
             return;
         }
@@ -148,6 +235,7 @@ export class WizardService {
             price: draft.price ?? "",
             location: draft.location ?? "",
             media: draft.media.map((m): MediaItem => ({ fileId: m.fileId, type: m.type })),
+            meetup: draft.meetup || (this.quickOn() && isMeetupLocation(draft.location)) || undefined,
             userId: from.id,
             username: from.username,
             firstName: from.first_name,
@@ -234,6 +322,113 @@ export class WizardService {
         });
     }
 
+    private mediaItem(msg: Message): { fileId: string; type: "photo" | "video" } | null {
+        if (msg.photo?.length) return { fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" };
+        if (msg.video) return { fileId: msg.video.file_id, type: "video" };
+        return null;
+    }
+
+    private isQuickMessage(msg: Message): boolean {
+        return this.mediaItem(msg) !== null && !!(msg.caption || msg.media_group_id);
+    }
+
+    // No draft yet: a photo/video with a caption, or any album item, starts a quick draft (quickListing only).
+    private async quickStart(msg: Message): Promise<boolean> {
+        const item = this.mediaItem(msg);
+        if (!this.quickOn() || !item || !msg.from || msg.caption?.startsWith("/")) return false;
+        const userId = String(msg.from.id);
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        // A single photo with no caption: a hint, no draft. An album item stays silent, it can be a late one.
+        if (!this.isQuickMessage(msg)) {
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickPhotoHint") });
+            return true;
+        }
+        const draft = await draftRepository.collectQuick({ userId, chatId: msg.chat.id, locale, item, caption: msg.caption, mediaGroupId: msg.media_group_id });
+        if (!draft) return false;
+        if (msg.media_group_id) this.scheduleFinish(userId, msg.from);
+        else await this.finishQuick(userId, msg.from);
+        return true;
+    }
+
+    private scheduleFinish(userId: string, from: TelegramUser): void {
+        const old = this.timers.get(userId);
+        if (old) clearTimeout(old);
+        const timer = setTimeout(() => {
+            this.timers.delete(userId);
+            void this.safe("finishQuick", from.id, async () => { await this.finishQuick(userId, from); return true; });
+        }, QUICK_ALBUM_DELAY_MS);
+        timer.unref();
+        this.timers.set(userId, timer);
+    }
+
+    // The album is complete (or a single photo arrived): claim it once, then read the caption.
+    private async finishQuick(userId: string, from: TelegramUser): Promise<void> {
+        const draft = await draftRepository.claimCollecting(userId);
+        if (draft) await this.parseQuick(draft, from);
+    }
+
+    // Reads the caption of a claimed draft and asks only for what is missing.
+    private async parseQuick(draft: IDraft, from: TelegramUser): Promise<void> {
+        const userId = draft.userId;
+        // No caption came with the album (a straggler after a WTB reply, /cancel or Confirm): say nothing.
+        if (!draft.caption?.trim()) {
+            await draftRepository.delete(userId);
+            return;
+        }
+        const { tier, rules, parsed } = classify(draft.caption, draft.media.length > 0);
+        if (tier === "wtb") {
+            await draftRepository.delete(userId);
+            await this.replyAsBuyer(draft, draft.caption);
+            return;
+        }
+        const firstLine = draft.caption.split("\n")[0];
+        // A bare number under 100 is a model number ("Glock 17"), not a price: the first line is the title.
+        const modelNumber = rules.includes("price-bare") && (parsed.priceValue ?? 0) < 100;
+        const title = modelNumber ? firstLine.replace(/\s+/g, " ").trim().slice(0, 60).trim() || undefined : parsed.title;
+        const updated = await draftRepository.update(userId, {
+            title,
+            description: quickDescription(draft.caption, title, modelNumber ? undefined : parsed.price, parsed.location), location: parsed.location,
+            price: !modelNumber && parsed.priceValue ? String(parsed.priceValue) : undefined, caption: undefined,
+        });
+        if (updated) await this.advance(updated, from);
+    }
+
+    // The first missing of title, price, (quick) media minimum; nothing missing is the preview.
+    private async advance(draft: IDraft, from: TelegramUser): Promise<void> {
+        const step: DraftStep | null = !draft.title ? "title" : !draft.price ? "price"
+            : draft.quick && draft.media.length < (this.config.minimumPhotos ?? 0) ? "media" : null;
+        if (!step) return this.previewOrFix(draft, from);
+        const promptMessageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step, captureId: draft.captureId, quick: draft.quick }, from, { indicator: false });
+        await draftRepository.update(draft.userId, { step, promptMessageId });
+    }
+
+    // A wanted caption sent with photos: with buyerMatches on, the live matches (not their own); never a draft.
+    private async replyAsBuyer(draft: IDraft, caption: string): Promise<void> {
+        const t = (key: string, params?: Record<string, string | number | boolean>) => this.t(draft.locale, key, params);
+        if (this.config.buyerMatches !== "on") {
+            await this.api.sendMessage({ chat_id: draft.chatId, text: t("dmWantedOff") });
+            return;
+        }
+        const q = parseQuery(caption);
+        const live = (await listingRepository.findLiveForMatching()).filter(l => l.sellerId !== draft.userId);
+        const byId = new Map(live.map(l => [String(l._id), l]));
+        const listings = matchListings(q, live).flatMap(id => byId.get(id) ?? []).filter(l => !findBlockedWord(l.title ?? ""));
+        const lines = await listingLines(listings, this.groupListings);
+        const card = buildDmMatches(t, lines, isSearchable(q) ? displayQuery(q.query) : undefined, this.botUsername());
+        await this.api.sendMessage({ chat_id: draft.chatId, text: `${card.text}\n${t("dmSellHint")}`, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
+    }
+
+    /** /start sell: with quickListing on and no live draft, say how to post in one message. */
+    handleSell(msg: Message): Promise<boolean> {
+        return this.safe("handleSell", msg.chat.id, async () => {
+            const draft = await draftRepository.findByUserId(String(msg.from!.id));
+            if (!this.quickOn() || (draft && !isDraftExpired(draft, this.config.timeOut))) return this.handleNewPost(msg);
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickSellHint") });
+            return true;
+        });
+    }
+
     /** /cancel in a private chat: drop the user's draft. */
     async cancel(msg: Message): Promise<void> {
         const deleted = await draftRepository.delete(String(msg.from!.id));
@@ -249,12 +444,30 @@ export class WizardService {
         return this.safe("handleMessage", msg.chat.id, async () => {
             if (!msg.from || msg.text?.startsWith("/")) return false;
             const draft = await draftRepository.findByUserId(String(msg.from.id));
-            if (!draft) return false;
+            if (!draft) return this.quickStart(msg);
 
             if (isDraftExpired(draft, this.config.timeOut)) {
+                if (this.quickOn() && msg.caption && this.isQuickMessage(msg)) {
+                    await draftRepository.deleteIfUnchanged(draft);
+                    return this.quickStart(msg);
+                }
                 await this.expire(draft);
                 return true;
             }
+
+            const item = this.mediaItem(msg);
+            if (draft.collecting && item) {
+                await draftRepository.collectQuick({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, item, caption: msg.caption, mediaGroupId: msg.media_group_id });
+                this.scheduleFinish(draft.userId, msg.from);
+                return true;
+            }
+            if (item && msg.media_group_id && draft.mediaGroupId === msg.media_group_id && draft.step !== "media") {
+                const updated = await draftRepository.pushLateMedia(draft.userId, msg.media_group_id, item);
+                if (updated?.step === "confirm") await this.refreshPreview(updated, msg.from);
+                return true;
+            }
+            // A new captioned photo while a preview waits: the Continue / Start over question, not silence.
+            if (this.quickOn() && draft.step === "confirm" && msg.caption && !(msg.media_group_id && msg.media_group_id === draft.mediaGroupId)) return this.handleNewPost(msg);
 
             if (draft.step === "media") {
                 if (msg.photo && msg.photo.length > 0) {
@@ -285,22 +498,16 @@ export class WizardService {
                 return true;
             }
 
-            // A capture draft only ever asks for the title and then the price (description, location and
-            // media come from the post; minimumPhotos does not apply).
-            if (draft.captureId) {
+            // A capture or quick draft only asks for what is missing (title, price, and for a quick
+            // draft the media minimum); the rest came with the post or the caption.
+            if (draft.captureId || draft.quick) {
                 const updated = await draftRepository.update(draft.userId, { [draft.step]: msg.text });
-                if (!updated) return true;
-                if (draft.step === "title" && !updated.price) {
-                    const promptMessageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: "price", captureId: draft.captureId }, msg.from);
-                    await draftRepository.update(draft.userId, { step: "price", promptMessageId });
-                } else {
-                    await this.previewOrFix(updated, msg.from);
-                }
+                if (updated) await this.advance(updated, msg.from);
                 return true;
             }
 
             const next = NEXT_STEP[draft.step];
-            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next }, msg.from);
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next, meetup: draft.meetup }, msg.from);
             const fields: DraftFields = { step: next, promptMessageId: messageId };
             fields[draft.step] = msg.text;
             if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
@@ -324,6 +531,7 @@ export class WizardService {
 
             const draft = await draftRepository.findByUserId(parsed.userId);
             if (!draft || message.chat.id !== draft.chatId || message.message_id !== draft.promptMessageId) return false;
+            if (this.isQuickAction(parsed.action) && !this.quickOn()) return false;
             const requiredStep = REQUIRED_STEP[parsed.action];
             if (requiredStep && draft.step !== requiredStep) return false;
 
@@ -343,7 +551,8 @@ export class WizardService {
                         await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "notEnoughMedia") });
                         return true;
                     }
-                    await this.previewOrFix(draft, query.from);
+                    if (draft.quick) await this.advance(draft, query.from);
+                    else await this.previewOrFix(draft, query.from);
                     return true;
                 }
                 case "confirm": {
@@ -362,9 +571,41 @@ export class WizardService {
                     await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCancelled") });
                     return true;
                 }
+                case "editTitle":
+                case "editPrice":
+                case "editLocation": {
+                    await this.ack(query);
+                    await this.removeKeyboard(message.chat.id, message.message_id);
+                    const step = EDIT_FIELD[parsed.action];
+                    const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step, captureId: draft.captureId, meetup: draft.meetup }, query.from, { indicator: false });
+                    await draftRepository.update(draft.userId, { step, promptMessageId: messageId, fixing: true });
+                    return true;
+                }
+                case "meetup": {
+                    if (draft.step !== "location" && draft.step !== "confirm") return false;
+                    await this.ack(query);
+                    const updated = await draftRepository.update(draft.userId, { meetup: draft.meetup ? undefined : true });
+                    if (!updated) return true;
+                    if (updated.step === "confirm") {
+                        await this.refreshPreview(updated, query.from);
+                    } else {
+                        await this.api.editMessageReplyMarkup({ chat_id: draft.chatId, message_id: message.message_id, reply_markup: { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, updated.meetup)]] } })
+                            .catch((err: unknown) => { if (!isApiError(err, 400, "message is not modified")) throw err; });
+                    }
+                    return true;
+                }
                 case "continue": {
                     await this.ack(query);
                     await this.removeKeyboard(message.chat.id, message.message_id);
+                    if (draft.collecting) {
+                        await this.finishQuick(draft.userId, query.from);
+                        return true;
+                    }
+                    if (draft.quick && draft.step === "media") { // a crash between the claim and the update
+                        if (draft.caption) await this.parseQuick(draft, query.from);
+                        else await this.advance(draft, query.from);
+                        return true;
+                    }
                     const messageId = await this.sendStep(draft, query.from);
                     await draftRepository.update(draft.userId, { promptMessageId: messageId });
                     return true;
@@ -380,6 +621,10 @@ export class WizardService {
         });
     }
 
+    private isQuickAction(action: WizardAction): boolean {
+        return action === "editTitle" || action === "editPrice" || action === "editLocation" || action === "meetup";
+    }
+
     // Save & send to moderation (the draft was already taken atomically).
     private async createPost(draft: IDraft, from: TelegramUser): Promise<void> {
         if (draft.captureId) return this.finishCapture(draft, draft.captureId);
@@ -392,6 +637,7 @@ export class WizardService {
             price: postData.price,
             media: postData.media,
             location: postData.location,
+            meetup: postData.meetup,
             createdAt: new Date(),
         });
 
@@ -414,7 +660,7 @@ export class WizardService {
             return;
         }
         try {
-            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined });
+            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined, meetup: draft.meetup });
             if (result.kind === "gone") await say(t("captureExpired"));
             else if (result.kind === "already") await say(t("captureAlreadyAdded"));
             else {

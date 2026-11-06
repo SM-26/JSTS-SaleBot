@@ -6,6 +6,8 @@ import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
 import type { StoredEntity } from "../models/Post";
+import { MEETUP_FAQ_PAYLOAD, meetupLocationParts } from "./meetup";
+import { deepLink } from "./deepLinks";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 
@@ -15,6 +17,7 @@ export interface PostData {
     descriptionEntities?: StoredEntity[];
     price: string;
     location: string;
+    meetup?: boolean;
     media: MediaItem[];
     userId: number;
     username?: string;
@@ -24,7 +27,8 @@ export interface PostData {
 export class PostService {
     constructor(
         private api: Api,
-        private config: BotConfig
+        private config: BotConfig,
+        private botUsername: () => string = () => ""
     ) { }
 
     private get lang() {
@@ -56,13 +60,15 @@ export class PostService {
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
 
+        const locationLine = this.locationLine(data);
+
+        message.heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2);
+        if (data.description) message.blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)));
         message
-            .heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2)
-            .blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)))
             .divider()
             .list([
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
-                richListItem(b => b.paragraph(`📍 ${data.location}`)),
+                ...(locationLine ? [richListItem(b => b.paragraph(locationLine))] : []),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
                 ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
@@ -91,6 +97,16 @@ export class PostService {
         if (footer) message.footer(footer);
 
         return message.build();
+    }
+
+    // The meeting point's words link to its FAQ node; the link stays through Sold edits, a button would not.
+    private locationLine(data: PostData): string | RichTextBuilder | null {
+        if (!data.meetup) return data.location ? `📍 ${data.location}` : null;
+        const { before, place } = meetupLocationParts(data.location, localeService.t(this.lang, "meetupPlace"));
+        const username = this.botUsername();
+        return username
+            ? new RichTextBuilder().plain(`📍 ${before}`).url(place, deepLink(username, MEETUP_FAQ_PAYLOAD))
+            : `📍 ${before}${place}`;
     }
 
     // One Rich Message carrying the post AND the approve/reject buttons. A media
@@ -172,6 +188,7 @@ export class PostService {
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,

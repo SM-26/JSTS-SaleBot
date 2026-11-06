@@ -1,14 +1,14 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
 import type { IMediaItem } from "../models/Post";
 
-export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing">>;
+export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing" | "meetup" | "caption">>;
 
 /** `timeOut` is minutes from config.json; 0 (or less) means drafts never expire. */
 export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes: number, now = Date.now()): boolean {
     return timeOutMinutes > 0 && draft.updatedAt.getTime() + timeOutMinutes * 60_000 < now;
 }
 
-const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1 };
+const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1, meetup: 1, quick: 1, collecting: 1, mediaGroupId: 1, caption: 1 };
 
 export type CaptureDraftInput = {
     userId: string;
@@ -70,6 +70,50 @@ class DraftRepository {
     pushMedia(userId: string, item: IMediaItem) {
         return Draft.findOneAndUpdate(
             { userId, step: "media" },
+            { $push: { media: item }, $set: { updatedAt: new Date() } },
+            { returnDocument: "after" }
+        ).exec();
+    }
+
+    // One collecting draft per user: the filter carries collecting:true, so the upsert writes it.
+    // A concurrent first item loses the race on the unique userId (11000): retry once, then give up
+    // (another draft holds the slot).
+    async collectQuick(input: { userId: string; chatId: number; locale: string; item: IMediaItem; caption?: string; mediaGroupId?: string }) {
+        const { userId, chatId, locale, item, caption, mediaGroupId } = input;
+        const now = new Date();
+        const run = () => Draft.findOneAndUpdate(
+            { userId, collecting: true },
+            {
+                $setOnInsert: { chatId, locale, step: "media", quick: true, promptMessageId: 0, startedAt: now },
+                $push: { media: item },
+                $set: { updatedAt: now, ...(caption ? { caption } : {}), ...(mediaGroupId ? { mediaGroupId } : {}) },
+            },
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: false }
+        ).exec();
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await run();
+            } catch (err) {
+                if ((err as { code?: number }).code !== 11000) throw err;
+                if (attempt === 1) return null;
+            }
+        }
+    }
+
+    // The only way out of collecting: exactly one caller gets the draft.
+    claimCollecting(userId: string) {
+        return Draft.findOneAndUpdate({ userId, collecting: true }, { $unset: { collecting: 1 } }, { returnDocument: "after" }).exec();
+    }
+
+    // Drops the draft only if nothing touched it since it was read.
+    deleteIfUnchanged(draft: Pick<IDraft, "userId" | "updatedAt">) {
+        return Draft.deleteOne({ userId: draft.userId, updatedAt: draft.updatedAt }).exec();
+    }
+
+    // A late album item, at any step.
+    pushLateMedia(userId: string, mediaGroupId: string, item: IMediaItem) {
+        return Draft.findOneAndUpdate(
+            { userId, mediaGroupId },
             { $push: { media: item }, $set: { updatedAt: new Date() } },
             { returnDocument: "after" }
         ).exec();

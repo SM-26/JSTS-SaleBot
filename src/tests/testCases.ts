@@ -48,6 +48,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
     classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
+    quick_caption: { label: "📸 Quick draft from caption text", run: testCase_QuickCaption },
     shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
@@ -535,6 +536,30 @@ async function testCase_ClassifyFixtures(
 }
 
 /**
+ * TEST CASE: what the one-message quick draft reads from a fixed caption. Touches no draft, sends no post.
+ */
+async function testCase_QuickCaption(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const caption = ["Glock 17 Gen3", "like new, two magazines", "1,800 ₪ Tel Aviv"].join("\n");
+        const { tier, parsed } = classify(caption, true);
+        const fields = [`tier: ${tier}`, `title: ${parsed.title ?? "-"}`, `price: ${parsed.priceValue ?? "-"}`, `location: ${parsed.location ?? "-"}`, `description: ${parsed.description ?? "-"}`].join("\n");
+        await api.sendMessage({ chat_id: msg.chat.id, text: ["Caption:", caption, "", "Quick draft would read:", fields].join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_QuickCaption]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Quick caption failed: " + (err as Error).message });
+    }
+}
+
+/**
  * TEST CASE: DM the last 5 shadow_log rows (tier, wouldList, mergeWith, link). Read-only.
  */
 async function testCase_ShadowLast5(
@@ -707,7 +732,7 @@ async function testCase_AlertMeNow(
     if (!msg.from) throw new Error("Test requires a valid user in message context");
     try {
         const username = (await api.getMe()).username ?? "";
-        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username))).sendNow(String(msg.from.id), new Date());
+        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username)), () => username).sendNow(String(msg.from.id), new Date());
         if (sent === 0) await api.sendMessage({ chat_id: msg.chat.id, text: "No alerts to send (0)." });
     } catch (err) {
         console.error("[ERROR - testCase_AlertMeNow]", (err as Error).message);
@@ -731,7 +756,7 @@ async function wipeTestRows(userId: string, title: string): Promise<void> {
 
 async function seedTestPost(userId: string, title: string, now: Date) {
     return postRepository.createPost({
-        userId, title, description: "test", price: "100", location: "test", media: [TEST_MEDIA[0]],
+        userId, title, description: "test", price: "100", location: "test", media: [], // no photo: a lifecycle test needs none, and a stale file id breaks the rich message
         status: "approved", approvedMessageId: null, createdAt: now,
     });
 }

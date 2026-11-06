@@ -17,6 +17,7 @@ export type NewGroupListing = {
     title: string;
     price: string;
     location?: string;
+    meetup?: boolean;
     text: string;
     media: IMediaItem[];
     isBundle: boolean;
@@ -69,6 +70,7 @@ class ListingRepository {
                     price: post.price,
                     ...(priceValue !== undefined ? { priceValue } : {}),
                     location: post.location,
+                    ...(post.meetup === true ? { meetup: true } : {}),
                     text,
                     textHash: textHash(text),
                     media: post.media.map(m => ({ fileId: m.fileId, type: m.type })),
