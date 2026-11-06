@@ -5,12 +5,13 @@ import { deepLink } from "./deepLinks";
 
 export type Translate = (key: string, params?: Record<string, string | number | boolean>) => string;
 export type Surface = "n" | "c" | "l";
-export interface Card { text: string; keyboard: InlineKeyboardButton[][] }
+export interface Card { text: string; keyboard: InlineKeyboardButton[][]; html?: boolean }
 
 type ListingAction = "s" | "f" | "r";
 type CaptureAction = "a" | "n" | "x";
 
 export const listingActionData = (listingId: string, action: ListingAction, surface: Surface): string => `ls_${listingId}_${action}_${surface}`;
+export const lifecycleActionData = (listingId: string, action: "r" | "s" | "x"): string => `lc_${action}_${listingId}`;
 export const captureActionData = (captureId: string, action: CaptureAction): string => `mk_${captureId}_${action}`;
 
 export function parseListingArg(arg: string): { listingId: string; action: ListingAction; surface: Surface } | null {
@@ -73,4 +74,20 @@ export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | 
 
 export function buildNeverNote(t: Translate, botUsername: string): Card {
     return { text: t("captureNeverNote"), keyboard: [[{ text: t("captureOpenBotButton"), url: `https://t.me/${botUsername}` }]] };
+}
+
+// The nudge keyboard: two to a row. A bot listing never gets Remove; the DM omits the Manage link.
+export function nudgeKeyboard(listing: Pick<IListing, "_id" | "source">, t: Translate, botUsername?: string): InlineKeyboardButton[][] {
+    const id = String(listing._id);
+    const keyboard: InlineKeyboardButton[][] = [
+        [
+            { text: t("nudgeStillButton"), callback_data: lifecycleActionData(id, "r") },
+            { text: t("listingSoldButton"), callback_data: lifecycleActionData(id, "s") },
+        ],
+    ];
+    const row: InlineKeyboardButton[] = [];
+    if (listing.source === "group") row.push({ text: t("listingRemoveButton"), callback_data: lifecycleActionData(id, "x") });
+    if (botUsername) row.push({ text: t("listingManageButton"), url: deepLink(botUsername, `l_${id}`) });
+    if (row.length) keyboard.push(row);
+    return keyboard;
 }

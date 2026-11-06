@@ -15,6 +15,7 @@ export interface IListing extends Document {
     price?: string;
     priceValue?: number;
     location?: string;
+    meetup?: boolean; // slice 5 writes it; slice 4 only reads it
     text?: string;
     textHash?: string;
     media: IMediaItem[];
@@ -24,6 +25,8 @@ export interface IListing extends Document {
     createdAt: Date;
     refreshedAt: Date;
     nudgedAt?: Date;
+    nudgeHeld?: boolean; // a nudge was claimed but not delivered; waits for the seller's next group message
+    staleSentAt?: Date; // set by /stalecheck; starts the 7-day answer window
     endedAt?: Date;
     endedBy?: "seller" | "moderator" | "system";
     note?: { ephemeralMessageId: number; sentAt: Date };
@@ -46,6 +49,7 @@ const listingSchema = new Schema<IListing>({
     price: { type: String },
     priceValue: { type: Number },
     location: { type: String },
+    meetup: { type: Boolean },
     text: { type: String },
     textHash: { type: String },
     media: { type: [mediaItemSchema], default: [] },
@@ -55,6 +59,8 @@ const listingSchema = new Schema<IListing>({
     createdAt: { type: Date, required: true },
     refreshedAt: { type: Date, required: true },
     nudgedAt: { type: Date },
+    nudgeHeld: { type: Boolean },
+    staleSentAt: { type: Date },
     endedAt: { type: Date },
     endedBy: { type: String, enum: ["seller", "moderator", "system"] },
     note: { type: new Schema({ ephemeralMessageId: Number, sentAt: Date }, { _id: false }) },
@@ -64,5 +70,6 @@ listingSchema.index({ status: 1, refreshedAt: 1 });
 listingSchema.index({ sellerId: 1, status: 1 });
 listingSchema.index({ source: 1, postId: 1 }, { unique: true, partialFilterExpression: { postId: { $exists: true } } });
 listingSchema.index({ chatId: 1, messageIds: 1 });
+listingSchema.index({ nudgeHeld: 1 }, { sparse: true });
 
 export default mongoose.model<IListing>("Listing", listingSchema);

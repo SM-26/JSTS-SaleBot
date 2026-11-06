@@ -13,6 +13,7 @@ export async function sendNote(api: Api, config: BotConfig, receiverUserId: numb
         const sent = await api.sendMessage({
             chat_id: config.approvedGroupId,
             text: card.text,
+            ...(card.html ? { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } } : {}),
             reply_markup: { inline_keyboard: card.keyboard },
             ephemeral_message_parameters: { receiver_user_id: receiverUserId },
             ...(config.approvedTopicId && Number(config.approvedTopicId) !== 1 ? { message_thread_id: Number(config.approvedTopicId) } : {}),

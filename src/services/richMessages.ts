@@ -95,7 +95,7 @@ function commandItem(line: string) {
 export function buildHelpMessage(
     t: Translate,
     authLevel: AuthLevel,
-    opts: { enableFaq?: boolean; donationsEnabled?: boolean }
+    opts: { enableFaq?: boolean; donationsEnabled?: boolean; buyerMatches?: string }
 ): InputRichMessage {
     const heading = (key: string) => t(key).replace(/<\/?b>/g, "");
     const items = (keys: string[]) => keys.map(key => commandItem(t(key)));
@@ -103,6 +103,7 @@ export function buildHelpMessage(
     const generalCmds = ["helpStart", "helpNewPost", "helpCancel", "helpMyPosts", "helpLang", "helpHelp"];
     if (opts.enableFaq !== false) generalCmds.push("helpFaq");
     if (opts.donationsEnabled !== false) generalCmds.push("helpDonate");
+    if (opts.buyerMatches === "on") generalCmds.push("helpAlerts");
 
     const message = new RichMessageBuilder()
         .heading(heading("helpTitle"), 2)
@@ -119,7 +120,7 @@ export function buildHelpMessage(
         message
             .divider()
             .heading(heading("helpAdminSection"), 3)
-            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel"]));
+            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"]));
     }
 
     return message.build();

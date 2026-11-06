@@ -11,9 +11,10 @@ import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { classify, textHash, type Parsed } from "./classifier";
 import { groupMessageLink } from "./deepLinks";
-import { editNote } from "./ephemeralNotes";
+import type { LifecycleService } from "./lifecycleService";
 import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
 import { localeService } from "./localeService";
+import { groupCardKeyboard } from "./takeDownService";
 
 export type AddResult =
     | { kind: "added"; listing: IListing }
@@ -35,11 +36,11 @@ const TOASTS = { s: "listingSoldToast", f: "listingRefreshedToast", r: "listingR
 
 // A member's own group message, once they said yes: Add, then Sold / Refresh /
 // Remove from the private note or the bot, and edit sync. A member's message in the
-// group is never touched, and every ls_ button is refused on a bot post.
+// group is never touched (only a moderator tx_ delete does), and every ls_ button is refused on a bot post.
 export class GroupListingService {
     private groupUsername?: string;
 
-    constructor(private api: Api, private config: BotConfig, private getBotUsername: () => string) { }
+    constructor(private api: Api, private config: BotConfig, private getBotUsername: () => string, private lifecycle: LifecycleService) { }
 
     async addToMarket(captureId: string, fields: { title: string; price: string; location?: string }, now = new Date()): Promise<AddResult> {
         const peek = await captureRepository.findById(captureId);
@@ -83,7 +84,7 @@ export class GroupListingService {
     }
 
     // One card in the moderation topic for a seller's first captured listing; the
-    // existing td_ button takes it down without touching the member's message.
+    // td_ button takes it down and leaves the member's message; tx_ also deletes it (moderators only).
     private async notifyNewSeller(listing: IListing): Promise<void> {
         if (!this.config.moderationGroupId) return;
         try {
@@ -98,7 +99,7 @@ export class GroupListingService {
                     price: listing.price ?? "",
                     link: await this.groupLink(listing.messageIds[0]),
                 }),
-                reply_markup: { inline_keyboard: [[{ text: t("takeDownButton"), callback_data: `td_${listing._id}` }]] },
+                reply_markup: { inline_keyboard: groupCardKeyboard(String(listing._id), t) },
             });
         } catch (err) {
             console.error("[ERROR - GroupListingService.notifyNewSeller]", (err as Error).message);
@@ -141,20 +142,16 @@ export class GroupListingService {
             if (from !== listing.sellerId) return await answer("notYourButton");
             if (listing.source !== "group") return await answer("staleButton"); // a bot post is never managed with ls_
 
-            let current: IListing | null = listing;
-            if (listing.status === "live" || listing.status === "expired") {
-                const id = parsed.listingId;
-                const changed = parsed.action === "s" ? await listingRepository.markSold(id, now)
-                    : parsed.action === "f" ? await listingRepository.refresh(id, now)
-                        : await listingRepository.markRemoved(id, "seller", now);
-                if (changed) {
-                    current = changed;
-                    await answer(TOASTS[parsed.action]);
-                } else {
-                    current = (await listingRepository.findById(id)) ?? listing; // lost a race: show what won
-                    await answer("listingEnded");
-                }
+            const id = parsed.listingId;
+            const result = parsed.action === "s" ? await this.lifecycle.sellListing(id, from, now)
+                : parsed.action === "f" ? await this.lifecycle.refreshListing(id, from, now)
+                    : await this.lifecycle.removeListing(id, from, now);
+            let current: IListing;
+            if (result.outcome === "ok" && result.listing) {
+                current = result.listing;
+                await answer(TOASTS[parsed.action]);
             } else {
+                current = result.listing ?? listing; // lost a race: show what won
                 await answer("listingEnded");
             }
 
@@ -238,19 +235,9 @@ export class GroupListingService {
         }
     }
 
-    // Brings the private note in line with the listing; best effort, and never from query.message.
-    async syncNote(listing: IListing, refreshed = false): Promise<void> {
-        if (!listing.note || listing.chatId === undefined) return;
-        try {
-            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(listing.sellerId));
-            const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
-            const card: Card = listing.status === "live"
-                ? buildManagementCard(t, listing, { surface: "n", botUsername: this.getBotUsername(), refreshed })
-                : buildEndedCard(t, listing);
-            await editNote(this.api, listing.chatId, Number(listing.sellerId), listing.note.ephemeralMessageId, card);
-        } catch (err) {
-            console.error("[ERROR - GroupListingService.syncNote]", (err as Error).message);
-        }
+    // Brings the private note in line with the listing (one implementation, in LifecycleService).
+    syncNote(listing: IListing, refreshed = false): Promise<void> {
+        return this.lifecycle.syncNote(listing, refreshed);
     }
 
     // The member reposted the same item: the old listing gets a fresh clock and follows the newest

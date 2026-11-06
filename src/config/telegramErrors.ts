@@ -10,3 +10,8 @@ export function isApiError(err: unknown, errorCode: number, fragment: string): e
         && err.errorCode === errorCode
         && err.description.toLowerCase().includes(fragment.toLowerCase());
 }
+
+/** Permanent: the user blocked the bot (403) or never started it (400 chat not found). Retrying never helps. */
+export function isUnreachable(err: unknown): boolean {
+    return isApiError(err, 403, "") || isApiError(err, 400, "chat not found");
+}

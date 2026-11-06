@@ -7,6 +7,7 @@ import Listing from "../models/Listing";
 import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
+import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -539,12 +540,32 @@ async function run() {
             assert.ok(!edits()[0].params.text, "a rich edit, not the summary text");
             const markup = edits()[0].params.reply_markup as Keyboard | undefined;
             assert.ok(!markup || markup.inline_keyboard.flat().length === 0, "no buttons on the sold card");
+            assert.strictEqual((await Listing.findOne({ source: "bot", postId: soldId }))?.status, "sold", "sold_ ends the listing, created on demand");
 
+            const old = new Date(Date.now() - 5 * 24 * 3600 * 1000);
+            await Listing.create({ source: "bot", origin: "dm", postId: bumpId, sellerId: String(u), title: "Card2", status: "live", createdAt: old, refreshedAt: old, nudgedAt: old });
             h.calls.length = 0;
             await h.pressButton(`bump_${bumpId}`, { userId: u, messageId: 502 });
             await settle();
             assert.strictEqual(edits().length, 0, "Bump leaves the card alone");
             assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery"), "Bump still answers with a popup");
+            const bumped = (await Listing.collection.findOne({ postId: bumpId }))!;
+            assert.ok(Date.now() - bumped.refreshedAt.getTime() < 5000 && !("nudgedAt" in bumped), "bump restarts the listing clock and clears nudgedAt");
+
+            // a bump refused by dailyBumpLimit leaves the listing clock alone
+            const limitedId = await seedApproved("Limited", "approved");
+            await Post.updateOne({ _id: limitedId }, { $set: { dailyBumpCount: 999, lastBumpAt: new Date() } });
+            await Listing.create({ source: "bot", origin: "dm", postId: limitedId, sellerId: String(u), title: "Limited", status: "live", createdAt: old, refreshedAt: old });
+            await h.pressButton(`bump_${limitedId}`, { userId: u, messageId: 503 });
+            await settle();
+            assert.strictEqual((await Listing.findById((await Listing.findOne({ postId: limitedId }))!._id))!.refreshedAt.getTime(), old.getTime(), "a refused bump leaves refreshedAt unchanged");
+
+            // bumping a post whose listing expired relists it
+            const expiredId = await seedApproved("Expired", "approved");
+            await Listing.create({ source: "bot", origin: "dm", postId: expiredId, sellerId: String(u), title: "Expired", status: "expired", createdAt: old, refreshedAt: old });
+            await h.pressButton(`bump_${expiredId}`, { userId: u, messageId: 504 });
+            await settle();
+            assert.strictEqual((await Listing.findOne({ postId: expiredId }))!.status, "live", "bumping an expired listing makes it live");
 
             h.calls.length = 0;
             await h.pressButton("clear_sold", { userId: u, messageId: 500 });
@@ -998,6 +1019,9 @@ async function run() {
             }
             console.log("  [OK] (r12) a malformed td_ id answers already.");
         }
+
+        // (tx1)..(tx7): a moderator also deletes the member's original post
+        await takeDownDeleteChecks({ boot: (o) => ({ h: boot(o).h }), mod, user, settle, T, answers, toAuthor, tdPress, publishTrusted, richTo, APPROVED_GROUP, MOD_GROUP });
 
         // (r13) an expired listing can be taken down
         {
@@ -1476,7 +1500,7 @@ async function run() {
                 const toMod = () => callsTo(h, "sendMessage").filter((c) => Number(c.params.chat_id) === MOD_GROUP);
                 assert.strictEqual(toMod().length, 1);
                 const buttons = keyboard(toMod()[0]);
-                assert.deepStrictEqual(buttons.map((b) => [b.text, b.callback_data]), [[T("takeDownButton"), `td_${first.id}`]]);
+                assert.deepStrictEqual(buttons.map((b) => [b.text, b.callback_data]), [[T("takeDownButton"), `td_${first.id}`], [T("takeDownDeleteButton"), `tx_${first.id}_d`]]);
                 await addListing(ctrl, seller);
                 assert.strictEqual(toMod().length, 1, "no card for the second listing");
                 console.log("  [OK] (v2) a seller's first listing sends one take-down card.");
@@ -1988,7 +2012,7 @@ async function run() {
 
                 const other = user();
                 const elsewhere = await seedCapture({ senderId: String(other), text: SALE1 });
-                await ctrl.captureNotes.onClassified({ capture: elsewhere, result: classify(SALE1, false) }, new Date());
+                await ctrl.captureNotes.onClassified({ capture: elsewhere, result: classify(SALE1, false), shadowId: "" }, new Date());
                 assert.strictEqual(ephemerals(h).length, 0);
                 assert.strictEqual((await Capture.findById(elsewhere._id))!.state, "classified");
                 console.log("  [OK] (w15) a hidden blocked URL and another chat get no note.");
@@ -2256,7 +2280,7 @@ async function run() {
                 assert.strictEqual(await draftOf(u), null);
                 const toMod = h.calls.filter((c) => ["sendMessage", "sendRichMessage"].includes(c.method) && Number(c.params.chat_id) === MOD_GROUP);
                 assert.strictEqual(toMod.length, 1, "only the first-seller card");
-                assert.deepStrictEqual(buttons(toMod[0]).map((b) => b.callback_data), [`td_${id}`]);
+                assert.deepStrictEqual(buttons(toMod[0]).map((b) => b.callback_data), [`td_${id}`, `tx_${id}_d`]);
                 const mine = dms(h, u);
                 assert.ok(mine.some((c) => text(c) === T("capturePublished")), "capturePublished");
                 const card = mine.find((c) => c.params.reply_markup)!;

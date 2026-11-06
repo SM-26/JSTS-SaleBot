@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Numbered stale-check results.
+  - Changed:
+    - On a multi-item `/stalecheck` DM, each result line now starts with the item's number ("1 · Refreshed"). `lcItemResult` is a new locale string; a stale button's label must keep starting with `{i}`, which `check-routes` enforces.
+Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
+  - Added:
+    - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
+    - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a 403, meaning the buyer blocked the bot, deletes all of that buyer's saved searches). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.
+    - `buyerMatches` accepts `on` besides `off` and `shadow`. The code default stays `off` and `config.json.example` stays `shadow`; `/config buyerMatches shadow` is the kill switch.
+    - `/label` also labels buyer matches as useful or not (`lb_<id>_<u|d|m>`), and `/stats` gained a buyer line.
+    - Tests: `check-buyer` (new, in `pnpm test`, needs `MONGO_URI`), plus coverage in `check-callbacks`, `check-cards`, `check-routes`, `check-classifier` and `check-rich`. `/test` gained buyer cases. `src/tests/syntheticBuyer.ts` is manual (not in `pnpm test`), TEST bot and groups only.
+  - Notes:
+    - `s_` carries a capture id, and captures live 7 days, so an `s_` link stops working after 7 days. `/alerts <text>` has no such limit.
+    - A listing `/stalecheck` just asked about does not alert until its seller confirms it; the confirm alerts once.
+    - A "wanted" post the bot cannot search (no model name, only a ceiling (`עד 800`) or a phone number) gets no note.
+    - Private notes are best effort: they reach only apps online when sent. The alert DMs are ordinary messages.
+    - The `saved_searches` TTL deletes a search at 60 days in every mode, including `shadow` and `off`.
+    - Data: additive only. New collections `saved_searches` and `alert_log`; new optional fields `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. Rolling back to 3.2.0 or 3.1.0 leaves them as harmless leftovers; `al_` buttons fall to the stale toast and `s_` links to the greeting.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead. The version is not bumped here; the owner picks the release order.
+
+3.2.0 - Listing lifecycle (slice 3 of "the market", #104).
+  - Added:
+    - **Nudge.** With `nudges: true`, a listing not refreshed for 7 days gets a DM to its seller (Refresh and Sold; a group listing also gets Remove). A seller the bot cannot DM is held: the nudge arrives as a private note (with Manage) after their next sale-topic message. Held nudges need capture on (`captureMode` not `off`). Bump lifts `hold`, so it shrinks the `/stalecheck` count.
+    - **Expiry.** A live listing not refreshed for 30 days expires. This runs whatever `nudges` says (legacy `hold` listings are skipped). An approved bot post stays `approved` when its listing expires; the group message is not touched.
+    - **Relist.** `/myposts` shows the seller's expired bot listings with a Relist button. Callbacks `lc_<r|s|x>_<listingId>` (refresh/relist, sold, remove) are frozen. A seller can still never remove an approved bot post: it ends only by Sold, expiry or take-down.
+    - **Trust line** on new group cards (sales count plus the date the seller started; nothing extra for a new seller).
+    - **`/stalecheck`** (admin, DM only): asks the sellers of the legacy listings that are on hold whether each is still for sale (`sc_go` to send after a dry run, `sc_no` to cancel; the buttons in the seller's DM use `lc_`). `/stalecheck <userId ...>` limits it to those sellers. Unanswered listings expire 7 days after the DM, a blocked seller's expire at once.
+    - Tests: `/test` gained "Age my test listing 7 days" / "30 days" and "Stale-check dry run (to me only)" (test bot only); `check-callbacks`, `check-cards` and `check-market` cover the new formats and flows; `src/tests/syntheticLifecycle.ts` (manual, TEST bot only, sends two real DMs to the owner).
+    - **Take down and delete original post.** A group listing's take-down card has a second button (`tx_<listingId>_<d|y|n>`, moderators only) that also deletes the member's message and all its photos, after one confirm step that survives a restart. A double press acts once, the press is logged with the moderator, listing and message ids, and if Telegram refuses some deletions (48 h limit, missing right) the card says how many are left. The listing still ends and the seller is told as for a take-down. Bot listings keep the single button; a seller's Remove still never deletes anything.
+  - Changed:
+    - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
+  - Notes:
+    - Data: additive only. `listings.nudgeHeld` and `listings.staleSentAt` are new optional fields; `posts` and `users` are unchanged. Rolling back to 3.1.0 is safe: the old image ignores the fields and the `lc_`/`sc_` buttons do nothing.
+    - **Rollout order** (owner gates, nothing automatic): (1) deploy with `nudges: false`: legacy listings stay on hold and nothing is sent; expiry runs for non-hold listings. (2) Run `/stalecheck` on the test bot, read the dry run, finalize the text, then "Stale-check dry run (to me only)". (3) On prod, `/stalecheck <pilot ids>`, wait for answers, then `/stalecheck` for the rest. (4) `/config nudges true` only on the owner's go-ahead; at most 25 nudges go out per tick, so the first batch spreads over several ticks.
+    - Do not deploy during a `/stalecheck` send. Before deploying, this read-only query should return 0: `db.listings.countDocuments({status:"live",hold:false,refreshedAt:{$lte:new Date(Date.now()-30*864e5)}})`.
+    - Take the `mongodump` from `docs/BACKUP.md` first. Deploys need the owner's go-ahead.
+
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
   - Added:
     - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of the same item (same text, or a near-identical text with the same title) refreshes the listing, which follows the newest repost (message, text, price, photos), and sends a short refresh note; a different item that reads alike gets its own note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
