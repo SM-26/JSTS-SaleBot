@@ -41,7 +41,7 @@ Fails if:
 
 - a command registered in `src/controllers/botController.ts` is missing from [Commands](Commands.md), or a row there is no longer registered;
 - a key in `src/services/configSchema.ts` or `config.json.example` is missing from [Config](Config.md), or a row there is unknown;
-- a link between pages is broken or leaves `docs/` (a wiki can't follow it; use a full URL);
+- a link between pages, or a full link to a wiki page, is broken, or a link leaves `docs/` (a wiki can't follow it; use a full URL);
 - a page names a `src/` or `scripts/` path that doesn't exist. The changelog is exempt, since it describes history.
 
 ## Not in `pnpm test`
@@ -52,4 +52,4 @@ Fails if:
 
 ## The wiki
 
-`.github/workflows/wiki.yml` copies `docs/` to the wiki on every push to master that touches it. Links between pages stay relative with `.md`, and the workflow rewrites them. `docs/README.md` becomes the wiki's Home.
+`.github/workflows/wiki.yml` copies `docs/` to the wiki on every push to master that touches it. Links between pages stay relative with `.md`, and the workflow rewrites them. `docs/README.md` becomes the wiki's Home. It is also the repo's front page, so its links are full wiki URLs.
