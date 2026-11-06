@@ -551,6 +551,21 @@ async function run() {
             const bumped = (await Listing.collection.findOne({ postId: bumpId }))!;
             assert.ok(Date.now() - bumped.refreshedAt.getTime() < 5000 && !("nudgedAt" in bumped), "bump restarts the listing clock and clears nudgedAt");
 
+            // a bump refused by dailyBumpLimit leaves the listing clock alone
+            const limitedId = await seedApproved("Limited", "approved");
+            await Post.updateOne({ _id: limitedId }, { $set: { dailyBumpCount: 999, lastBumpAt: new Date() } });
+            await Listing.create({ source: "bot", origin: "dm", postId: limitedId, sellerId: String(u), title: "Limited", status: "live", createdAt: old, refreshedAt: old });
+            await h.pressButton(`bump_${limitedId}`, { userId: u, messageId: 503 });
+            await settle();
+            assert.strictEqual((await Listing.findById((await Listing.findOne({ postId: limitedId }))!._id))!.refreshedAt.getTime(), old.getTime(), "a refused bump leaves refreshedAt unchanged");
+
+            // bumping a post whose listing expired relists it
+            const expiredId = await seedApproved("Expired", "approved");
+            await Listing.create({ source: "bot", origin: "dm", postId: expiredId, sellerId: String(u), title: "Expired", status: "expired", createdAt: old, refreshedAt: old });
+            await h.pressButton(`bump_${expiredId}`, { userId: u, messageId: 504 });
+            await settle();
+            assert.strictEqual((await Listing.findOne({ postId: expiredId }))!.status, "live", "bumping an expired listing makes it live");
+
             h.calls.length = 0;
             await h.pressButton("clear_sold", { userId: u, messageId: 500 });
             await settle();
