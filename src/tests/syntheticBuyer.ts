@@ -26,8 +26,8 @@ const MOD_TOPIC = 15;
 const OWNER = 278683632;
 const SELLER = "synthetic-seller";
 const WANTED = "מחפש גלוק 17 עד 800";
-// the first TEST_MEDIA photo of testCases.ts (file ids are reusable within the same bot)
-const PHOTO = "AgACAgQAAxkBAAINXGm-_OK_AAH4GQnBW-0HVvslh49hbgACsg1rGy28-FEImRX00Ng_2AEAAwIAA3kAAzoE";
+// the RADIO_POST photo of testCases.ts (file ids are reusable within the same bot)
+const PHOTO = "AgACAgQAAyEGAASRyiESAAIBaWrrdLCnO5_7O2IBhJgi88eq-bjkAAJUD2sbuaNZU5XHhK251RGCAQADAgADeQADPQQ";
 
 interface Call { method: string; chat?: number; topic?: number; text?: string; ok: boolean; description?: string; result?: unknown }
 
