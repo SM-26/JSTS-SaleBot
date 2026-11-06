@@ -46,6 +46,11 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`ls_${ID}_s_n`, { action: "listing", arg: `${ID}_s_n` }],
     [`ls_${ID}_f_c`, { action: "listing", arg: `${ID}_f_c` }],
     [`ls_${ID}_r_l`, { action: "listing", arg: `${ID}_r_l` }],
+    [`al_${ID}_d`, { action: "alerts", arg: `${ID}_d` }],
+    [`al_${ID}_r`, { action: "alerts", arg: `${ID}_r` }],
+    [`lb_${ID}_u`, { action: "label", arg: `${ID}_u` }],
+    [`lb_${ID}_d`, { action: "label", arg: `${ID}_d` }],
+    [`lb_${ID}_m`, { action: "label", arg: `${ID}_m` }],
     // Unknown or ephemeral (handled by temporary listeners): must not route.
     ["confirm_123", null],
     ["done_media_123", null],
@@ -77,7 +82,7 @@ for (const dir of localeDirs) {
     }
 }
 for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `rr_${ID}_1`, `rr_${ID}_4`,
-    `mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`,
+    `mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`, `al_${ID}_d`, `al_${ID}_r`, `lb_${ID}_u`, `lb_${ID}_d`, `lb_${ID}_m`,
     ...["s", "f", "r"].flatMap(a => ["n", "c", "l"].map(surface => `ls_${ID}_${a}_${surface}`)),
 ]) generated.push(s);
 
@@ -90,6 +95,8 @@ console.log(`  [SUCCESS] ${generated.length} generated strings route correctly a
 const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     [`c_${ID}`, { kind: "c", id: ID }],
     [`l_${ID}`, { kind: "l", id: ID }],
+    [`s_${ID}`, { kind: "s", id: ID }],
+    ["s_", null], ["s_xyz", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
 ];
 for (const [args, expected] of PAYLOADS) {

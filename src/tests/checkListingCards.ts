@@ -4,6 +4,7 @@ import {
     buildAskNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
     parseCaptureArg, parseListingArg, type Card,
 } from "../services/listingCards";
+import { alertActionData, buildAlertCard, buildAlertsList, buildBuyerNote, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
 
 /** Pure card builders and callback_data codecs; no Mongo, no config. Run: pnpm run check-cards */
 
@@ -80,6 +81,34 @@ assert.deepStrictEqual(parseListingArg(ID + "_f_c"), { listingId: ID, action: "f
 for (const bad of [`${ID}_x_c`, `${ID}_s_z`, "zz_s_n"]) assert.strictEqual(parseListingArg(bad), null, bad);
 assert.deepStrictEqual(parseCaptureArg(ID + "_x"), { captureId: ID, action: "x" });
 assert.strictEqual(parseCaptureArg("set_ask"), null);
+
+// buyer cards
+{
+    const lines = [
+        { title: "Glock <b>17</b>", price: "1,300", location: "North", date: "2026-11-01", link: "https://t.me/c/1/2" },
+        { title: "Hi-capa", date: "2026-10-30" },
+    ];
+    const n = buildBuyerNote(t, lines, ID, BOT);
+    all.push(n);
+    assert(n.html === true && n.text.startsWith("buyerNoteTitle") && n.text.includes('"n":2'));
+    assert(n.text.includes("Glock &lt;b&gt;17") && !n.text.includes("<b>17") && n.text.includes("Hi-capa"));
+    assert(n.text.includes('<a href="https://t.me/c/1/2">') && n.text.includes("2026-11-01"));
+    assert(urls(n)[0]!.endsWith(`?start=s_${ID}`));
+    assert.strictEqual(buildBuyerNote(t, [], ID, BOT).text, "buyerNoteEmpty");
+    assert(!buildAlertCard(t, "q", lines[1]).text.includes("<a"));
+    assert(buildAlertCard(t, "a<b", lines[0]).text.includes("a&lt;b"));
+    const list = buildAlertsList(t, [{ id: ID, query: "x".repeat(200), expiresAt: new Date("2026-12-01") }]);
+    all.push(list);
+    assert.deepStrictEqual(datas(list), [`al_${ID}_d`]);
+    assert(list.keyboard[0][0].text.startsWith("🗑") && list.keyboard[0][0].text.length <= 30);
+    assert.strictEqual(buildAlertsList(t, []).text, "alertsEmpty");
+    const r = buildRenewOffer(t, { id: ID, query: "q", expiresAt: new Date("2026-12-01") });
+    all.push(r);
+    assert.deepStrictEqual(datas(r), [`al_${ID}_r`]);
+    assert.deepStrictEqual(parseAlertArg(`${ID}_d`), { searchId: ID, action: "d" });
+    assert.strictEqual(parseAlertArg(`${ID}_x`), null);
+    assert.strictEqual(alertActionData(ID, "r"), `al_${ID}_r`);
+}
 
 // callback_data size
 for (const c of all) for (const d of datas(c)) if (d) assert(Buffer.byteLength(d) <= 64, d);
