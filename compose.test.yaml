@@ -1,0 +1,67 @@
+# Test stack for showing the bot to the admins on the TEST bot and TEST groups.
+# Built from this checkout, with its own database: it never touches prod or dev data.
+#
+#   cp config.test.json.example config.test.json
+#   docker compose -f compose.test.yaml up -d --build
+#
+# Watch it in Docker Desktop under "jsts-salebot-test". See docs/Running.md.
+name: jsts-salebot-test
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: production
+    container_name: jsts-salebot-test
+    restart: unless-stopped
+    # Refuses any token but the test bot's, so this stack can't run against prod.
+    command:
+      - sh
+      - -c
+      - case "$$BOT_TOKEN" in 9299714864:*) exec node dist/bot.js ;; *) echo "BOT_TOKEN is not the test bot, refusing to start" >&2; exit 1 ;; esac
+    env_file:
+      - ${TEST_ENV_FILE:-.env}
+    environment:
+      # Overrides whatever the env file says.
+      - MONGO_URI=mongodb://mongoserver:27017/SalesBotTestDemo
+      - NODE_ENV=production
+    volumes:
+      # /config saves back to this file.
+      - ./config.test.json:/app/config.json
+    depends_on:
+      mongoserver:
+        condition: service_healthy
+
+  mongoserver:
+    image: mongo:8.2
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command: [ "mongod", "--quiet" ]
+    # No port published: reach it through mongo-express or `docker exec`.
+    volumes:
+      - mongodb_test_data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # http://localhost:8082 (admin / pass). Host-only.
+  mongo-express:
+    image: mongo-express:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongoserver
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+      - ME_CONFIG_MONGODB_URL=mongodb://mongoserver:27017
+    depends_on:
+      mongoserver:
+        condition: service_healthy
+
+volumes:
+  mongodb_test_data:

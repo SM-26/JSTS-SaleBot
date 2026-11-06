@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import type { CatchupItem } from "../services/catchupScan";
 
 // Group members the bot has seen, whether or not they started the bot
 // (collection `members`). Never feeds /broadcastUsers: these people may not be
@@ -12,7 +13,9 @@ export interface IMember extends Document {
     lastBuyerNoteAt?: Date;
     // Texts a note was sent for (newest last, at most 20, kept 30 days): a repost of one gets no new note. Name kept from when it only held declines.
     declined?: { hash: string; at: Date }[];
-    pendingCatchup?: Record<string, unknown>[];
+    pendingCatchup?: CatchupItem[];
+    // Stamps outlive the items: sentAt alone blocks a second offer.
+    catchup?: { importedAt: Date; armedAt?: Date; sentAt?: Date; heldAt?: Date; note?: { ephemeralMessageId: number } };
 }
 
 const memberSchema = new Schema<IMember>({
@@ -23,6 +26,16 @@ const memberSchema = new Schema<IMember>({
     lastBuyerNoteAt: { type: Date },
     declined: { type: [new Schema({ hash: String, at: Date }, { _id: false })], default: undefined },
     pendingCatchup: { type: [Schema.Types.Mixed], default: undefined },
+    catchup: {
+        type: new Schema({
+            importedAt: Date,
+            armedAt: Date,
+            sentAt: Date,
+            heldAt: Date,
+            note: { type: new Schema({ ephemeralMessageId: Number }, { _id: false }), default: undefined },
+        }, { _id: false }),
+        default: undefined,
+    },
 }, { collection: "members", timestamps: false });
 
 export default mongoose.model<IMember>("Member", memberSchema);

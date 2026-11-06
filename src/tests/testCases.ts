@@ -17,10 +17,12 @@ import { PublishService } from "../services/publishService";
 import listingRepository from "../repositories/listingRepository";
 import { GroupListingService } from "../services/groupListingService";
 import { CaptureNoteService } from "../services/captureNoteService";
-import { seedCapture } from "./fixtures";
+import { CatchupService } from "../services/catchupService";
+import { seedCapture, seedCatchupOffer } from "./fixtures";
 import { rankMatches } from "../services/matchService";
 import { AlertService } from "../services/alertService";
 import { StaleCheckService } from "../services/staleCheckService";
+import { sellerLayout, sellerTier, type SellerTier } from "../services/trustService";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -28,11 +30,11 @@ import { StaleCheckService } from "../services/staleCheckService";
  * can test approve/reject quickly. None of them waits on a typed reply.
  */
 
-// Telegram file_ids from previously uploaded photos (reusable within the same bot)
+// Telegram file_ids of photos the owner sent to the TEST bot (they only work on that bot)
 const TEST_MEDIA: MediaItem[] = [
-    { fileId: "AgACAgQAAxkBAAINXGm-_OK_AAH4GQnBW-0HVvslh49hbgACsg1rGy28-FEImRX00Ng_2AEAAwIAA3kAAzoE", type: "photo" },
-    { fileId: "AgACAgQAAxkBAAINW2m-_OKCg3jnCq9lJ83ir9wv2VEvAAKxDWsbLbz4UTzQXIYguRLzAQADAgADeQADOgQ", type: "photo" },
-    { fileId: "AgACAgQAAxkBAAINXWm-_OkLEuv9Tex5FGbcr9AzGJZiAAKzDWsbLbz4UfeDwqmcdSY1AQADAgADeAADOgQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBeGrt8G3EwiBqDvkbH4S95jdTfOKlAAJfDmsbSnJwUwj9XBgc7zudAQADAgADeQADPQQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBeWrt8G2SL-v_NX1utD_qmTDR1QILAAJgDmsbSnJwU6XaBpCPj_ubAQADAgADeQADPQQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBd2rt8G3Gjdpb3d8qWys-7FPgiHDGAAJeDmsbSnJwUxWtNAok_u-GAQADAgADeQADPQQ", type: "photo" },
 ];
 
 export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
@@ -48,14 +50,24 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
     classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
+    quick_caption: { label: "📸 Quick draft from caption text", run: testCase_QuickCaption },
     shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
     capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
+    catchup_offer: { label: "🛒 Catch-up offer to me", run: testCase_CatchupOffer },
     match_for_text: { label: "🔎 Match for text", run: testCase_MatchForText },
     alert_me_now: { label: "🔔 Alert me now", run: testCase_AlertMeNow },
     age_listing_7: { label: "⏩ Age my test listing 7 days", run: (...a) => ageTestListing(7, ...a) },
     age_listing_30: { label: "⏩ Age my test listing 30 days", run: (...a) => ageTestListing(30, ...a) },
+    set_tier_regular: { label: "🎚 Set my tier: regular", run: (...a) => setMyTier("regular", ...a) },
+    set_tier_top: { label: "🎚 Set my tier: top seller", run: (...a) => setMyTier("top", ...a) },
+    set_tier_verified: { label: "🎚 Set my tier: verified", run: (...a) => setMyTier("verified", ...a) },
+    set_tier_both: { label: "🎚 Set my tier: both", run: (...a) => setMyTier("both", ...a) },
+    post_as_regular: { label: "📮 Post as regular", run: (...a) => postAsTier("regular", ...a) },
+    post_as_top: { label: "📮 Post as top seller", run: (...a) => postAsTier("top", ...a) },
+    post_as_verified: { label: "📮 Post as verified", run: (...a) => postAsTier("verified", ...a) },
+    post_as_both: { label: "📮 Post as both", run: (...a) => postAsTier("both", ...a) },
     stale_dry_run: { label: "📨 Stale-check dry run (to me only)", run: testCase_StaleDryRun },
 };
 
@@ -535,6 +547,30 @@ async function testCase_ClassifyFixtures(
 }
 
 /**
+ * TEST CASE: what the one-message quick draft reads from a fixed caption. Touches no draft, sends no post.
+ */
+async function testCase_QuickCaption(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const caption = ["Glock 17 Gen3", "like new, two magazines", "1,800 ₪ Tel Aviv"].join("\n");
+        const { tier, parsed } = classify(caption, true);
+        const fields = [`tier: ${tier}`, `title: ${parsed.title ?? "-"}`, `price: ${parsed.priceValue ?? "-"}`, `location: ${parsed.location ?? "-"}`, `description: ${parsed.description ?? "-"}`].join("\n");
+        await api.sendMessage({ chat_id: msg.chat.id, text: ["Caption:", caption, "", "Quick draft would read:", fields].join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_QuickCaption]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Quick caption failed: " + (err as Error).message });
+    }
+}
+
+/**
  * TEST CASE: DM the last 5 shadow_log rows (tier, wouldList, mergeWith, link). Read-only.
  */
 async function testCase_ShadowLast5(
@@ -707,11 +743,113 @@ async function testCase_AlertMeNow(
     if (!msg.from) throw new Error("Test requires a valid user in message context");
     try {
         const username = (await api.getMe()).username ?? "";
-        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username))).sendNow(String(msg.from.id), new Date());
+        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username)), () => username).sendNow(String(msg.from.id), new Date());
         if (sent === 0) await api.sendMessage({ chat_id: msg.chat.id, text: "No alerts to send (0)." });
     } catch (err) {
         console.error("[ERROR - testCase_AlertMeNow]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Alert failed: " + (err as Error).message });
+    }
+}
+
+const TIER_SEED_TITLE = "[test] tier seed";
+
+/**
+ * Makes the presser's real tier match, on the test bot only: verified is the admin mark, top seller is
+ * three seeded sold listings (3 of 3 ended). The seeds are rows only (no group message) and are replaced on each press.
+ * Then the presser uses the real /newPost and the layout follows.
+ */
+async function setMyTier(
+    tier: SellerTier,
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Run on the test bot." });
+        return;
+    }
+    try {
+        const userId = String(msg.from.id);
+        const now = new Date();
+        await userService.ensureUser(msg.from);
+        await listingRepository.deleteBySellerTitle(userId, TIER_SEED_TITLE);
+        for (const p of await postRepository.findByUserId(userId)) {
+            if (p.title === TIER_SEED_TITLE) await postRepository.deleteById(String(p._id));
+        }
+        await userRepository.setVerified(userId, tier === "verified" || tier === "both" ? userId : null);
+        if (tier === "top" || tier === "both") {
+            for (let i = 0; i < 3; i++) {
+                const post = await seedTestPost(userId, TIER_SEED_TITLE, now);
+                const listing = await listingRepository.createForPost(post, "dm", false, now);
+                await listingRepository.markSold(String(listing._id), now);
+            }
+        }
+        const actual = await sellerTier(userId);
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: actual === tier
+                ? `🎚 Your tier is now: ${tier}. /newPost (or a photo with a caption) publishes in that layout.`
+                : `🎚 Asked for ${tier} but your tier is ${actual}: you have other real listings that count. Use "Post as" to see a layout.`,
+        });
+    } catch (err) {
+        console.error("[ERROR - setMyTier]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Set tier failed: " + (err as Error).message });
+    }
+}
+
+const TIER_POST = {
+    title: "Hello Capa",
+    description: "היי קאפה טוקיו מרוי\nצביעת cerakote הלו קיטי קסטום יחידה ומיוחדת\nPink sherbet\nStormtrooper white\nMystique FX finish",
+    price: "2500",
+    highlight: "רוצים לשכנע את החברה להצטרף למשחק? מתנה לילדה? סתם הצהרת אופנה?",
+    location: "בית דגן",
+    meetup: true,
+};
+
+/**
+ * One tap puts a made-up sample into the moderation group as a normal pending card (Approve, Reject with the
+ * preset reasons), already in the chosen tier's layout. Approve publishes it to the test sale topic in that layout.
+ * The tier is stored on this post only (layoutTier), so the presser's real tier is untouched and any admin can run it.
+ * Real sellers never get this: a trusted seller still publishes at once. Test bot only.
+ */
+async function postAsTier(
+    tier: SellerTier,
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Seller-post tests run only on the test bot." });
+        return;
+    }
+    try {
+        const user: TgUser = msg.from;
+        const userId = String(user.id);
+        await userService.ensureUser(user);
+        const post = await postRepository.createPost({ userId, ...TIER_POST, media: TEST_MEDIA, layoutTier: tier, createdAt: new Date() });
+        const data = { ...TIER_POST, media: TEST_MEDIA, userId: user.id, username: user.username, firstName: user.first_name };
+        const layout = await sellerLayout(userId, config.lang, "postAsTier", tier);
+        const cardId = await postService.sendToModeration(String(post._id), data, layout);
+        if (cardId) await postRepository.setModerationMessageId(String(post._id), cardId);
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: `📮 Sample post as ${tier} is waiting for approval in the moderation group (card ${cardId ?? "none"}). Approve publishes it to the test sale topic in this layout.\nPost ID: ${post._id}`,
+        });
+    } catch (err) {
+        console.error("[ERROR - postAsTier]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Post as tier failed: " + (err as Error).message });
     }
 }
 
@@ -731,7 +869,7 @@ async function wipeTestRows(userId: string, title: string): Promise<void> {
 
 async function seedTestPost(userId: string, title: string, now: Date) {
     return postRepository.createPost({
-        userId, title, description: "test", price: "100", location: "test", media: [TEST_MEDIA[0]],
+        userId, title, description: "test", price: "100", location: "test", media: [], // no photo: a lifecycle test needs none, and a stale file id breaks the rich message
         status: "approved", approvedMessageId: null, createdAt: now,
     });
 }
@@ -823,5 +961,48 @@ async function testCase_StaleDryRun(
     } catch (err) {
         console.error("[ERROR - testCase_StaleDryRun]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Stale dry run failed: " + (err as Error).message });
+    }
+}
+
+/**
+ * Sends the presser a real catch-up note for two synthetic items. Fixture only: a tap in the
+ * DM makes listings that point at fake message ids (the test bot only, like testCase_CaptureNote).
+ */
+async function testCase_CatchupOffer(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ The catch-up test runs only on the test bot." });
+        return;
+    }
+    try {
+        const username = (await api.getMe()).username ?? "";
+        const service = new CatchupService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, new PostService(api, config), () => username)), () => username);
+        const now = new Date();
+        const userId = String(msg.from.id);
+        await listingRepository.deleteBySellerTitle(userId, "גלוק 17"); // repeatable: clear what an earlier run added
+        await listingRepository.deleteBySellerTitle(userId, "וסט טקטי");
+        await seedCatchupOffer(userId, [
+            { messageId: 1, date: now.toISOString(), title: "גלוק 17", price: "1,300₪", location: "מרכז", text: "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", tier: "strict" },
+            { messageId: 2, date: now.toISOString(), title: "וסט טקטי", price: "250₪", text: "וסט טקטי למכירה 250₪", tier: "strict" },
+        ], now);
+        const sent = await service.deliver(userId, now);
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: sent
+                ? `✅ Catch-up note sent to you in group ${config.approvedGroupId}, topic ${config.approvedTopicId ?? "none"}`
+                : `❌ The catch-up note was not sent (group ${config.approvedGroupId}); see the log`,
+        });
+    } catch (err) {
+        console.error("[ERROR - testCase_CatchupOffer]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Catch-up offer failed: " + (err as Error).message });
     }
 }

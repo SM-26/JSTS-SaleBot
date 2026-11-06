@@ -1,7 +1,6 @@
 import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
 import captureRepository from "../repositories/captureRepository";
-import draftRepository from "../repositories/draftRepository";
 import savedSearchRepository from "../repositories/savedSearchRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig, UserSession } from "../types";
@@ -85,13 +84,13 @@ export class SavedSearchService {
         if (session) session.pendingAlertFix = { searchId: String(row._id), promptId, at: Date.now() };
     }
 
-    // True when the message was the answer to the pending fix (a reply to the prompt, or no wizard is running).
+    // True when the message was the answer to the pending fix: only a Telegram reply to the prompt, never a plain next message.
     async handleFixReply(msg: Message, session?: UserSession): Promise<boolean> {
         const pending = session?.pendingAlertFix;
         if (!session || !pending || !msg.from) return false;
         if (Date.now() - pending.at >= FIX_WINDOW_MS || !msg.text || msg.text.startsWith("/")) return false;
+        if (msg.reply_to_message?.message_id !== pending.promptId) return false;
         const from = String(msg.from.id);
-        if (msg.reply_to_message?.message_id !== pending.promptId && await draftRepository.findByUserId(from)) return false;
         if (!this.on()) {
             delete session.pendingAlertFix;
             return false;
@@ -99,13 +98,15 @@ export class SavedSearchService {
 
         const t = await this.translatorFor(from);
         const q = parseQuery(msg.text);
-        const reply = (key: string) => this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: describeSearch(t, q) }) });
+        const reply = async (key: string): Promise<number> =>
+            (await this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: describeSearch(t, q) }) })).message_id;
         if (!isSearchable(q)) {
             if (pending.searchId) { // a thanks after saving, not a failed attempt
                 delete session.pendingAlertFix;
                 return false;
             }
-            await reply("alertNotSearchable");
+            // this prompt also asks for a reply, so a reply to it must count
+            session.pendingAlertFix = { promptId: await reply("alertNotSearchable"), at: pending.at };
             return true;
         }
         const now = new Date();
@@ -122,8 +123,10 @@ export class SavedSearchService {
             await reply("alertLimit");
             return true;
         } else {
-            await savedSearchRepository.upsert(from, q, now);
-            await reply("alertSaved");
+            const row = await savedSearchRepository.upsert(from, q, now);
+            // alertSaved promises a reply can still change it
+            session.pendingAlertFix = { searchId: String(row._id), promptId: await reply("alertSaved"), at: Date.now() };
+            return true;
         }
         delete session.pendingAlertFix;
         return true;

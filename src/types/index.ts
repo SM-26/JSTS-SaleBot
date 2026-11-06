@@ -36,6 +36,11 @@ export interface BotConfig {
     buyerMatches?: "off" | "shadow" | "on";
     nudges?: boolean;
     rulesUrl?: string;
+    quickListing?: boolean;
+    // Post layouts by seller tier. Off: every post uses the regular layout.
+    tierLayouts?: boolean;
+    topSellerPercent?: number;
+    topSellerMinEnded?: number;
 }
 
 export interface LocaleStrings {
@@ -43,12 +48,23 @@ export interface LocaleStrings {
     welcome: string;
     wizardStep: string;
     contactSellerCta: string;
+    meetupPlace: string;
+    quickSellHint: string;
+    quickPhotoHint: string;
+    dmAlertHint: string;
+    dmSellHint: string;
+    dmWantedOff: string;
     trustLine: string;
+    trustLineOne: string;
     enterDescription: string;
     enterPrice: string;
     expectedText: string;
     enterMedia: string;
     doneMediaButton: string;
+    editTitleButton: string;
+    editDescriptionButton: string;
+    editPriceButton: string;
+    editLocationButton: string;
     enterLocation: string;
     postCreated: string;
     postApproved: string;
@@ -176,6 +192,8 @@ export interface UserSession {
     // The buyer's one-reply fix after a saved search (or a failed one): the row it edits, the prompt and when.
     pendingAlertFix?: { searchId?: string; promptId: number; at: number };
     // Admin's /stalecheck dry run waiting for sc_go; ignored after an hour.
+    // A seller who pressed Lower price: the post, the force-reply prompt (and the /myposts card to refresh) and when.
+    pendingPriceCut?: { postId: string; promptId: number; cardId?: number; at: number };
     pendingStalecheck?: { sellerIds: string[]; at: number; promptMessageId?: number };
 }
 
@@ -196,6 +214,11 @@ export interface Post {
     lastBumpAt?: Date | null;
     rejectionReason?: string | null;
     rejectionNotifiedAt?: Date | null;
+    meetup?: boolean;
+    layoutTier?: "regular" | "top" | "verified" | "both";
+    highlight?: string;
+    // The price before the latest price cut; the tiered layouts show it struck through.
+    previousPrice?: string;
 }
 
 export interface User {

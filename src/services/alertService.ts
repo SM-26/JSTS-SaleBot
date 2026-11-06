@@ -31,12 +31,14 @@ function outcomeOf(err: unknown): Outcome {
 const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const query = (s: ISavedSearch) => ({ terms: s.terms, maxPrice: s.maxPrice, meetup: s.meetup ?? false });
 // A listing /stalecheck just asked about is not news until its seller confirms it (a confirm moves refreshedAt past staleSentAt).
+// A catch-up listing keeps its old post date as refreshedAt: it is news from when it joined the market.
+const newsAt = (l: IListing) => Math.max(l.refreshedAt.getTime(), l.origin === "catchup" ? l.createdAt.getTime() : 0);
 const unconfirmed = (l: IListing) => l.staleSentAt !== undefined && l.refreshedAt <= l.staleSentAt;
 const alertable = (l: IListing) => !findBlockedWord(l.title ?? "") && !unconfirmed(l);
 
 // DMs saved-search alerts and renew offers (buyerMatches "on").
 export class AlertService {
-    constructor(private api: Api, private config: BotConfig, private groupListings: GroupListingService) { }
+    constructor(private api: Api, private config: BotConfig, private groupListings: GroupListingService, private botUsername: () => string = () => "") { }
 
     private async translator(userId: string) {
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
@@ -57,7 +59,7 @@ export class AlertService {
         const media = listing.media[0];
         if (media) {
             try {
-                const base = { chat_id: Number(userId), caption: card.text, parse_mode: "HTML" as const };
+                const base = { chat_id: Number(userId), caption: card.text, parse_mode: "HTML" as const, ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) };
                 if (media.type === "video") await this.api.sendVideo({ ...base, video: media.fileId });
                 else await this.api.sendPhoto({ ...base, photo: media.fileId });
                 return;
@@ -88,7 +90,7 @@ export class AlertService {
         for (const s of searches) {
             if (gone.has(s.userId)) continue;
             const from = Math.max(s.createdAt.getTime(), s.scannedAt.getTime() - SCAN_OVERLAP_MS);
-            const candidates = live.filter(l => l.refreshedAt.getTime() >= from && l.sellerId !== s.userId);
+            const candidates = live.filter(l => newsAt(l) >= from && l.sellerId !== s.userId);
             const searchId = String(s._id);
             let delivered = false;
             let blocked = false;
@@ -101,7 +103,7 @@ export class AlertService {
                 const listing = byId.get(id)!;
                 let card: Card;
                 try {
-                    card = buildAlertCard(await this.translator(s.userId), s.query, await lineOf(listing));
+                    card = buildAlertCard(await this.translator(s.userId), s.query, await lineOf(listing), this.botUsername());
                 } catch (err) { // a card that cannot be built is skipped, never retried
                     console.error("[ERROR - alerts]", "card", s.userId, id, describe(err));
                     await alertLogRepository.markFailed(searchId, id);
@@ -164,7 +166,7 @@ export class AlertService {
         for (const s of searches) {
             for (const id of matchListings(query(s), live, 3)) {
                 const listing = byId.get(id)!;
-                await this.sendAlert(userId, buildAlertCard(t, s.query, (await listingLines([listing], this.groupListings))[0]), listing);
+                await this.sendAlert(userId, buildAlertCard(t, s.query, (await listingLines([listing], this.groupListings))[0], this.botUsername()), listing);
                 sent++;
             }
         }

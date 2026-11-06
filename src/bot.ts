@@ -8,6 +8,7 @@ import { connectDB, disconnectDB } from "./config/db";
 import { BotController } from "./controllers/botController";
 import { errorBoundary } from "./controllers/middleware";
 import { createPollErrorLogger } from "./config/pollingErrors";
+import memberRepository from "./repositories/memberRepository";
 import { reconcileBotListings } from "./services/marketService";
 import { isCaptureOn } from "./services/captureService";
 import { tick } from "./services/shadowService";
@@ -66,6 +67,8 @@ async function main() {
                     { name: "captures", everyMs: 10_000, run: async () => { if (isCaptureOn(controller.config)) await tick(controller.config, new Date(), async (event, now) => { await controller.captureNotes.onClassified(event, now); await controller.buyerNotes.onClassified(event, now); }); } },
                     { name: "alerts", everyMs: 60_000, run: () => controller.alerts.tick(new Date()) },
                     { name: "reconcile", everyMs: 3_600_000, run: reconcile },
+                    { name: "catchup-purge", everyMs: 3_600_000, run: async () => { const n = await memberRepository.dropExpiredCatchups(new Date()); if (n) console.log(`[INFO] catchup-purge: dropped ${n} expired offers`); } },
+                    { name: "catchup-held", everyMs: 10_000, run: async () => { await controller.catchupService.releaseHeld(new Date()); } },
                     ...controller.lifecycleJobs(),
                 ]);
             },

@@ -1,6 +1,6 @@
 {
   "name": "sales-bot",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "packageManager": "pnpm@11.13.1",
   "main": "dist/bot.js",
   "description": "JSTS-SaleBot implementation",
@@ -11,6 +11,8 @@
     "check-locals": "ts-node src/tests/checkLocals.ts",
     "check-config": "ts-node src/tests/configSchema.check.ts",
     "check-classifier": "ts-node src/tests/checkClassifier.ts",
+    "check-catchup": "ts-node src/tests/checkCatchup.ts",
+    "catchup": "ts-node scripts/catchup.ts",
     "check-claim": "ts-node src/tests/checkModerationClaim.ts",
     "check-polling": "ts-node src/tests/checkPollingErrors.ts",
     "check-callbacks": "ts-node src/tests/checkCallbackData.ts",
@@ -23,8 +25,10 @@
     "check-buyer": "ts-node src/tests/checkBuyerMatches.ts",
     "check-dump": "ts-node src/tests/checkProdDump.ts",
     "check-rich": "ts-node src/tests/checkRichMessages.ts",
+    "check-tiers": "ts-node src/tests/checkTiers.ts",
+    "check-docs": "ts-node src/tests/checkDocs.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-rich && echo \"Tests passed\""
+    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && pnpm run check-docs && echo \"Tests passed\""
   },
   "repository": {
     "type": "git",
@@ -33,7 +37,7 @@
   "bugs": {
     "url": "https://github.com/SM-26/JSTS-SaleBot/issues"
   },
-  "homepage": "https://github.com/SM-26/JSTS-SaleBot/blob/master/docs/README.md",
+  "homepage": "https://github.com/SM-26/JSTS-SaleBot/wiki",
   "author": "SM26",
   "license": "ISC",
   "auditLevel": "low",

@@ -56,7 +56,7 @@ export async function errorBoundary(err: unknown, ctx: Context): Promise<void> {
     }
 }
 
-const STALE_PREFIXES = ["confirm_", "cancel_", "done_media_", "skip_reason_", "draft_"];
+export const STALE_PREFIXES = ["confirm_", "cancel_", "done_media_", "skip_reason_", "draft_"];
 
 /**
  * Register LAST: wizard/prompt buttons nobody handled belong to a flow that is gone.

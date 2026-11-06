@@ -13,11 +13,11 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 > sometime a bug fix will not trigger a version bump.
 
 ## Current Version
-3.2.0
+3.3.0
 
 ## Changelog
 
-See [CHANGELOG.md](../docs/CHANGELOG.md) for the full version history and release notes.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history and release notes.
 
 ## How to update
 

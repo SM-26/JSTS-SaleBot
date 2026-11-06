@@ -1,10 +1,11 @@
 import assert from "assert";
 import { Types } from "mongoose";
 import {
-    buildAskNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
-    nudgeKeyboard, parseCaptureArg, parseListingArg, type Card,
+    buildAskNote, buildCatchupList, buildCatchupNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
+    catchupActionData, nudgeKeyboard, parseCaptureArg, parseCatchupArg, parseListingArg, type Card,
 } from "../services/listingCards";
-import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
+import type { CatchupItem } from "../services/catchupScan";
+import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildDmMatches, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
 
 /** Pure card builders and callback_data codecs; no Mongo, no config. Run: pnpm run check-cards */
 
@@ -23,9 +24,47 @@ const urls = (c: Card): Array<string | undefined> => c.keyboard.flat().map((b) =
     all.push(c);
     assert(c.text.startsWith("captureNoteComplete"));
     assert(c.text.includes('"title":"גלוק 17"') && c.text.includes('"details":"1,300₪ · מרכז"'));
-    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [1, 2]); // Add alone, then Not now + Don't ask again
-    assert.deepStrictEqual(datas(c), [`mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`]);
+    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [2, 2]); // Add + Edit, then Not now + Don't ask again
+    assert.deepStrictEqual(datas(c), [`mk_${ID}_a`, undefined, `mk_${ID}_n`, `mk_${ID}_x`]);
+    assert.strictEqual(urls(c)[1], `https://t.me/${BOT}?start=c_${ID}`);
+    assert.strictEqual(c.keyboard[0][1].text, "captureEditButton");
     assert.strictEqual(c.keyboard[0][0].style, "success"); // green Add (a ➕ alone was hard to see)
+}
+
+// catch-up note and list (synthetic items)
+{
+    const n = buildCatchupNote(t, { memberId: ID, count: 3 }, BOT);
+    all.push(n);
+    assert.strictEqual(n.text, 'catchupOfferNote{"n":3}');
+    assert.deepStrictEqual(n.keyboard.map((r) => r.length), [1, 1]);
+    assert.deepStrictEqual(urls(n), [`https://t.me/${BOT}?start=k_${ID}`, undefined]);
+    assert.deepStrictEqual(datas(n), [undefined, `ck_${ID}_x`]);
+    assert.strictEqual(n.keyboard[0][0].style, "success");
+    assert.strictEqual((n.keyboard[0][0] as { text: string }).text, "catchupPickButton");
+    assert.strictEqual((n.keyboard[1][0] as { text: string }).text, "catchupNoThanksButton");
+
+    assert.strictEqual(catchupActionData(ID, "x"), `ck_${ID}_x`);
+    assert.strictEqual(catchupActionData(ID, 1234567), `ck_${ID}_1234567`);
+    assert.deepStrictEqual(parseCatchupArg(`${ID}_x`), { memberId: ID, action: "x" });
+    assert.deepStrictEqual(parseCatchupArg(`${ID}_42`), { memberId: ID, action: "add", messageId: 42 });
+    for (const bad of [`${ID}_0`, `${ID}_a`, `${ID}_`, `${ID}_01`, "abc123_x", `${ID}x_5`, ""]) assert.strictEqual(parseCatchupArg(bad), null, bad);
+
+    const item = (i: number, title = `Item ${i}`): CatchupItem => ({ messageId: 1000 + i, date: "2026-10-20T10:00:00", title, price: `${i}00₪`, location: "Center", text: "x", tier: "strict" });
+    const l = buildCatchupList(t, { memberId: ID, items: [item(1), item(2, "ציוד טקטי ארוך מאוד מאוד מאוד מאוד מאוד מאוד מאוד מאוד")] });
+    all.push(l);
+    assert.deepStrictEqual(datas(l), [`ck_${ID}_1001`, `ck_${ID}_1002`]);
+    assert(l.text.startsWith("catchupListTitle"));
+    assert(l.text.includes("1. Item 1 · 100₪ · Center") && l.text.includes("2. "));
+    const labels = l.keyboard.flat().map((b) => b.text);
+    assert.strictEqual(labels[0], "➕ 1. Item 1");
+    assert(labels.every((x) => [...x].length <= 32), "labels trimmed to 32");
+    const many = buildCatchupList(t, { memberId: ID, items: Array.from({ length: 20 }, (_, i) => item(i + 1)) });
+    all.push(many);
+    assert.strictEqual(many.keyboard.flat().length, 15);
+    assert(many.text.length < 4096);
+    const none = buildCatchupList(t, { memberId: ID, items: [] });
+    assert.strictEqual(none.text, "catchupAllDone");
+    assert.strictEqual(none.keyboard.length, 0);
 }
 
 // ask note incomplete (no title, or no price)
@@ -37,6 +76,20 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert.strictEqual(urls(c)[0], `https://t.me/${BOT}?start=c_${ID}`);
     assert.strictEqual(datas(c)[0], undefined);
     assert.deepStrictEqual(datas(c).slice(1), [`mk_${ID}_n`, `mk_${ID}_x`]);
+}
+
+// trade note: Edit only, no Add (a trade with a real price has no `trade` flag and is the normal note)
+{
+    const c = buildAskNote(t, { id: ID, parsed: { title: "גלוק", isBundle: false, trade: true } }, BOT);
+    all.push(c);
+    assert(c.text.startsWith("captureNoteTrade"));
+    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [1, 2]);
+    assert.deepStrictEqual(datas(c), [undefined, `mk_${ID}_n`, `mk_${ID}_x`]);
+    assert.strictEqual(urls(c)[0], `https://t.me/${BOT}?start=c_${ID}`);
+    assert.strictEqual(c.keyboard[0][0].text, "captureEditButton");
+    // even with a price on it, a trade flag means no Add
+    const d = buildAskNote(t, { id: ID, parsed: { title: "x", price: "5", isBundle: false, trade: true } }, BOT);
+    assert(!datas(d).includes(`mk_${ID}_a`));
 }
 
 // nudge keyboard: lc_ formats, remove only for a group listing
@@ -67,6 +120,23 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert(r.text.startsWith("listingRefreshedCard"));
 }
 
+// meeting point line: flag or location, never when neither
+{
+    const base = { _id: new Types.ObjectId(ID), title: "גלוק", price: "100" };
+    const plain = buildManagementCard(t, base, { surface: "c" });
+    all.push(plain);
+    assert(!plain.text.includes("📍"));
+    const flagged = buildManagementCard(t, { ...base, meetup: true, location: "Haifa" }, { surface: "c" });
+    all.push(flagged);
+    assert.strictEqual(flagged.text, `${plain.text}
+📍 Haifa · meetupPlace`);
+    const byName = buildManagementCard(t, { ...base, location: "בית דגן" }, { surface: "c" });
+    all.push(byName);
+    assert.strictEqual(byName.text, `${plain.text}
+📍 בית דגן`);
+    assert.strictEqual(buildManagementCard(t, { ...base, location: "Haifa" }, { surface: "c" }).text, plain.text);
+}
+
 // ended card
 for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRemovedNote"], ["taken_down", "listingEnded"], ["expired", "listingEnded"]] as const) {
     const c = buildEndedCard(t, { status, title: "x" });
@@ -82,6 +152,25 @@ for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRe
     assert(c.text.startsWith("captureNeverNote"));
     assert.strictEqual(c.keyboard.length, 1);
     assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}`]);
+}
+
+// meeting point on buyer cards
+{
+    const plain = [{ title: "Hi-capa", price: "500", location: "Haifa", date: "2026-10-30" }];
+    const meet = [{ title: "Glock", location: "Haifa", date: "2026-11-01", meetup: true }, ...plain];
+    const bn = buildBuyerNote(t, meet, ID, BOT);
+    assert(bn.text.includes("Haifa · meetupPlace"), bn.text);
+    assert.strictEqual(bn.keyboard.length, 2);
+    assert(urls(bn)[1]!.endsWith("?start=faq_1"));
+    const dm = buildDmMatches(t, meet, undefined, BOT);
+    assert(dm.text.includes("Haifa · meetupPlace") && dm.keyboard.length === 1 && urls(dm)[0]!.endsWith("?start=faq_1"));
+    const ac = buildAlertCard(t, "q", meet[0], BOT);
+    assert(ac.text.includes("Haifa · meetupPlace") && urls(ac)[0]!.endsWith("?start=faq_1"));
+    assert.strictEqual(buildAlertCard(t, "q", meet[0]).keyboard.length, 0, "no bot username, no row");
+    assert.strictEqual(buildAlertCard(t, "q", plain[0], BOT).keyboard.length, 0);
+    assert.strictEqual(buildDmMatches(t, plain, undefined, BOT).keyboard.length, 0);
+    assert.strictEqual(buildBuyerNote(t, plain, ID, BOT).keyboard.length, 1);
+    assert(!buildBuyerNote(t, plain, ID, BOT).text.includes("meetupPlace"));
 }
 
 // parse round trip

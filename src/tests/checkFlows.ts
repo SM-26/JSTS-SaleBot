@@ -8,8 +8,11 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
+import { quickListingChecks } from "./quickListingChecks";
+import { priceChangeChecks } from "./priceChangeChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
+import type { CatchupItem } from "../services/catchupScan";
 
 // Persistent flows (issue #84, phase 5): the /newpost wizard, the reject-reason
 // prompt and the custom donation amount all live in Mongo, so each flow is
@@ -576,6 +579,8 @@ async function run() {
             console.log("  [OK] (l) a sold card is re-rendered in place, bump leaves it, clear_sold refreshes the summary.");
         }
 
+        await priceChangeChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP });
+
         // (m) a moderator approval publishes the post and creates the bot listing
         {
             const { h } = boot();
@@ -608,6 +613,31 @@ async function run() {
             assert.strictEqual(text(card), T("statusApproved"));
             assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
             console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
+        // (m2) a meetup post publishes with the meeting-point button and a flagged listing; a plain one has no buttons
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const meetupId = await seedPost(seller, "Meet me");
+            await Post.updateOne({ _id: meetupId }, { $set: { meetup: true } });
+            const plainId = await seedPost(seller, "Plain");
+            for (const [id, msgId] of [[meetupId, 320], [plainId, 321]] as const) {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${id}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: msgId });
+                await settle();
+                const sent = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
+                const listing = (await Listing.findOne({ source: "bot", postId: id }))!;
+                assert.ok(!sent.params.reply_markup, "no button under a group post");
+                if (id === meetupId) {
+                    assert.ok(JSON.stringify(sent.params.rich_message).includes("?start=faq_1"), "the meeting point's words link to faq_1");
+                    assert.strictEqual(listing.meetup, true);
+                } else {
+                    assert.ok(!("meetup" in listing.toObject()), "meetup is never written as false");
+                }
+            }
+            console.log("  [OK] (m2) the meeting-point link and flag follow the post.");
         }
 
         // (n) a listing failure does not stop the author's DM; the card gets no Take down
@@ -1772,7 +1802,7 @@ async function run() {
                 assert.deepStrictEqual(
                     [(p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(p.chat_id), "message_thread_id" in p],
                     [u, APPROVED_GROUP, false]);
-                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
+                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data).filter(Boolean), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
                 assert.strictEqual(cap.state, "asked");
                 assert.ok(ephemeralId(sent[0]) !== undefined && ephemeralId(sent[0])! >= 5000);
                 assert.strictEqual(cap.note?.ephemeralMessageId, ephemeralId(sent[0]));
@@ -2478,7 +2508,7 @@ async function run() {
                 await settle();
                 const card = richTo(h, u);
                 assert.strictEqual(card.length, 1);
-                assert.deepStrictEqual(keyboard(card[0]).map((b) => b.callback_data), [`sold_${post._id}`, `bump_${post._id}`]);
+                assert.deepStrictEqual(keyboard(card[0]).map((b) => b.callback_data), [`sold_${post._id}`, `bump_${post._id}`, `lp_${post._id}`]);
                 assert.strictEqual(dms(h, u).length, 0);
 
                 await Post.updateOne({ _id: post._id }, { $set: { status: "pending" } });
@@ -2751,7 +2781,7 @@ async function run() {
                 const out = sent(h, u);
                 assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage"]);
                 assert.ok(text(out[0]).includes(T("myPostsTitle")));
-                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`, `lp_${postId}`]);
                 console.log("  [OK] (z1) /myposts with captureMode shadow is unchanged.");
             }
 
@@ -2770,7 +2800,7 @@ async function run() {
                 const out = sent(h, u);
                 assert.deepStrictEqual(out.map((c) => c.method), ["sendMessage", "sendRichMessage", "sendMessage"]);
                 assert.ok(text(out[0]).includes(T("myPostsTitle")));
-                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`]);
+                assert.deepStrictEqual(keyboard(out[1]).map((b) => b.callback_data), [`sold_${postId}`, `bump_${postId}`, `lp_${postId}`]);
                 const section = out[2];
                 assert.strictEqual(section.params.parse_mode, "HTML");
                 assert.deepStrictEqual(section.params.link_preview_options, { is_disabled: true });
@@ -2864,6 +2894,356 @@ async function run() {
                 await settle();
                 assert.ok(text(sent(h, u)[0]).includes(">a&lt;b&gt;&amp;c</a>"));
                 console.log("  [OK] (z6) listing titles are HTML-escaped.");
+            }
+        })();
+
+        // (k1)..(k26): quickListing buttons, the meetup toggle and the one-message quick draft
+        await quickListingChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP, MOD_GROUP });
+
+        // Slice 6: catch-up scan. Labels (cu1)..(cu9).
+        cfg.approvedTopicId = 1;
+        cfg.captureMode = "optin";
+        cfg.moderationGroupId = MOD_GROUP;
+        const realFetch = globalThis.fetch;
+        const realToken = process.env.BOT_TOKEN;
+        process.env.BOT_TOKEN ??= "123:TEST"; // the harness never reads it; the import builds the file URL from it
+        await (async () => { // its own function, like the sections above
+            const { default: memberRepository } = await import("../repositories/memberRepository");
+            const { findBlockedWord, BLOCKED_WORDS_PATH } = await import("../services/blockedWords");
+            const fs = await import("fs");
+            const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
+            const tp = (key: string, params?: Record<string, string | number>) => localeService.t(cfg.lang, key, params);
+            const admin = user();
+            await User.create({ userId: String(admin), firstName: "Admin", authLevel: 2 });
+            const item = (messageId: number, title: string, text: string, days = 2): CatchupItem =>
+                ({ messageId, date: new Date(Date.now() - days * 86_400_000).toISOString(), title, price: "100", text, tier: "strict" });
+            const fileOf = (sellers: { userId: number; items: CatchupItem[] }[]) =>
+                JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), sellers: sellers.map((s) => ({ userId: String(s.userId), name: "S", items: s.items })) });
+            const memberOf = (u: number) => Member.findOne({ userId: String(u) }).exec();
+            const memberIdOf = async (u: number) => String((await memberOf(u))!._id);
+            const sends = (h: H) => h.calls.filter((c) => c.method === "sendMessage");
+            const ephemerals = (h: H) => h.calls.filter((c) => c.method === "sendMessage" && c.params.ephemeral_message_parameters);
+            const answers = (h: H) => h.calls.filter((c) => c.method === "answerCallbackQuery").map((c) => String(c.params.text));
+            const stubFetch = (body: string) => {
+                globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+                    String(input instanceof Request ? input.url : input).includes("api.telegram.org/file/") ? new Response(body) : realFetch(input, init)) as typeof fetch;
+            };
+            const importDoc = async (h: H, from: number, extra: Record<string, unknown> = {}) => {
+                await h.message({ document: { file_id: "f1", file_unique_id: "u1", file_size: 200, ...extra }, caption: "/catchup import" }, { userId: from });
+                await settle();
+            };
+            const getFileOk = { getFile: { file_id: "f1", file_path: "documents/f1.json" } };
+            // a seller with an armed offer; the note is delivered by a message in the sale topic
+            const deliveredSeller = async (h: H, items: CatchupItem[]) => {
+                const u = user();
+                await memberRepository.importCatchup(String(u), items, new Date());
+                await memberRepository.armCatchup(new Date());
+                await h.sendText("anyone here", { ...GROUP, userId: u });
+                await settle();
+                return u;
+            };
+
+            try {
+                // (cu1) /catchup is admin-only and private-only
+                {
+                    const { h } = boot();
+                    const plain = user();
+                    const target = user();
+                    await memberRepository.importCatchup(String(target), [item(1, "Glock", "Glock 17 100")], new Date());
+                    await h.sendText("/catchup send", { userId: plain });
+                    await settle();
+assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
+                    assert.strictEqual((await memberOf(target))!.catchup?.armedAt, undefined, "a plain user arms nothing");
+                    h.calls.length = 0;
+                    await h.sendText("/catchup send", { userId: admin, chatId: MOD_GROUP, chatType: "supergroup" });
+                    await settle();
+                    assert.strictEqual(h.calls.length, 0, "/catchup in a group is ignored");
+                    assert.strictEqual((await memberOf(target))!.catchup?.armedAt, undefined);
+                    console.log("  [OK] (cu1) a plain user gets notAdmin and arms nothing; a group is ignored.");
+                }
+
+                // (cu2) /catchup import: stored, not sent, the message deleted; bad, oversized and non-admin files refused
+                {
+                    const seller = user();
+                    const { h } = boot({ responses: getFileOk });
+                    stubFetch(fileOf([{ userId: seller, items: [item(1, "Glock", "Glock 17 100")] }]));
+                    await importDoc(h, admin, { message_id: 9001 });
+                    const m = await memberOf(seller);
+                    assert.ok(m?.pendingCatchup?.length === 1 && m.catchup?.importedAt && !m.catchup.armedAt && !m.catchup.sentAt, "stored, not armed, not sent");
+                    assert.strictEqual(h.calls.filter((c) => c.method === "getFile").length, 1);
+                    assert.ok(h.calls.some((c) => c.method === "sendMessage" && text(c) === tp("catchupImported", { sellers: 1, items: 1, skipped: 0 })));
+                    assert.ok(h.calls.some((c) => c.method === "deleteMessage"), "the document message is deleted");
+                    // a sale-topic message before /catchup send: nothing reaches the seller
+                    h.calls.length = 0;
+                    await h.sendText("hello all", { ...GROUP, userId: seller });
+                    await settle();
+                    assert.ok(!h.calls.some((c) => c.method === "sendMessage" || Number(c.params.chat_id) === seller), "nothing to the seller before send");
+
+                    const bad = boot({ responses: getFileOk });
+                    const ghost = user();
+                    stubFetch("this is not json");
+                    await importDoc(bad.h, admin);
+                    assert.ok(bad.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("catchupBadFile")));
+                    stubFetch(JSON.stringify({ version: 1, generatedAt: "x", sellers: [{ userId: String(ghost), name: "S", items: [{ messageId: "nope" }] }] }));
+                    bad.h.calls.length = 0;
+                    await importDoc(bad.h, admin);
+                    assert.ok(bad.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("catchupBadFile")));
+                    assert.strictEqual(await memberOf(ghost), null, "a malformed file stores nothing");
+
+                    const big = boot({ responses: getFileOk });
+                    await importDoc(big.h, admin, { file_size: 6_000_000 });
+                    assert.ok(big.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("catchupBadFile")));
+                    assert.ok(!big.h.calls.some((c) => c.method === "getFile"), "an oversized file is refused before getFile");
+                    assert.ok(bad.h.calls.some((c) => c.method === "deleteMessage"), "a bad file's message is deleted too");
+                    assert.ok(big.h.calls.some((c) => c.method === "deleteMessage"), "an oversized file's message is deleted too");
+
+                    const plainBoot = boot({ responses: getFileOk });
+                    await importDoc(plainBoot.h, user());
+                    assert.ok(plainBoot.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("notAdmin")));
+                    assert.ok(!plainBoot.h.calls.some((c) => c.method === "getFile"), "a plain user's file is never fetched");
+                    console.log("  [OK] (cu2) import stores without sending; bad, oversized and non-admin files are refused.");
+                }
+
+                // (cu3) send, then the next sale-topic message gets one note, once; a reply or forward does not count
+                {
+                    const { h } = boot();
+                    const a = user();
+                    const b = user();
+                    await memberRepository.importCatchup(String(a), [item(1, "Glock", "Glock 17 100")], new Date());
+                    await memberRepository.importCatchup(String(b), [item(2, "Vest", "Vest tactical 250")], new Date());
+                    await h.sendText("/catchup send", { userId: admin });
+                    await settle();
+                    assert.ok(h.calls.some((c) => c.method === "sendMessage" && text(c).startsWith("Armed")), "armed reply");
+                    h.calls.length = 0;
+                    await h.sendText("just chatting", { ...GROUP, userId: a });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "a chatter message delivers");
+                    const mid = await memberIdOf(a);
+                    assert.ok(JSON.stringify(ephemerals(h)[0].params.reply_markup).includes(`start=k_${mid}`));
+                    await h.sendText("and more", { ...GROUP, userId: a });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "never twice");
+                    await h.sendText("a reply", { ...GROUP, userId: b, replyToMessageId: 5 });
+                    await h.sendText("a forward", { ...GROUP, userId: b, forwardOrigin: { type: "user", date: 1, sender_user: { id: 5, is_bot: false, first_name: "X" } } });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "a reply and a forward do not deliver");
+                    await h.sendText("now a plain one", { ...GROUP, userId: b });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 2);
+                    console.log("  [OK] (cu3) one note on the next sale-topic message, never twice, replies and forwards ignored.");
+                }
+
+                // (cu4) /start k_<id>: the owner after delivery gets the list; others and early visitors the greeting
+                {
+                    const { h } = boot();
+                    const early = user();
+                    await memberRepository.importCatchup(String(early), [item(1, "Glock", "Glock 17 100")], new Date());
+                    const earlyId = await memberIdOf(early);
+                    await h.sendText(`/start k_${earlyId}`, { userId: early });
+                    await settle();
+                    assert.strictEqual(text(sends(h)[0]), T("greeting"), "before delivery: greeting");
+                    const owner = await deliveredSeller(h, [item(11, "Glock", "Glock 17 100"), item(12, "Vest", "Vest tactical 250")]);
+                    const ownerId = await memberIdOf(owner);
+                    h.calls.length = 0;
+                    await h.sendText(`/start k_${ownerId}`, { userId: owner });
+                    await settle();
+                    assert.deepStrictEqual(keyboard(sends(h)[0]).map((b) => b.callback_data), [`ck_${ownerId}_11`, `ck_${ownerId}_12`]);
+                    h.calls.length = 0;
+                    await h.sendText(`/start k_${ownerId}`, { userId: user() });
+                    await settle();
+                    assert.strictEqual(text(sends(h)[0]), T("greeting"), "another user: greeting");
+                    console.log("  [OK] (cu4) the owner gets the list; another user or an early visit gets the greeting.");
+                }
+
+                // (cu5) ck_ add: a catchup listing, the DM edited, a td_ card only for the first listing
+                {
+                    const { h } = boot();
+                    const u = await deliveredSeller(h, [item(21, "Glock", "Glock 17 100", 3), item(22, "Vest", "Vest tactical 250"), item(23, "Scope", "Red scope 300")]);
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_21`, { userId: u, messageId: 55 });
+                    await settle();
+                    const l1 = await Listing.findOne({ sellerId: String(u), origin: "catchup", messageIds: 21 });
+                    assert.ok(l1 && l1.source === "group", "listing exists");
+                    assert.ok(Math.abs(l1!.refreshedAt.getTime() - (Date.now() - 3 * 86_400_000)) < 60_000, "refreshedAt is the item date");
+                    assert.deepStrictEqual(answers(h), [T("captureAddedToast")]);
+                    const edit = h.calls.find((c) => c.method === "editMessageText")!;
+                    assert.deepStrictEqual(keyboard(edit).map((b) => b.callback_data), [`ck_${id}_22`, `ck_${id}_23`], "the DM lists what is left");
+                    const cards = () => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
+                    assert.strictEqual(cards().length, 1, "a td_ card for the first listing");
+                    assert.ok(keyboard(cards()[0])[0].callback_data.startsWith("td_"));
+                    await h.pressButton(`ck_${id}_22`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.strictEqual(cards().length, 1, "none for the second");
+                    // a double press and another user
+                    h.calls.length = 0;
+                    await Promise.all([h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 }), h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 })]);
+                    await settle();
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), messageIds: 23 }), 1, "a double press makes one listing");
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_23`, { userId: user(), messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("notYourButton")]);
+                    console.log("  [OK] (cu5) add makes a catchup listing, edits the DM, one td_ card; double press and strangers are safe.");
+                }
+
+                // (cu6) a blocked word added after the scan, and a duplicate of a live listing
+                {
+                    const { h } = boot();
+                    const word = (JSON.parse(fs.readFileSync(BLOCKED_WORDS_PATH, "utf8")) as string[]).find((w) => !w.includes("*") && findBlockedWord(w));
+                    assert.ok(word, "the blocklist has a plain entry");
+                    const u = await deliveredSeller(h, [item(31, "Glock", "Glock 19 100 " + word), item(32, "Glock", "Glock 17 100"), item(33, "Glock", "Glock 17 100")]);
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_31`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("staleButton")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), messageIds: 31 }), 0, "a blocked item is never listed");
+                    assert.ok(!(await memberOf(u))!.pendingCatchup?.some((i) => i.messageId === 31), "and stays gone");
+                    await h.pressButton(`ck_${id}_32`, { userId: u, messageId: 55 });
+                    await settle();
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_33`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("captureAlreadyAdded")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), origin: "catchup" }), 1, "a duplicate of a live listing is not listed");
+                    console.log("  [OK] (cu6) a blocked item and a duplicate of a live listing create nothing.");
+                }
+
+                // (cu7) No thanks: items gone, the note deleted, /start k_ says nothing is left
+                {
+                    const { h } = boot();
+                    const u = await deliveredSeller(h, [item(41, "Glock", "Glock 17 100")]);
+                    const id = await memberIdOf(u);
+                    const noteId = (await memberOf(u))!.catchup!.note!.ephemeralMessageId;
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_x`, { userId: u, noMessage: true });
+                    await settle();
+                    assert.strictEqual((await memberOf(u))!.pendingCatchup, undefined, "items gone");
+                    const del = h.calls.filter((c) => c.method === "deleteEphemeralMessage");
+                    assert.deepStrictEqual(del.map((c) => [Number(c.params.chat_id), Number(c.params.receiver_user_id), Number(c.params.ephemeral_message_id)]), [[APPROVED_GROUP, u, noteId]]);
+                    assert.deepStrictEqual(answers(h), ["undefined"], "a plain answer, no text");
+                    h.calls.length = 0;
+                    await h.sendText(`/start k_${id}`, { userId: u });
+                    await settle();
+                    assert.strictEqual(text(sends(h)[0]), T("catchupNothingLeft"));
+                    console.log("  [OK] (cu7) No thanks drops the items, deletes the note; the link then says nothing is left.");
+                }
+
+                // (cu8) two different items opening with the same line are both added
+                {
+                    const { h } = boot();
+                    const u = await deliveredSeller(h, [item(51, "למכירה", "למכירה\nGlock 17 100"), item(52, "למכירה", "למכירה\nVest tactical 250")]);
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_51`, { userId: u, messageId: 55 });
+                    await h.pressButton(`ck_${id}_52`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("captureAddedToast"), T("captureAddedToast")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), origin: "catchup" }), 2, "same first line, different text: two listings");
+                    console.log("  [OK] (cu8) items sharing a first line but not their text are both listed.");
+                }
+
+                // (cu9) a forged ck_ button against an offer that was never delivered changes nothing
+                {
+                    const { h } = boot();
+                    const u = user();
+                    await memberRepository.importCatchup(String(u), [item(61, "Glock", "Glock 17 100")], new Date());
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_61`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("staleButton")]);
+                    assert.strictEqual((await memberOf(u))!.pendingCatchup?.length, 1, "the item is still offered");
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0, "no listing");
+                    console.log("  [OK] (cu9) a forged add against an undelivered offer is refused.");
+                }
+                // (cu10) an ended listing, or a declined text, is never offered or added again
+                {
+                    const { default: listingRepo } = await import("../repositories/listingRepository");
+                    const { textHash } = await import("../services/classifier");
+                    const { h } = boot();
+                    const u = user();
+                    const endedItem = item(71, "Glock", "Glock 17 100");
+                    const declinedItem = item(72, "Vest", "Vest tactical 250");
+                    const freshItem = item(73, "Scope", "Red scope 300");
+                    await memberRepository.importCatchup(String(u), [endedItem, declinedItem, freshItem], new Date());
+                    const ended = await listingRepo.createFromCatchup({ chatId: APPROVED_GROUP, messageId: 71, sellerId: String(u), sellerName: "S", item: endedItem, isBundle: false }, new Date());
+                    await Listing.updateOne({ _id: ended._id }, { $set: { status: "removed" } });
+                    await Member.updateOne({ userId: String(u) }, { $set: { declined: [{ hash: textHash(declinedItem.text), at: new Date() }] } });
+                    await memberRepository.armCatchup(new Date());
+                    await h.sendText("anyone here", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 1, "the seller still has one fresh item, so one note");
+                    const id = await memberIdOf(u);
+                    h.calls.length = 0;
+                    await h.sendText(`/start k_${id}`, { userId: u });
+                    await settle();
+                    assert.deepStrictEqual(keyboard(sends(h)[0]).map((b) => b.callback_data), [`ck_${id}_73`], "the list hides ended and declined items");
+                    // a button for the ended item (still stored) creates nothing
+                    h.calls.length = 0;
+                    await h.pressButton(`ck_${id}_71`, { userId: u, messageId: 55 });
+                    await settle();
+                    assert.deepStrictEqual(answers(h), [T("captureAlreadyAdded")]);
+                    assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 1, "only the ended one exists");
+                    console.log("  [OK] (cu10) ended and declined items are not offered or added again.");
+                }
+
+                // (cu11) a send that may have gone out keeps the claim; a definite refusal frees it
+                {
+                    const cases: [string, Record<string, unknown>, boolean][] = [
+                        ["403 refused", { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { ok: false, error_code: 403, description: "Forbidden" } : undefined }, false],
+                        ["network error", { sendMessage: (p: Record<string, unknown>) => { if (p.ephemeral_message_parameters) throw new Error("socket hang up"); return undefined; } }, true],
+                        ["came out public", { sendMessage: (p: Record<string, unknown>) => p.ephemeral_message_parameters ? { message_id: 1, chat: { id: APPROVED_GROUP, type: "supergroup" }, date: 1 } : undefined }, true],
+                    ];
+                    for (const [label, responses, kept] of cases) {
+                        const { h } = boot({ responses });
+                        const u = user();
+                        await memberRepository.importCatchup(String(u), [item(81, "Glock", `Glock 17 100 ${label}`)], new Date());
+                        await memberRepository.armCatchup(new Date());
+                        await h.sendText("anyone here", { ...GROUP, userId: u });
+                        await settle();
+                        assert.strictEqual(Boolean((await memberOf(u))!.catchup?.sentAt), kept, `${label}: claim ${kept ? "kept" : "released"}`);
+                        if (kept) {
+                            const before = ephemerals(h).length;
+                            await h.sendText("again", { ...GROUP, userId: u });
+                            await settle();
+                            assert.strictEqual(ephemerals(h).length, before, `${label}: never sent twice`);
+                        }
+                    }
+                    console.log("  [OK] (cu11) an unclear send keeps the claim, a definite refusal releases it.");
+                }
+
+                // (cu12) one sale post gets one note: the catch-up note waits while a capture window is open
+                {
+                    const { h, ctrl } = boot();
+                    const u = user();
+                    await memberRepository.importCatchup(String(u), [item(91, "Glock", "Glock 17 100")], new Date());
+                    await memberRepository.armCatchup(new Date());
+                    await h.sendText("Glock 19 למכירה 1,300₪", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 0, "a sale post is held back from the catch-up note");
+                    await h.sendText("just chatting", { ...GROUP, userId: u });
+                    await settle();
+                    assert.strictEqual(ephemerals(h).length, 0, "still held while the window is open");
+                    const later = new Date(Date.now() + 300_000);
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "not while the window is open");
+                    await Capture.updateMany({ senderId: String(u) }, { $set: { state: "closed" } });
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 1, "the sweeper delivers once the window settles, with no later message");
+                    assert.strictEqual(ephemerals(h).length, 1);
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "never twice");
+                    cfg.captureMode = "shadow";
+                    const w = user();
+                    await memberRepository.importCatchup(String(w), [item(92, "Vest", "Vest tactical 250")], new Date());
+                    await memberRepository.armCatchup(new Date());
+                    await memberRepository.holdCatchup(String(w), new Date(Date.now() - 600_000));
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "no delivery outside optin");
+                    cfg.captureMode = "optin";
+                    console.log("  [OK] (cu12) the catch-up note waits for the capture window.");
+                }
+            } finally {
+                globalThis.fetch = realFetch;
+                if (realToken === undefined) delete process.env.BOT_TOKEN;
             }
         })();
 

@@ -2,6 +2,8 @@ import assert from "assert";
 import fs from "fs";
 import path from "path";
 import { routeCallback } from "../controllers/callbackRoutes";
+import { parseWizardCallback } from "../services/wizardService";
+import { STALE_PREFIXES } from "../controllers/middleware";
 import { deepLink, groupMessageLink, parseStartPayload } from "../services/deepLinks";
 
 /**
@@ -20,6 +22,7 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`reject_${ID}`, { action: "reject", arg: ID }],
     [`sold_${ID}`, { action: "sold", arg: ID }],
     [`bump_${ID}`, { action: "bump", arg: ID }],
+    [`lp_${ID}`, { action: "lowerPrice", arg: ID }],
     ["clear_rejected", { action: "clearRejected", arg: "" }],
     ["clear_sold", { action: "clearSold", arg: "" }],
     ["lang_en", { action: "lang", arg: "en" }],
@@ -44,6 +47,8 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`mk_${ID}_a`, { action: "capture", arg: `${ID}_a` }],
     [`mk_${ID}_n`, { action: "capture", arg: `${ID}_n` }],
     [`mk_${ID}_x`, { action: "capture", arg: `${ID}_x` }],
+    [`ck_${ID}_x`, { action: "catchup", arg: `${ID}_x` }],
+    [`ck_${ID}_1234567`, { action: "catchup", arg: `${ID}_1234567` }],
     ["mk_set_ask", { action: "capture", arg: "set_ask" }],
     ["mk_set_never", { action: "capture", arg: "set_never" }],
     [`ls_${ID}_s_n`, { action: "listing", arg: `${ID}_s_n` }],
@@ -91,8 +96,8 @@ for (const dir of localeDirs) {
         generated.push(`faq_${nodeId}`);
     }
 }
-for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `tx_${ID}_d`, `tx_${ID}_y`, `tx_${ID}_n`, `rr_${ID}_1`, `rr_${ID}_4`,
-    `mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`, `al_${ID}_d`, `al_${ID}_r`, `lb_${ID}_u`, `lb_${ID}_d`, `lb_${ID}_m`,
+for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lp_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `tx_${ID}_d`, `tx_${ID}_y`, `tx_${ID}_n`, `rr_${ID}_1`, `rr_${ID}_4`,
+    `mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`, `ck_${ID}_x`, `ck_${ID}_9999999999`, `al_${ID}_d`, `al_${ID}_r`, `lb_${ID}_u`, `lb_${ID}_d`, `lb_${ID}_m`,
     `lc_r_${ID}`, `lc_s_${ID}`, `lc_x_${ID}`,
     ...["s", "f", "r"].flatMap(a => ["n", "c", "l"].map(surface => `ls_${ID}_${a}_${surface}`)),
 ]) generated.push(s);
@@ -106,6 +111,9 @@ console.log(`  [SUCCESS] ${generated.length} generated strings route correctly a
 const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     [`c_${ID}`, { kind: "c", id: ID }],
     [`l_${ID}`, { kind: "l", id: ID }],
+    [`k_${ID}`, { kind: "k", id: ID }],
+    ["k_", null], ["k_xyz", null],
+    ["faq_1", { kind: "faq", id: "1" }], ["faq_2", null], ["faq_", null],
     [`s_${ID}`, { kind: "s", id: ID }],
     ["s_", null], ["s_xyz", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
@@ -114,8 +122,19 @@ for (const [args, expected] of PAYLOADS) {
     assert.deepStrictEqual(parseStartPayload(args), expected, `start payload failed: "${args}"`);
 }
 assert.strictEqual(deepLink("JSTS_testing_bot", `c_${ID}`), `https://t.me/JSTS_testing_bot?start=c_${ID}`);
+assert.strictEqual(deepLink("JSTS_testing_bot", `k_${ID}`), `https://t.me/JSTS_testing_bot?start=k_${ID}`);
 assert.strictEqual(groupMessageLink({ id: -1002445943058 }, 9), "https://t.me/c/2445943058/9");
 assert.strictEqual(groupMessageLink({ id: -1001, username: "airsoft_yad2" }, 5), "https://t.me/airsoft_yad2/5");
 console.log("  [SUCCESS] start payloads and links.");
+
+// --- wizard field-edit buttons (quickListing) ---------------------------------------
+const UID = "7200000001";
+for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_description_${UID}`, "editDescription"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"]]) {
+    assert.deepStrictEqual(parseWizardCallback(data), { action, userId: UID }, data);
+    assert.ok(Buffer.byteLength(data) <= 64, data);
+    assert.strictEqual(routeCallback(data), null, data);
+    assert.ok(STALE_PREFIXES.some(p => data.startsWith(p)), `${data} must be covered by the stale catch-all`);
+}
+console.log("  [SUCCESS] wizard edit/meetup buttons parse, fit 64 bytes, are not routed and are stale-covered.");
 
 console.log("[SUCCESS] All callback_data checks passed.");

@@ -2,7 +2,7 @@
 // these prefixes and formats must never change (see src/tests/checkCallbackData.ts).
 export type CallbackAction =
     | "test" | "faq" | "approve" | "reject" | "clearRejected" | "clearSold"
-    | "sold" | "bump" | "lang" | "donate" | "label" | "takeDown" | "takeDownDelete" | "rejectReason" | "capture" | "listing" | "lifecycle" | "stalecheck" | "alerts";
+    | "sold" | "bump" | "lowerPrice" | "lang" | "donate" | "label" | "takeDown" | "takeDownDelete" | "rejectReason" | "capture" | "listing" | "lifecycle" | "stalecheck" | "alerts" | "catchup";
 
 export function routeCallback(data: string): { action: CallbackAction; arg: string } | null {
     if (data.startsWith("test_")) return { action: "test", arg: data.slice("test_".length) };
@@ -13,6 +13,7 @@ export function routeCallback(data: string): { action: CallbackAction; arg: stri
     if (data === "clear_sold") return { action: "clearSold", arg: "" };
     if (data.startsWith("sold_")) return { action: "sold", arg: data.slice("sold_".length) };
     if (data.startsWith("bump_")) return { action: "bump", arg: data.slice("bump_".length) };
+    if (data.startsWith("lp_")) return { action: "lowerPrice", arg: data.slice("lp_".length) };
     if (data.startsWith("lang_")) return { action: "lang", arg: data.slice("lang_".length) };
     if (data.startsWith("donate_")) return { action: "donate", arg: data.slice("donate_".length) };
     if (data.startsWith("lb_")) return { action: "label", arg: data.slice("lb_".length) };
@@ -24,5 +25,6 @@ export function routeCallback(data: string): { action: CallbackAction; arg: stri
     if (data.startsWith("al_")) return { action: "alerts", arg: data.slice("al_".length) };
     if (data.startsWith("lc_")) return { action: "lifecycle", arg: data.slice("lc_".length) };
     if (data.startsWith("sc_")) return { action: "stalecheck", arg: data.slice("sc_".length) };
+    if (data.startsWith("ck_")) return { action: "catchup", arg: data.slice("ck_".length) };
     return null;
 }

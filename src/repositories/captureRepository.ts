@@ -36,9 +36,13 @@ const REBUILD = {
 
 const sortedParts = (parts: unknown) => ({ $sortArray: { input: parts, sortBy: { messageId: 1 } } });
 
-const isDuplicateKey = (err: unknown) => typeof err === "object" && err !== null && (err as { code?: number }).code === 11000;
+export const isDuplicateKey = (err: unknown) => typeof err === "object" && err !== null && (err as { code?: number }).code === 11000;
 
 class CaptureRepository {
+    hasOpen(chatId: number, senderId: string): Promise<boolean> {
+        return Capture.exists({ chatId, senderId, state: "open" }).then(r => r !== null);
+    }
+
     // Adds a message to the sender's open window, or starts a new one. Album
     // items arrive concurrently: the unique open-window index makes the losers
     // of the insert race retry into the winner's capture.

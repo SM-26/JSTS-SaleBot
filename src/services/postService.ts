@@ -6,6 +6,10 @@ import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
 import type { StoredEntity } from "../models/Post";
+import { MEETUP_FAQ_PAYLOAD, meetupLocationParts } from "./meetup";
+import { deepLink } from "./deepLinks";
+import { buildTierMessage } from "./tierLayouts";
+import { sellerLayout, type SellerTier } from "./trustService";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 
@@ -14,7 +18,10 @@ export interface PostData {
     description: string;
     descriptionEntities?: StoredEntity[];
     price: string;
+    previousPrice?: string;
     location: string;
+    meetup?: boolean;
+    highlight?: string;
     media: MediaItem[];
     userId: number;
     username?: string;
@@ -24,7 +31,8 @@ export interface PostData {
 export class PostService {
     constructor(
         private api: Api,
-        private config: BotConfig
+        private config: BotConfig,
+        private botUsername: () => string = () => ""
     ) { }
 
     private get lang() {
@@ -51,18 +59,24 @@ export class PostService {
     // plain objects because RichTextBuilder.build() always wraps in an array.
     formatPostRichMessage(
         data: PostData,
-        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string }; trustLine?: string } = {}
+        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string }; trustLine?: string; tier?: SellerTier; stats?: { sold: number; since: string } } = {}
     ): InputRichMessage {
+        // Top, verified and both sellers get their own layout (tierLayouts.ts); regular is the code below, unchanged.
+        if (opts.tier && opts.tier !== "regular") {
+            return buildTierMessage(data, { tier: opts.tier, sold: opts.sold, stats: opts.stats }, this.lang, this.botUsername());
+        }
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
 
+        const locationLine = this.locationLine(data);
+
+        message.heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2);
+        if (data.description) message.blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)));
         message
-            .heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2)
-            .blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)))
             .divider()
             .list([
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
-                richListItem(b => b.paragraph(`📍 ${data.location}`)),
+                ...(locationLine ? [richListItem(b => b.paragraph(locationLine))] : []),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
                 ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
@@ -93,11 +107,21 @@ export class PostService {
         return message.build();
     }
 
+    // The meeting point's words link to its FAQ node; the link stays through Sold edits, a button would not.
+    private locationLine(data: PostData): string | RichTextBuilder | null {
+        if (!data.meetup) return data.location ? `📍 ${data.location}` : null;
+        const { before, place } = meetupLocationParts(data.location, localeService.t(this.lang, "meetupPlace"));
+        const username = this.botUsername();
+        return username
+            ? new RichTextBuilder().plain(`📍 ${before}`).url(place, deepLink(username, MEETUP_FAQ_PAYLOAD))
+            : `📍 ${before}${place}`;
+    }
+
     // One Rich Message carrying the post AND the approve/reject buttons. A media
     // group can't hold buttons, which is why the old media path sent a second
     // message — the source of the noticeable button delay.
-    async sendToModeration(postId: string, data: PostData): Promise<number | null> {
-        return this.sendToModerationTopic(this.formatPostRichMessage(data), [[
+    async sendToModeration(postId: string, data: PostData, layout?: { tier?: SellerTier; stats?: { sold: number; since: string } }): Promise<number | null> {
+        return this.sendToModerationTopic(this.formatPostRichMessage(data, layout), [[
             { text: localeService.t(this.lang, 'approveButton'), callback_data: `approve_${postId}` },
             { text: localeService.t(this.lang, 'rejectButton'), callback_data: `reject_${postId}` },
         ]]);
@@ -166,17 +190,20 @@ export class PostService {
         const postId = String(post._id);
         await postRepository.updateStatus(postId, "sold");
         const postUser = await userRepository.findByUserId(post.userId);
+        const layout = await sellerLayout(post.userId, this.lang, "PostService.setPostSold", post.layoutTier);
         const richMessage = this.formatPostRichMessage({
             title: post.title,
             description: post.description,
             descriptionEntities: post.descriptionEntities,
             price: post.price,
             location: post.location,
+            meetup: post.meetup,
+            highlight: post.highlight,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
-        }, { sold: true });
+        }, { sold: true, tier: layout.tier, stats: layout.stats });
         return richMessage;
     }
 
