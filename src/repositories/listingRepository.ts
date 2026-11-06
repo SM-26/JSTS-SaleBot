@@ -1,5 +1,6 @@
 import Listing, { IListing } from "../models/Listing";
 import type { IMediaItem } from "../models/Post";
+import type { CatchupItem } from "../services/catchupScan";
 import { textHash } from "../services/classifier";
 import type { Post } from "../types";
 
@@ -91,6 +92,32 @@ class ListingRepository {
             hold: false,
             createdAt: now,
             refreshedAt: now,
+        });
+    }
+
+    // A past message found by the catch-up scan; the clock starts at its post date, so slice 3's expiry sees its real age.
+    createFromCatchup(input: { chatId: number; messageId: number; sellerId: string; sellerName: string; item: CatchupItem; isBundle: boolean }, now: Date): Promise<IListing> {
+        const { item } = input;
+        const priceValue = priceValueOf(item.price);
+        return Listing.create({
+            chatId: input.chatId,
+            messageIds: [input.messageId],
+            sellerId: input.sellerId,
+            sellerName: input.sellerName,
+            title: item.title,
+            price: item.price,
+            ...(item.location ? { location: item.location } : {}),
+            text: item.text,
+            media: [],
+            isBundle: input.isBundle,
+            ...(priceValue !== undefined ? { priceValue } : {}),
+            textHash: textHash(item.text),
+            source: "group",
+            origin: "catchup",
+            status: "live",
+            hold: false,
+            createdAt: now,
+            refreshedAt: new Date(item.date),
         });
     }
 

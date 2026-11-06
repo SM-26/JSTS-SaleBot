@@ -9,6 +9,7 @@ import memberRepository from "../repositories/memberRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
+import type { CatchupItem } from "./catchupScan";
 import { classify, textHash, type Parsed } from "./classifier";
 import { groupMessageLink } from "./deepLinks";
 import { editNote } from "./ephemeralNotes";
@@ -80,6 +81,21 @@ export class GroupListingService {
         }
         if (firstForSeller) await this.notifyNewSeller(listing);
         return { kind: "added", listing };
+    }
+
+    // A listing from a catch-up offer tap: the member's old message, in the approved group.
+    async addCatchupItem(member: { userId: string; name: string }, item: CatchupItem, now: Date): Promise<IListing> {
+        const firstForSeller = (await listingRepository.countBySeller(member.userId)) === 0;
+        const listing = await listingRepository.createFromCatchup({
+            chatId: this.config.approvedGroupId,
+            messageId: item.messageId,
+            sellerId: member.userId,
+            sellerName: member.name,
+            item,
+            isBundle: classify(item.text, false).parsed.isBundle,
+        }, now);
+        if (firstForSeller) await this.notifyNewSeller(listing);
+        return listing;
     }
 
     // One card in the moderation topic for a seller's first captured listing; the
