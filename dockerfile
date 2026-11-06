@@ -1,7 +1,7 @@
 # --- Base Stage ---
 FROM node:26-alpine AS base
 WORKDIR /app
-# pnpm-workspace.yaml carries pnpm settings (e.g. minimumReleaseAge exemptions) the install must see.
+# pnpm-workspace.yaml carries pnpm settings (e.g. overrides) the install must see.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # node:26 no longer bundles Corepack, so install pnpm directly — pinned to the
 # "packageManager" field in package.json so Docker, CI and local never drift.

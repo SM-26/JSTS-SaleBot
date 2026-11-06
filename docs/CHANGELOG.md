@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Dependency update.
+  - Changed:
+    - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
   - Added:
     - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of the same item (same text, or a near-identical text with the same title) refreshes the listing, which follows the newest repost (message, text, price, photos), and sends a short refresh note; a different item that reads alike gets its own note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
