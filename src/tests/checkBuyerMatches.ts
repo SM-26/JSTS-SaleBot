@@ -340,23 +340,36 @@ async function checkSavedSearchDm() {
         assert.strictEqual(lastText(), t("greeting"), "shadow: the greeting");
         controller.config.buyerMatches = "on";
 
-        // not searchable, then a plain text fixes it
+        // not searchable: a plain text does nothing, a reply to the prompt fixes it, a reply to the repeated prompt too
         await say(`/start s_${await cap(u3, "מחפש וסט")}`, { userId: u3 });
         assert.strictEqual((await rows(u3)).length, 0);
         assert.strictEqual(lastText(), t("alertNotSearchable"));
+        const firstAsk = promptId();
         await say("glock 17", { userId: u3 });
-        assert.strictEqual((await rows(u3)).length, 1, "plain text saves after a failed link");
+        assert.strictEqual((await rows(u3)).length, 0, "a plain text saves nothing");
+        await say("וסט", { userId: u3, replyToMessageId: firstAsk });
+        assert.strictEqual(lastText(), t("alertNotSearchable"));
+        const askedAgain = promptId();
+        await say("glock 17", { userId: u3, replyToMessageId: askedAgain });
+        assert.strictEqual((await rows(u3)).length, 1, "a reply to the repeated prompt saves");
+        assert.ok(lastText().startsWith("Alert saved"), lastText());
+        await say("glock 18", { userId: u3, replyToMessageId: promptId() });
+        assert.deepStrictEqual((await rows(u3)).map((r) => r.query), ["glock 18"], "the saved prompt's promise holds");
 
-        // saved, then plain text changes the same row, a third text goes the normal path
-        await say("glock 19", { userId: u1 });
+        // saved: a plain text leaves it alone (the owner's "patch, 120, בית דגן"), a reply changes the same row, once
+        await say(`/start s_${c1}`, { userId: u1 });
+        const savedPrompt = promptId();
+        await say("patch, 120, בית דגן", { userId: u1 });
+        assert.deepStrictEqual((await rows(u1)).map((r) => r.query), ["glock 17"], "a plain next message changes nothing");
+        await say("glock 19", { userId: u1, replyToMessageId: savedPrompt });
         const after = await rows(u1);
         assert.strictEqual(after.length, 1);
         assert.strictEqual(after[0].query, "glock 19", "same row, query changed");
         assert.strictEqual(lastText(), "Alert updated: glock 19.");
-        await say("glock 26", { userId: u1 });
+        await say("glock 26", { userId: u1, replyToMessageId: savedPrompt });
         assert.strictEqual((await rows(u1))[0].query, "glock 19", "pending was cleared");
 
-        // an open wizard draft wins over a plain text, but not over a true reply
+        // a plain text goes to an open wizard draft, a true reply to the search
         await say(`/start s_${c1}`, { userId: u1 }); // saves glock 17 again (new row)
         const pid = promptId();
         await say("/newPost", { userId: u1 });
@@ -370,10 +383,11 @@ async function checkSavedSearchDm() {
         // pending older than an hour is ignored
         await Draft.deleteMany({ userId: String(u1) });
         await say(`/start s_${await cap(u2, WANT)}`, { userId: u2 });
+        const stalePrompt = promptId();
         const realNow = Date.now;
         Date.now = () => realNow() + 2 * 3600_000;
         try {
-            await say("glock 99", { userId: u2 });
+            await say("glock 99", { userId: u2, replyToMessageId: stalePrompt });
         } finally {
             Date.now = realNow;
         }
@@ -391,21 +405,23 @@ async function checkSavedSearchDm() {
         assert.strictEqual(m4.length, 1);
         assert.strictEqual(m4[0].maxPrice, undefined, "no ceiling: it is gone");
 
-        // a stray text after saving clears the pending fix and says nothing
-        await say("תודה", { userId: u2 });
+        // a stray reply after saving clears the pending fix and says nothing
+        const m4Prompt = promptId();
+        await say("תודה", { userId: u2, replyToMessageId: m4Prompt });
         assert.ok(!sent().some((c) => String(c.params.text) === t("alertNotSearchable")), "no alertNotSearchable reply");
-        await say("glock 77", { userId: u2 });
+        await say("glock 77", { userId: u2, replyToMessageId: m4Prompt });
         assert.deepStrictEqual((await rows(u2)).map((r) => r.query), ["m4"], "the next searchable text changes nothing");
 
         // fix reply: a text that duplicates another row, and shadow mode clears the pending fix
         await say("/alerts cz 75", { userId: u2 });
         await say("/alerts mp5", { userId: u2 });
-        await say("cz 75", { userId: u2 });
+        const mp5Prompt = promptId();
+        await say("cz 75", { userId: u2, replyToMessageId: mp5Prompt });
         assert.strictEqual(lastText(), t("alertDuplicate"));
         controller.config.buyerMatches = "shadow";
-        await say("glock 98", { userId: u2 });
+        await say("glock 98", { userId: u2, replyToMessageId: mp5Prompt });
         controller.config.buyerMatches = "on";
-        await say("glock 97", { userId: u2 });
+        await say("glock 97", { userId: u2, replyToMessageId: mp5Prompt });
         assert.deepStrictEqual((await rows(u2)).map((r) => r.query).sort(), ["cz 75", "m4", "mp5"], "shadow cleared the pending fix; nothing changed");
 
         // limit
@@ -418,9 +434,10 @@ async function checkSavedSearchDm() {
         await say("/alerts glock 17", { userId: u2 });
         assert.notStrictEqual(lastText(), t("alertLimit"), "an existing query is a duplicate, not a sixth");
         const before = (await rows(u2)).map((r) => r.query);
+        const oldPrompt = promptId();
         await say("/alerts ak", { userId: u2 });
         assert.strictEqual(lastText(), t("alertLimit"));
-        await say("ak 47", { userId: u2 });
+        await say("ak 47", { userId: u2, replyToMessageId: oldPrompt });
         assert.deepStrictEqual((await rows(u2)).map((r) => r.query), before, "the limit message cleared the older pending fix");
 
         // /alerts list: own rows only, a bin per row
