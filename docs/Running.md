@@ -79,7 +79,8 @@ docker compose -f compose.test.yaml up -d --build
 
 - **Watch it:** Docker Desktop, Containers, `jsts-salebot-test`.
 - **Update:** `git pull`, then the `up -d --build` command again. Data stays.
-- **Make someone an admin:** they send `/start` to the test bot. Then in `http://localhost:8082` (`admin` / `pass`), open `SalesBotTestDemo`, `users`, and set `authLevel` to `2` (`1` for a moderator).
+- **Make someone an admin:** they send `/start` to the test bot, then an admin uses `/promote` in the bot's DM. The very first admin has no one to promote them, so use the database page.
+- **Database page on demand:** `docker compose -f compose.test.yaml --profile tools up -d mongo-express`, then `http://localhost:8082` (`admin` / `pass`): open `SalesBotTestDemo`, `users`, and set `authLevel` to `2` (`1` for a moderator). Stop it with `docker compose -f compose.test.yaml stop mongo-express`.
 - **Start over empty:** `docker compose -f compose.test.yaml down -v`.
 
 Stop this stack before using the test token any other way.
