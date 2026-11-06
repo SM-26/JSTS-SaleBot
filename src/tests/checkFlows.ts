@@ -2012,7 +2012,7 @@ async function run() {
 
                 const other = user();
                 const elsewhere = await seedCapture({ senderId: String(other), text: SALE1 });
-                await ctrl.captureNotes.onClassified({ capture: elsewhere, result: classify(SALE1, false) }, new Date());
+                await ctrl.captureNotes.onClassified({ capture: elsewhere, result: classify(SALE1, false), shadowId: "" }, new Date());
                 assert.strictEqual(ephemerals(h).length, 0);
                 assert.strictEqual((await Capture.findById(elsewhere._id))!.state, "classified");
                 console.log("  [OK] (w15) a hidden blocked URL and another chat get no note.");

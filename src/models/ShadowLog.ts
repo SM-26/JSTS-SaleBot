@@ -19,6 +19,10 @@ export interface ShadowLogRow {
     label?: "sale" | "not_sale";
     labeledBy?: string;
     labeledAt?: Date;
+    matchLabel?: "useful" | "not_useful";
+    matchLabeledBy?: string;
+    matchLabeledAt?: Date;
+    buyerNoteAt?: Date;
 }
 
 export interface IShadowLog extends Document, ShadowLogRow {}
@@ -37,6 +41,10 @@ const shadowLogSchema = new Schema<IShadowLog>({
     label: { type: String, enum: ["sale", "not_sale"] },
     labeledBy: { type: String },
     labeledAt: { type: Date },
+    matchLabel: { type: String, enum: ["useful", "not_useful"] },
+    matchLabeledBy: { type: String },
+    matchLabeledAt: { type: Date },
+    buyerNoteAt: { type: Date },
 }, { collection: "shadow_log", timestamps: false });
 
 shadowLogSchema.index({ at: 1 }, { expireAfterSeconds: 120 * 24 * 3600 });
