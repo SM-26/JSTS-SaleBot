@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased
+  - Added:
+    - **Take down and delete original post.** A group listing's take-down card has a second button (`tx_<listingId>_<d|y|n>`, moderators only) that also deletes the member's message and all its photos, after one confirm step that survives a restart. A double press acts once, the press is logged with the moderator, listing and message ids, and if Telegram refuses some deletions (48 h limit, missing right) the card says how many are left. The listing still ends and the seller is told as for a take-down. Bot listings keep the single button; a seller's Remove still never deletes anything.
+
 Unreleased - Dependency update.
   - Changed:
     - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
