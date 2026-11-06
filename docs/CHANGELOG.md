@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 Unreleased
+  - Fixed:
+    - A held catch-up offer (and a held nudge) could stay held when the seller's last capture row got the same millisecond as the hold; `hasSettledSince` now includes that instant.
   - Docs:
     - The wiki is now where the docs are read. Pages live in `docs/` and `.github/workflows/wiki.yml` copies them on every merge to master. The long README became a front page plus one page per topic, and `Agents.md` keeps the rules and links to the rest.
     - `check-docs` in `pnpm test` fails on an undocumented command or config key, a broken page link or a missing source path.

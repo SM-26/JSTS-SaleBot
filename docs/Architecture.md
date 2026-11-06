@@ -36,6 +36,8 @@ Node.js and TypeScript, `node-telegram-bot-api` v2 (a middleware chain with `Con
 | Private notes (ephemeral API) | `src/services/ephemeralNotes.ts` |
 | Callback formats | `src/controllers/callbackRoutes.ts` |
 
+The design behind the market redesign, as a record of why things are as they are, is in [`design/`](https://github.com/SM-26/JSTS-SaleBot/tree/master/design). It's history, not a guide: these wiki pages describe how the bot works today.
+
 ## Post lifecycle
 ```
 User sends /newPost (or, with config.quickListing, a photo/video/album with a caption in DM and no draft:

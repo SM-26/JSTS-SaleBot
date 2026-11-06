@@ -3232,6 +3232,14 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 1, "the sweeper delivers once the window settles, with no later message");
                     assert.strictEqual(ephemerals(h).length, 1);
                     assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 0, "never twice");
+                    // same millisecond: the hold is taken just before the capture row, so lastAt can equal heldAt
+                    const same = user();
+                    const tick = new Date(Date.now() - 600_000);
+                    await memberRepository.importCatchup(String(same), [item(93, "Mag", "Mag 30rd 50")], new Date());
+                    await memberRepository.armCatchup(new Date());
+                    await seedCapture({ senderId: String(same), chatId: APPROVED_GROUP, text: "Mag למכירה 50", state: "closed", now: tick });
+                    await memberRepository.holdCatchup(String(same), tick);
+                    assert.strictEqual(await ctrl.catchupService.releaseHeld(later), 1, "heldAt equal to lastAt still releases");
                     cfg.captureMode = "shadow";
                     const w = user();
                     await memberRepository.importCatchup(String(w), [item(92, "Vest", "Vest tactical 250")], new Date());
