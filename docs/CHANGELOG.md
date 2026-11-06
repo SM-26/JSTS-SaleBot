@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Numbered stale-check results.
+  - Changed:
+    - On a multi-item `/stalecheck` DM, each result line now starts with the item's number ("1 · Refreshed"). `lcItemResult` is a new locale string; a stale button's label must keep starting with `{i}`, which `check-routes` enforces.
 Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
   - Added:
     - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
