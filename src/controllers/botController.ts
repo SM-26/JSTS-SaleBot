@@ -360,6 +360,13 @@ export class BotController {
             return;
         }
 
+        if (route.action === "catchup") {
+            // Minimal until Task 4 replaces it with the catch-up service: answer the stale toast.
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(query.from.id)));
+            this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, "staleButton") });
+            return;
+        }
+
         if (route.action === "listing") {
             await this.groupListings.handleListingCallback(query, route.arg);
             return;

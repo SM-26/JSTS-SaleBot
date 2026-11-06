@@ -1,9 +1,9 @@
-export type StartPayload = { kind: "c" | "l"; id: string };
+export type StartPayload = { kind: "c" | "l" | "k"; id: string };
 
-// /start c_<captureId> or l_<listingId>; anything else is not ours.
+// /start c_<captureId>, l_<listingId> or k_<memberId> (catch-up); anything else is not ours.
 export function parseStartPayload(args: string): StartPayload | null {
-    const m = /^([cl])_([0-9a-f]{24})$/.exec(args.trim());
-    return m ? { kind: m[1] as "c" | "l", id: m[2] } : null;
+    const m = /^([clk])_([0-9a-f]{24})$/.exec(args.trim());
+    return m ? { kind: m[1] as "c" | "l" | "k", id: m[2] } : null;
 }
 
 export const deepLink = (botUsername: string, payload: string): string => `https://t.me/${botUsername}?start=${payload}`;

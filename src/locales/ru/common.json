@@ -191,5 +191,19 @@
     "captureModCard": "Первое объявление нового продавца: {name}\n{title} · {price}\n{link}",
     "captureExpired": "Это объявление больше недоступно. Чтобы выставить что-то, отправьте /newpost.",
     "captureDraftBusy": "У вас есть неоконченный пост. Завершите его или отправьте /cancel, затем откройте ссылку снова.",
-    "capturePublished": "Добавлено на рынок."
+    "capturePublished": "Добавлено на рынок.",
+    "catchupOfferNote": "Мы заметили, что вы недавно разместили здесь {n} объявлений. Добавить их на рынок бота?",
+    "catchupPickButton": "➕ Выбрать в боте",
+    "catchupNoThanksButton": "Нет, спасибо",
+    "catchupListTitle": "Нажмите на объявление, чтобы добавить его на рынок:",
+    "catchupAllDone": "Готово, добавлять больше нечего.",
+    "catchupNothingLeft": "Здесь больше нечего добавлять.",
+    "catchupUsage": "Использование: отправьте файл с подписью /catchup import, затем /catchup send. Просто /catchup показывает счётчики.",
+    "catchupNoFile": "Отправьте файл как документ с подписью /catchup import.",
+    "catchupBadFile": "Не удалось прочитать файл.",
+    "catchupImported": "Импортировано продавцов: {sellers}, объявлений: {items}, пропущено: {skipped}.",
+    "catchupArmed": "Подготовлено предложений: {n}. Они уйдут, когда участник в следующий раз напишет в группе.",
+    "catchupNotOptin": "Внимание: captureMode не optin, поэтому пока ничего не будет доставлено.",
+    "catchupStatus": "Догон: импортировано {imported}, готово {armed}, отправлено {sent}, ждут {items} объявлений.",
+    "helpCatchup": "/catchup - Импорт и отправка предложений догона"
 }

@@ -191,5 +191,19 @@
     "captureModCard": "New seller's first listing: {name}\n{title} · {price}\n{link}",
     "captureExpired": "This post is no longer available. To list something, send /newpost.",
     "captureDraftBusy": "You have a post in progress. Finish it or send /cancel, then open the link again.",
-    "capturePublished": "Added to the market."
+    "capturePublished": "Added to the market.",
+    "catchupOfferNote": "We saw you recently posted {n} items here. Add them to the bot's market?",
+    "catchupPickButton": "➕ Pick items in the bot",
+    "catchupNoThanksButton": "No thanks",
+    "catchupListTitle": "Tap an item to add it to the market:",
+    "catchupAllDone": "All done, nothing left to add.",
+    "catchupNothingLeft": "There is nothing to add here anymore.",
+    "catchupUsage": "Usage: send the catch-up file with the caption /catchup import, then /catchup send. /catchup alone shows counts.",
+    "catchupNoFile": "Send the catch-up file as a document with the caption /catchup import.",
+    "catchupBadFile": "Could not read the catch-up file.",
+    "catchupImported": "Imported {sellers} sellers, {items} items, {skipped} skipped.",
+    "catchupArmed": "Armed {n} offers. They go out when each member next writes in the group.",
+    "catchupNotOptin": "Heads up: captureMode is not optin, so nothing will be delivered yet.",
+    "catchupStatus": "Catch-up: {imported} imported, {armed} armed, {sent} sent, {items} items waiting.",
+    "helpCatchup": "/catchup - Import and send catch-up offers"
 }

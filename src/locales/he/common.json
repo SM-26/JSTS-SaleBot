@@ -191,5 +191,19 @@
     "captureModCard": "המודעה הראשונה של מוכר חדש: {name}\n{title} · {price}\n{link}",
     "captureExpired": "הפוסט הזה כבר לא זמין. כדי להעלות מודעה, שלחו /newpost.",
     "captureDraftBusy": "יש לכם פוסט בתהליך. סיימו אותו או שלחו /cancel, ואז פתחו את הקישור שוב.",
-    "capturePublished": "נוסף לשוק."
+    "capturePublished": "נוסף לשוק.",
+    "catchupOfferNote": "ראינו שפרסמת כאן לאחרונה {n} פריטים. להוסיף אותם לשוק של הבוט?",
+    "catchupPickButton": "➕ בחר פריטים בבוט",
+    "catchupNoThanksButton": "לא תודה",
+    "catchupListTitle": "לחצו על פריט כדי להוסיף אותו לשוק:",
+    "catchupAllDone": "הכול הושלם, אין עוד מה להוסיף.",
+    "catchupNothingLeft": "אין כאן יותר מה להוסיף.",
+    "catchupUsage": "שימוש: שלחו את קובץ ההשלמה עם הכיתוב /catchup import, ואז /catchup send. /catchup לבדו מציג ספירות.",
+    "catchupNoFile": "שלחו את קובץ ההשלמה כמסמך עם הכיתוב /catchup import.",
+    "catchupBadFile": "לא ניתן לקרוא את קובץ ההשלמה.",
+    "catchupImported": "יובאו {sellers} מוכרים, {items} פריטים, {skipped} דולגו.",
+    "catchupArmed": "הוכנו {n} הצעות. הן יישלחו כשכל חבר יכתוב בקבוצה.",
+    "catchupNotOptin": "שימו לב: captureMode אינו optin, ולכן עדיין לא יישלח דבר.",
+    "catchupStatus": "השלמה: {imported} יובאו, {armed} מוכנים, {sent} נשלחו, {items} פריטים ממתינים.",
+    "helpCatchup": "/catchup - ייבוא ושליחת הצעות השלמה"
 }

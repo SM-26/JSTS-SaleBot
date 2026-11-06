@@ -119,7 +119,7 @@ export function buildHelpMessage(
         message
             .divider()
             .heading(heading("helpAdminSection"), 3)
-            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel"]));
+            .list(items(["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpCatchup"]));
     }
 
     return message.build();
