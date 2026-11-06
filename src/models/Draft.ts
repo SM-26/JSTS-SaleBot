@@ -29,6 +29,8 @@ export interface IDraft extends Document {
     collecting?: boolean;
     mediaGroupId?: string;
     caption?: string;
+    // A caption-less photo waits for its text until this time (quickListing); gone once the text arrives or the time passes.
+    awaitText?: Date;
     startedAt: Date;
     updatedAt: Date;
 }
@@ -57,6 +59,7 @@ const draftSchema = new Schema<IDraft>({
     collecting: { type: Boolean },
     mediaGroupId: { type: String },
     caption: { type: String },
+    awaitText: { type: Date },
     startedAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true },
 }, { timestamps: false });

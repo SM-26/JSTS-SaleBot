@@ -2,7 +2,7 @@ import assert from "assert";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Listing from "../models/Listing";
-import { QUICK_ALBUM_DELAY_MS } from "../services/wizardService";
+import { QUICK_ALBUM_DELAY_MS, QUICK_TEXT_WINDOW_MS } from "../services/wizardService";
 import { FAQ_PADDING } from "../services/faqService";
 import { displayQuery } from "../services/buyerCards";
 import { parseQuery } from "../services/matchService";
@@ -577,7 +577,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             await h.sendPhoto("lonely", { userId: u2 });
             await settle();
             assert.deepStrictEqual(outbound(h).map(text), [T("quickPhotoHint")]);
-            assert.strictEqual(await draftOf(u2), null);
+            assert.ok((await draftOf(u2))!.awaitText, "the photo waits for its text, no more");
             console.log("  [OK] (k16) a late album item grows the media and redraws the preview; text and a bare photo create nothing.");
         }
 
@@ -621,7 +621,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             await album(h, u, `n${u}`, -1, "");
             await waitTimer();
             assert.strictEqual(outbound(h).length, 0, "no message");
-            assert.strictEqual(await draftOf(u), null, "no draft");
+            assert.ok((await draftOf(u))!.awaitText && !(await draftOf(u))!.title, "only a draft waiting for its text");
 
             const w = user();
             await h.message(photo("w0"), { userId: w, mediaGroupId: `w${w}`, caption: "מחפש nomatchzz78" });
@@ -631,7 +631,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             await h.message(photo("w1"), { userId: w, mediaGroupId: `w${w}` });
             await waitTimer();
             assert.strictEqual(outbound(h).length, 0, "a straggler says nothing");
-            assert.strictEqual(await draftOf(w), null);
+            assert.ok(!(await draftOf(w))?.title, "a straggler holds no listing");
             console.log("  [OK] (k19) a caption-less album or a straggler item leaves no draft and no message.");
         }
 
@@ -774,12 +774,11 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             await h.sendPhoto("bare1", { userId: u });
             await settle();
             assert.deepStrictEqual(sent(h).map(text), [T("quickPhotoHint")]);
-            assert.strictEqual(await draftOf(u), null);
+            assert.ok((await draftOf(u))!.awaitText);
             h.calls.length = 0;
             await h.sendPhoto("late1", { userId: u, mediaGroupId: "k27" });
             await waitTimer();
             assert.strictEqual(outbound(h).length, 0, "an album item stays silent");
-            assert.strictEqual(await draftOf(u), null);
             cfg.quickListing = false;
             await h.sendPhoto("bare2", { userId: u });
             await settle();
@@ -857,6 +856,156 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             assert.deepStrictEqual(toasts(h), [T("listingRefreshedToast")]);
             assert.strictEqual(previews(h).length, 0);
             console.log("  [OK] (k30) a refused photo costs that post its picture only: text with buttons, next post, Relist.");
+        }
+
+        // (k31) a caption-less photo, then its text: one quick draft; the hint went out at once
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendPhoto("pt1", { userId: u });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("quickPhotoHint")], "the hint at once");
+            const waiting = (await draftOf(u))!;
+            assert.ok(waiting.awaitText && waiting.awaitText.getTime() - Date.now() <= QUICK_TEXT_WINDOW_MS && waiting.awaitText.getTime() > Date.now());
+            h.calls.length = 0;
+            await h.sendText("Glock 17 900₪ חיפה", { userId: u });
+            await settle();
+            assert.strictEqual(previews(h).length, 1, "one preview");
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.title, d.price, d.media.length, d.awaitText], ["confirm", "Glock 17", "900", 1, undefined]);
+            h.calls.length = 0;
+            await h.sendText("another text", { userId: u });
+            await settle();
+            assert.strictEqual(outbound(h).length, 0, "a second text is nothing");
+            assert.strictEqual(await Draft.countDocuments({ userId: String(u) }), 1);
+            console.log("  [OK] (k31) a photo then its text join into one quick draft; the hint is not held back.");
+        }
+
+        // (k32) restart between the photo and its text
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendPhoto("pt2", { userId: u });
+            await settle();
+            const { h: h2 } = boot();
+            await h2.sendText("Glock 19 700₪", { userId: u });
+            await settle();
+            assert.strictEqual(previews(h2).length, 1, "the new controller finishes it");
+            assert.strictEqual((await draftOf(u))!.title, "Glock 19");
+            console.log("  [OK] (k32) a restart between photo and text loses nothing.");
+        }
+
+        // (k33) forwarded photo and text; an album then its text (while collecting, and after)
+        {
+            const { h } = boot();
+            const u = user();
+            const forwardOrigin = { type: "hidden_user", date: 1, sender_user_name: "Seller" };
+            await h.message(photo("f1"), { userId: u, forwardOrigin });
+            await settle();
+            await h.sendText("M4 1,200 ₪ חיפה", { userId: u, forwardOrigin });
+            await settle();
+            assert.strictEqual(previews(h).length, 1, "forward: one preview");
+            assert.strictEqual((await draftOf(u))!.price, "1200");
+
+            const a = user();
+            h.calls.length = 0;
+            await album(h, a, `ga${a}`, -1, "");
+            await h.sendText("M4 1,200 ₪ חיפה", { userId: a });
+            await waitTimer();
+            assert.strictEqual(previews(h).length, 1, "album, text at once: one preview");
+            assert.strictEqual((await draftOf(a))!.media.length, 3);
+
+            const b = user();
+            h.calls.length = 0;
+            await album(h, b, `gb${b}`, -1, "");
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "the bare album is silent");
+            await h.sendText("M4 1,200 ₪ חיפה", { userId: b });
+            await settle();
+            assert.strictEqual(previews(h).length, 1, "album, text after: one preview");
+            assert.strictEqual((await draftOf(b))!.media.length, 3);
+            console.log("  [OK] (k33) a forwarded photo and text, and an album then text, each give one draft.");
+        }
+
+        // (k34) no photo, no draft; a late text; a photo with no text; a new photo restarts the wait
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("Glock 17 900₪", { userId: u });
+            await settle();
+            assert.strictEqual(outbound(h).length, 0);
+            assert.strictEqual(await Draft.countDocuments({ userId: String(u) }), 0, "text alone starts nothing");
+
+            await h.sendPhoto("late", { userId: u });
+            await settle();
+            h.calls.length = 0;
+            await Draft.updateOne({ userId: String(u) }, { awaitText: new Date(Date.now() - 1000) });
+            await h.sendText("Glock 17 900₪", { userId: u });
+            await settle();
+            assert.strictEqual(outbound(h).length, 0, "past the window the text is nothing");
+            assert.strictEqual(await Draft.countDocuments({ userId: String(u) }), 0, "and the photo is gone");
+
+            await h.sendPhoto("p-a", { userId: u });
+            await h.sendPhoto("p-b", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual(d.media.map((m) => m.fileId), ["p-b"], "a new photo restarts the wait");
+            assert.strictEqual(previews(h).length, 0, "a photo with no text gets the hint only");
+
+            // /newpost right after a bare photo is the wizard, not Continue / Start over
+            h.calls.length = 0;
+            await h.sendText("/newpost", { userId: u });
+            await settle();
+            assert.ok(text(sent(h)[0]).startsWith(T("welcome")));
+            // key off: nothing waits
+            const w = user();
+            cfg.quickListing = false;
+            await h.sendPhoto("off1", { userId: w });
+            cfg.quickListing = true;
+            assert.strictEqual(await Draft.countDocuments({ userId: String(w) }), 0);
+            console.log("  [OK] (k34) text alone starts nothing, a late text is nothing, /newpost ignores the wait, key off holds no photo.");
+        }
+
+        // (k35) the wizard's own media step still takes photos; a WTB text after a photo is a buyer reply
+        {
+            const { h } = boot();
+            const u = user();
+            await toLocation(h, u);
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            await h.sendPhoto("w1", { userId: u });
+            await h.sendPhoto("w2", { userId: u });
+            await settle();
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.media.length, d.awaitText], ["media", 2, undefined]);
+
+            const b = user();
+            await h.sendPhoto("wtb1", { userId: b });
+            h.calls.length = 0;
+            await h.sendText("מחפש nomatchzz78", { userId: b });
+            await settle();
+            assert.strictEqual(sent(h).length, 1, "the buyer reply");
+            assert.strictEqual(await Draft.countDocuments({ userId: String(b) }), 0);
+            console.log("  [OK] (k35) the wizard media step is untouched; a wanted text after a photo is a buyer reply, no draft.");
+        }
+
+        // (k36) real captions: lone opener line, a price inside a sentence, an area line
+        {
+            const { h } = boot();
+            const u = user();
+            const sentence = "ללא פנס וכוונת שבתמונה ימכר 3500 ₪ 🤯";
+            await single(h, u, `למכירה,\nColt m4 DD RIS 2 14.5”\n${sentence}\nאזור אש העין`);
+            await settle();
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.title, d.price, d.location, d.description], ["Colt m4 DD RIS 2 14.5”", "3500", "אש העין", sentence]);
+
+            const v = user();
+            await single(h, v, "למכירה: Glock 17 Gen3 with two spare magazines, holster, light and a case 900₪", "s36");
+            await settle();
+            const e = (await draftOf(v))!;
+            assert.ok(!e.title!.startsWith("למכירה"));
+            assert.ok(`${e.title} ${e.description ?? ""}`.includes("holster, light and a case"), "no text lost after a dropped opener");
+            console.log("  [OK] (k36) a lone opener line, a price inside a sentence and an area line parse into the draft.");
         }
     } finally {
         cfg.quickListing = wasQuick;

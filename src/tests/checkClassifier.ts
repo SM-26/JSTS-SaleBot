@@ -42,6 +42,11 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["leading למכירה: is dropped", "למכירה: כוונת Holosun, 450₪", true, "strict", { title: "כוונת Holosun" }],
     ["location with ה and אזור goes", "M4 למכירה 900₪ אזור המרכז", true, "strict", { title: "M4 למכירה", location: "מרכז" }],
     ["long title cut at a word", "למכירה " + "מילה ".repeat(30) + "500₪", true, "strict", { title: "למכירה " + "מילה ".repeat(10).trim() }],
+    // real posts
+    ["lone opener line: next line is the title, area line is the location", "למכירה,\nColt m4 DD RIS 2 14.5”\nמחיר 3500 ₪\nאזור אש העין", true, "strict", { title: "Colt m4 DD RIS 2 14.5”", priceValue: 3500, location: "אש העין", description: "מחיר 3500 ₪" }],
+    ["a size with a decimal is not a price", "למכירה\nבריח 14.5 מ", true, "none", { priceValue: undefined }],
+    ["price in a sentence stays in the description", "Colt m4\nללא פנס וכוונת שבתמונה ימכר 3500 ₪ 🤯", true, "ask", { title: "Colt m4", price: "3500 ₪", priceValue: 3500, description: "ללא פנס וכוונת שבתמונה ימכר 3500 ₪ 🤯" }],
+    ["area line as written, any place", "M4 900₪\nאזור: נווה זוהר.", true, "ask", { location: "נווה זוהר", description: undefined }],
 ];
 
 let failed = 0;

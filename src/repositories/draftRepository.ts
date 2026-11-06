@@ -1,14 +1,14 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
 import type { IMediaItem } from "../models/Post";
 
-export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing" | "meetup" | "caption">>;
+export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing" | "meetup" | "caption" | "awaitText">>;
 
 /** `timeOut` is minutes from config.json; 0 (or less) means drafts never expire. */
 export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes: number, now = Date.now()): boolean {
     return timeOutMinutes > 0 && draft.updatedAt.getTime() + timeOutMinutes * 60_000 < now;
 }
 
-const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1, meetup: 1, quick: 1, collecting: 1, mediaGroupId: 1, caption: 1 };
+const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1, meetup: 1, quick: 1, collecting: 1, mediaGroupId: 1, caption: 1, awaitText: 1 };
 
 export type CaptureDraftInput = {
     userId: string;
@@ -25,8 +25,34 @@ export type CaptureDraftInput = {
 };
 
 class DraftRepository {
-    findByUserId(userId: string) {
-        return Draft.findOne({ userId }).exec();
+    // A photo that waited for its text past the window is no draft: dropped on sight.
+    async findByUserId(userId: string) {
+        const draft = await Draft.findOne({ userId }).exec();
+        if (draft?.awaitText && draft.awaitText.getTime() <= Date.now()) {
+            await Draft.deleteOne({ userId, awaitText: draft.awaitText }).exec();
+            return null;
+        }
+        return draft;
+    }
+
+    // A caption-less photo with no draft yet: it waits for its text. Never touches an existing draft.
+    startAwaitingText(input: { userId: string; chatId: number; locale: string; item: IMediaItem; until: Date }) {
+        const { userId, chatId, locale, item, until } = input;
+        const now = new Date();
+        return Draft.findOneAndUpdate(
+            { userId },
+            { $setOnInsert: { chatId, locale, step: "media", quick: true, promptMessageId: 0, media: [item], awaitText: until, startedAt: now, updatedAt: now } },
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: false }
+        ).exec();
+    }
+
+    // The text that arrived in time becomes the caption; exactly one caller gets the draft.
+    claimAwaitText(userId: string, caption: string) {
+        return Draft.findOneAndUpdate(
+            { userId, awaitText: { $gt: new Date() } },
+            { $set: { caption, updatedAt: new Date() }, $unset: { awaitText: 1 } },
+            { returnDocument: "after" }
+        ).exec();
     }
 
     // Replaces any existing draft: one per user (unique index on userId).

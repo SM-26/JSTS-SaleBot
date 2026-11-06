@@ -70,10 +70,27 @@ export function tokens(text: string): string[] {
 const unitRe = new RegExp("^\\s*(?:" + data.units.map(escapeRe).join("|") + ")(?![\\p{L}])", "iu");
 const tradeWords = data.tradeWords.map(normalize).map(p => phraseRe(p));
 const shekelWords = data.shekelWords.map(normalize).map(p => phraseRe(p));
+// a first line that is only an opener ("למכירה,") is not the title
+const LONE_LEAD = new Set(["למכירה", "להחלפה", "לטרייד", "טרייד", "החלפה"]);
+/** Index of the line that carries the title: the first non-empty line that is not just an opener. */
+export function titleLineIndex(text: string): number {
+    const lines = text.split("\n");
+    const i = lines.findIndex(l => { const n = normalize(l); return n && !LONE_LEAD.has(n); });
+    return i < 0 ? 0 : i;
+}
+// "אזור <place>" alone on a line: the place, as the seller wrote it
+const AREA_LINE = /^\s*(?:אזור|איזור)\s*:?\s*(\S[^\n]{0,39}?)\s*[.,;!]*\s*$/u;
 const LEAD = /^(?:לטרייד|להחלפה|טרייד|החלפה|למכירה)\s*[:\-–]\s*/u;
 const FOLD_BACK: Record<string, string> = { כ: "[כך]", מ: "[מם]", נ: "[נן]", פ: "[פף]", צ: "[צץ]" };
 // the city as written in the raw text (final letters either way), with its prefix letter and a leading "אזור"
 const cityTitleRes = new Map(data.cities.map(c => [c, new RegExp("(?:אזור\\s+)?(?<![\\p{L}\\p{N}])[בלמה]?" + normalize(c).split("").map(ch => FOLD_BACK[ch] ?? (ch === " " ? "\\s+" : escapeRe(ch))).join("") + "(?![\\p{L}\\p{N}])", "u")]));
+
+/** The title line without its price: location (with its ה/אזור), stray punctuation and a leading opener gone. Not cut yet. */
+export function cleanTitleLine(line: string, location?: string): string {
+    const re = location ? cityTitleRes.get(location) : undefined;
+    return (re ? line.replace(re, " ") : line).replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/([,.;:])(?:\s*[,;:])+/g, "$1")
+        .replace(/^[\s,.\-–:;]+|[\s,.\-–:;]+$/g, "").replace(LEAD, "");
+}
 
 const NUM = "\\d{1,3}(?:,\\d{3})+|\\d+";
 const NUM2 = "\\d{1,3}(?:,\\d{3})+|\\d{2,}"; // ב / bare prices need 2+ digits
@@ -84,7 +101,7 @@ const explicitRes = [
     new RegExp(`מחיר\\s*:?\\s*(?:${NUM})(?!\\d)`, "gu"),
     new RegExp(`(?<![\\p{L}\\d])ב-?(?:${NUM2})(?!\\d)`, "gu"),
 ];
-const bareRe = /(?<![\d,.])(?:\d{1,3}(?:,\d{3})+|\d{2,6})(?!\d)/gu;
+const bareRe = /(?<![\d,.])(?:\d{1,3}(?:,\d{3})+|\d{2,6})(?!\d|\.\d)/gu; // "14.5" is a size, not a price
 
 interface PriceMatch { str: string; value: number; index: number; rule: string }
 
@@ -114,18 +131,25 @@ export const phoneRe = /(?<![\d,.])(?:0\d{1,2}-?\d{7}|\d{9,10})(?!\d)/gu;
 function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed {
     // ponytail: bare numbers are noisy ("glock 17 ... 900"), so the largest wins
     const price = explicit.length ? explicit[0] : bare.reduce<PriceMatch | undefined>((best, m) => (!best || m.value > best.value ? m : best), undefined);
-    const [first = "", ...rest] = text.split("\n");
+    const lines = text.split("\n");
+    const ti = titleLineIndex(text);
+    const first = lines[ti] ?? "";
+    const offset = lines.slice(0, ti).reduce((n, l) => n + l.length + 1, 0);
+    let rest = lines.slice(ti + 1);
 
     const norm = normalize(text);
     const found = cities.map(c => ({ city: c.city, at: norm.search(c.re) })).filter(c => c.at >= 0).sort((x, y) => x.at - y.at)[0];
-    const location = found?.city;
+    // an "אזור <place>" line names any place, as written; else the known cities
+    const areaAt = rest.findIndex(l => AREA_LINE.test(l));
+    const area = areaAt >= 0 ? AREA_LINE.exec(rest[areaAt])![1] : undefined;
+    if (areaAt >= 0) rest = rest.filter((_, i) => i !== areaAt);
+    const location = area ?? found?.city;
 
     // ponytail: trade = keyword and no shekel word anywhere; a trade post's number is not a price
     const trade = tradeWords.some(re => re.test(norm)) && !shekelWords.some(re => re.test(norm)) && !text.includes("₪");
-    let title = price && !trade && price.index < first.length ? first.slice(0, price.index) + " " + first.slice(price.index + price.str.length) : first;
-    if (location) title = title.replace(cityTitleRes.get(location)!, " ");
-    title = title.replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/([,.;:])(?:\s*[,;:])+/g, "$1")
-        .replace(/^[\s,.\-–:;]+|[\s,.\-–:;]+$/g, "").replace(LEAD, "");
+    const at = price ? price.index - offset : -1;
+    let title = price && !trade && at >= 0 && at < first.length ? first.slice(0, at) + " " + first.slice(at + price.str.length) : first;
+    title = cleanTitleLine(title, area ? undefined : location);
     if (title.length > 60) { // cut at a word, not in the middle of one
         const cut = title.slice(0, 60);
         title = cut.slice(0, title[60] !== " " && cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : 60).replace(/[\s,.\-–:;]+$/g, "");

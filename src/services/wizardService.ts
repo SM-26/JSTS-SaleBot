@@ -17,7 +17,7 @@ import captureRepository from "../repositories/captureRepository";
 import { isApiError } from "../config/telegramErrors";
 import { isMeetupLocation } from "./meetup";
 import { findBlockedField, findBlockedWord, withLinkUrls, BlockedFieldName } from "./blockedWords";
-import { classify, normalize } from "./classifier";
+import { classify, cleanTitleLine, normalize, titleLineIndex } from "./classifier";
 import { isSearchable, matchListings, parseQuery } from "./matchService";
 import { buildDmMatches, displayQuery } from "./buyerCards";
 import { listingLines } from "./buyerNoteService";
@@ -31,6 +31,8 @@ const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editPrice
 const TOTAL_STEPS = 5;
 /** How long after the last album item the quick draft is finished (an album arrives as separate updates). */
 export const QUICK_ALBUM_DELAY_MS = 1500;
+/** How long a caption-less photo waits for its text, sent as a separate message right after it. */
+export const QUICK_TEXT_WINDOW_MS = 15_000;
 const PROMPTS: Record<TextStep | "media", { key: string; index: number }> = {
     title: { key: "welcome", index: 1 },
     description: { key: "enterDescription", index: 2 },
@@ -72,18 +74,31 @@ function removeCity(line: string, city: string): string {
     return line;
 }
 
+// A line left with no words (or only a "price:" label) once the price is out of it.
+const isEmptyLine = (s: string): boolean => !normalize(s) || FIELD_LABEL_ONLY.test(s.replace(/^[\s,\-–:;.]+|[\s,\-–:;.]+$/g, ""));
+
 // What a caption says beyond the title, price and location it was parsed into; undefined when nothing is left.
+// A sentence that merely holds the price stays whole; only a line that is nothing but the price goes.
 function quickDescription(caption: string, title: string | undefined, price: string | undefined, location: string | undefined): string | undefined {
     const priceRe = price && new RegExp(`(?<![\\d,.])${price.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`, "u");
-    const [first = "", ...rest] = (priceRe ? caption.replace(priceRe, " ") : caption).split("\n");
-    // The title is cut at 60 characters: what the cut left of its line (from a whole word) stays, the rest is the title.
+    const original = caption.split("\n").slice(titleLineIndex(caption));
+    const [firstRaw = "", ...restRaw] = original;
+    const first = priceRe ? firstRaw.replace(priceRe, " ") : firstRaw;
+    // The title is cut at 60 characters: what the cut left of its (cleaned) line stays, the rest is the title.
     const flat = first.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
-    const cut = title && flat.startsWith(title) ? title.length : flat.length;
-    const tail = /\S/.test(flat[cut - 1] ?? "") && /\S/.test(flat[cut] ?? "") ? flat.slice(flat.lastIndexOf(" ", cut) + 1) : flat.slice(cut);
-    const original = caption.split("\n");
-    const lines = [tail, ...rest].flatMap((raw, i) => {
+    const full = cleanTitleLine(first, location);
+    const base = title && full.startsWith(title) ? full : flat;
+    const cut = title && base.startsWith(title) ? title.length : base.length;
+    const tail = /\S/.test(base[cut - 1] ?? "") && /\S/.test(base[cut] ?? "") ? base.slice(base.lastIndexOf(" ", cut) + 1) : base.slice(cut);
+    const lines = [tail, ...restRaw].flatMap((raw, i) => {
+        const fromRest = i > 0;
+        if (fromRest && priceRe && priceRe.test(raw)) {
+            const left = raw.replace(priceRe, " ");
+            if (isEmptyLine(location ? removeCity(left, location) : left)) return [];
+        }
         const line = location ? removeCity(raw, location) : raw;
-        if (line === original[i]) return [line]; // untouched: as the seller wrote it
+        if (fromRest && line === raw) return [line]; // untouched: as the seller wrote it
+        if (!fromRest && line === original[0]) return [line];
         const clean = line.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
         return normalize(clean) && !FIELD_LABEL_ONLY.test(clean) ? [clean] : [];
     });
@@ -255,7 +270,7 @@ export class WizardService {
             const from = msg.from!;
             console.info("[INFO - WizardService.handleNewPost]", { userId: from.id, chatId: msg.chat.id });
             const draft = await draftRepository.findByUserId(String(from.id));
-            if (draft && !isDraftExpired(draft, this.config.timeOut)) {
+            if (draft && !draft.awaitText && !isDraftExpired(draft, this.config.timeOut)) {
                 const sent = await this.api.sendMessage({
                     chat_id: msg.chat.id,
                     text: this.t(draft.locale, "draftInProgress"),
@@ -295,7 +310,7 @@ export class WizardService {
             if (capture.state === "added") return say("captureAlreadyAdded");
             if (capture.state !== "classified" && capture.state !== "asked") return say("captureExpired");
             const existing = await draftRepository.findByUserId(userId);
-            if (existing && !isDraftExpired(existing, this.config.timeOut)) return say("captureDraftBusy");
+            if (existing && !existing.awaitText && !isDraftExpired(existing, this.config.timeOut)) return say("captureDraftBusy");
 
             const parsed: Partial<Parsed> = capture.parsed ?? {};
             const step: DraftStep = !parsed.title ? "title" : !parsed.price ? "price" : "confirm";
@@ -340,6 +355,8 @@ export class WizardService {
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
         // A single photo with no caption: a hint, no draft. An album item stays silent, it can be a late one.
         if (!this.isQuickMessage(msg)) {
+            // The photo waits in the draft for its text; the hint goes out at once.
+            if (!msg.media_group_id) await draftRepository.startAwaitingText({ userId, chatId: msg.chat.id, locale, item, until: new Date(Date.now() + QUICK_TEXT_WINDOW_MS) });
             await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickPhotoHint") });
             return true;
         }
@@ -370,9 +387,10 @@ export class WizardService {
     // Reads the caption of a claimed draft and asks only for what is missing.
     private async parseQuick(draft: IDraft, from: TelegramUser): Promise<void> {
         const userId = draft.userId;
-        // No caption came with the album (a straggler after a WTB reply, /cancel or Confirm): say nothing.
+        // No caption came with the album: say nothing and wait for its text (a forward sends it as a separate message).
+        // A straggler after a WTB reply, /cancel or Confirm waits the same way, and the wait just runs out.
         if (!draft.caption?.trim()) {
-            await draftRepository.delete(userId);
+            await draftRepository.update(userId, { awaitText: new Date(Date.now() + QUICK_TEXT_WINDOW_MS) });
             return;
         }
         const { tier, rules, parsed } = classify(draft.caption, draft.media.length > 0);
@@ -381,7 +399,7 @@ export class WizardService {
             await this.replyAsBuyer(draft, draft.caption);
             return;
         }
-        const firstLine = draft.caption.split("\n")[0];
+        const firstLine = draft.caption.split("\n")[titleLineIndex(draft.caption)];
         // A bare number under 100 is a model number ("Glock 17"), not a price: the first line is the title.
         const modelNumber = rules.includes("price-bare") && (parsed.priceValue ?? 0) < 100;
         const title = modelNumber ? firstLine.replace(/\s+/g, " ").trim().slice(0, 60).trim() || undefined : parsed.title;
@@ -422,7 +440,7 @@ export class WizardService {
     handleSell(msg: Message): Promise<boolean> {
         return this.safe("handleSell", msg.chat.id, async () => {
             const draft = await draftRepository.findByUserId(String(msg.from!.id));
-            if (!this.quickOn() || (draft && !isDraftExpired(draft, this.config.timeOut))) return this.handleNewPost(msg);
+            if (!this.quickOn() || (draft && !draft.awaitText && !isDraftExpired(draft, this.config.timeOut))) return this.handleNewPost(msg);
             const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
             await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickSellHint") });
             return true;
@@ -456,6 +474,24 @@ export class WizardService {
             }
 
             const item = this.mediaItem(msg);
+            // A caption-less photo is waiting for its text: this text is the caption. Anything else starts over.
+            if (draft.awaitText && this.quickOn()) {
+                if (msg.text && !msg.reply_to_message) {
+                    const joined = await draftRepository.claimAwaitText(draft.userId, msg.text);
+                    if (joined) await this.parseQuick(joined, msg.from);
+                    return true;
+                }
+                if (item && !(msg.media_group_id && msg.media_group_id === draft.mediaGroupId)) {
+                    await draftRepository.deleteIfUnchanged(draft);
+                    return this.quickStart(msg);
+                }
+            }
+            // An album still being collected, then its text: the text is the caption.
+            if (draft.collecting && !item && msg.text && !msg.reply_to_message && !draft.caption) {
+                await draftRepository.update(draft.userId, { caption: msg.text });
+                this.scheduleFinish(draft.userId, msg.from);
+                return true;
+            }
             if (draft.collecting && item) {
                 await draftRepository.collectQuick({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, item, caption: msg.caption, mediaGroupId: msg.media_group_id });
                 this.scheduleFinish(draft.userId, msg.from);
