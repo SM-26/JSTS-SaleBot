@@ -4,7 +4,7 @@ import User from "../models/User";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import { AuthLevel } from "../types";
-import { createHarness, BOT_USERNAME, RecordedCall } from "./harness";
+import { createHarness, idle, BOT_USERNAME, RecordedCall } from "./harness";
 
 // Schema compatibility of a restored PRODUCTION dump with the new code (issue
 // #84, phase 8a). Gated on DUMP_MONGO_URI, so it never runs in CI or in
@@ -19,8 +19,7 @@ const DUMP_MONGO_URI = process.env.DUMP_MONGO_URI;
 
 type Raw = Record<string, unknown>;
 const say = (line = "") => process.stdout.write(line + "\n");
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const settle = () => sleep(30); // fire-and-forget API calls land a tick after the chain returns
+const settle = () => idle(); // fire-and-forget API calls land a tick after the chain returns
 const redact = (s: string) => s.replace(/\d{6,}/g, "<n>").slice(0, 160);
 
 const problems: string[] = [];

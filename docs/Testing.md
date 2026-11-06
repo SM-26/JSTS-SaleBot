@@ -3,7 +3,7 @@
 ```bash
 pnpm run lint            # ESLint
 pnpm run build           # tsc type check
-pnpm test                # every check below, in this order
+pnpm test                # every check below, in parallel (src/tests/runAll.ts)
 ```
 
 The checks need a `config.json` (`cp config.json.example config.json`).
@@ -34,6 +34,15 @@ The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a g
 docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2
 MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test
 ```
+
+## How `pnpm test` runs
+
+`src/tests/runAll.ts` starts the scripts in parallel and prints each one's output as a single block when it finishes, then a summary. It exits non-zero if any script failed, and lists the scripts that printed `[SKIP]`. Run one script alone with `pnpm run check-<name>`.
+
+- **One database per script.** Each script gets `MONGO_URI` with its own database name (`SalesBotTestDB_flows`, ...), so a script that wipes collections only wipes its own. A single script run by hand uses the `MONGO_URI` as given.
+- **`check-routes` runs alone, last.** The `/config` command writes `config.json` (the script restores it), and every other script reads that file at import.
+- **No fixed sleeps after an update.** The harness (`src/tests/harness.ts`) counts outstanding updates, fake Telegram calls and MongoDB commands, and `idle()` returns once none is left. Use it instead of `sleep(n)` before asserting that something did or did not happen. It does not see timers the code schedules on purpose (the quick-listing album delay): wait for those explicitly, then `idle()`.
+- CI sets `TS_NODE_TRANSPILE_ONLY=true` for the test step only; `pnpm run build` already type-checks `src/tests`.
 
 ## `check-docs`
 

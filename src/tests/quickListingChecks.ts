@@ -7,7 +7,7 @@ import { FAQ_PADDING } from "../services/faqService";
 import { displayQuery } from "../services/buyerCards";
 import { parseQuery } from "../services/matchService";
 import { seedCapture } from "./fixtures";
-import { createHarness, RecordedCall, HarnessOptions } from "./harness";
+import { createHarness, idle, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
 // quickListing (slice 5): field-edit buttons and the Beit Dagan toggle on the wizard, run from
@@ -43,7 +43,8 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
     const wasMin = cfg.minimumPhotos;
     const wasMatches = cfg.buyerMatches;
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-    const waitTimer = () => sleep(QUICK_ALBUM_DELAY_MS + 200);
+    // The album timer was armed before this sleep started, so it has fired when the sleep ends; idle() then proves its work is done.
+    const waitTimer = async () => { await sleep(QUICK_ALBUM_DELAY_MS); await idle(); };
     const photo = (id: string) => ({ photo: [{ file_id: id, file_unique_id: id, width: 10, height: 10 }] });
     const outbound = (h: H) => h.calls.filter((c) => c.method !== "getMe");
     const previews = (h: H) => h.calls.filter((c) => c.method === "sendRichMessage");

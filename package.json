@@ -28,7 +28,7 @@
     "check-tiers": "ts-node src/tests/checkTiers.ts",
     "check-docs": "ts-node src/tests/checkDocs.ts",
     "lint": "eslint .",
-    "test": "pnpm run check-locals && pnpm run check-config && pnpm run check-classifier && pnpm run check-catchup && pnpm run check-claim && pnpm run check-polling && pnpm run check-callbacks && pnpm run check-cards && pnpm run check-platform && pnpm run check-store && pnpm run check-routes && pnpm run check-flows && pnpm run check-market && pnpm run check-buyer && pnpm run check-tiers && pnpm run check-rich && pnpm run check-docs && echo \"Tests passed\""
+    "test": "ts-node src/tests/runAll.ts"
   },
   "repository": {
     "type": "git",

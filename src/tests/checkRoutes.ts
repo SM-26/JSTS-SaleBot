@@ -10,7 +10,7 @@ import Member from "../models/Member";
 import Listing from "../models/Listing";
 import ShadowLog from "../models/ShadowLog";
 import { TEST_CASES } from "./testCases";
-import { createHarness, BOT_USERNAME } from "./harness";
+import { createHarness, idle, BOT_USERNAME } from "./harness";
 import { seedCapture } from "./fixtures";
 import { AuthLevel, BotConfig } from "../types";
 import type { Message } from "node-telegram-bot-api/types";
@@ -34,8 +34,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<bool
     return condition();
 }
 
-// Handlers are awaited, but their fire-and-forget API calls land a tick later.
-const QUIET_MS = 300;
+// Handlers are awaited, but their fire-and-forget API calls land a tick later: idle() waits until none is outstanding.
 
 async function run() {
     if (!MONGO_URI) {
@@ -68,12 +67,12 @@ async function run() {
         h.calls.length = 0;
         await send();
         assert.ok(await waitFor(() => h.calls.length > 0), `${label} should produce an API call`);
-        await sleep(QUIET_MS); // let multi-message handlers finish before the next case
+        await idle(); // let multi-message handlers finish before the next case
     };
     const expectSilence = async (label: string, send: () => Promise<void>) => {
         h.calls.length = 0;
         await send();
-        await sleep(QUIET_MS);
+        await idle();
         assert.strictEqual(h.calls.length, 0, `${label} must produce no API calls, got ${JSON.stringify(h.calls)}`);
     };
 
@@ -321,7 +320,7 @@ async function run() {
         h.calls.length = 0;
         await h.sendText("/NewPost", { userId });
         assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")), "/NewPost must send the first prompt");
-        await sleep(QUIET_MS);
+        await idle();
         assert.strictEqual(h.calls.filter((c) => c.method === "sendMessage").length, 1, "only the first prompt so far");
         assert.strictEqual((await Draft.findOne({ userId: String(userId) }))?.step, "title", "the draft is in Mongo");
 
@@ -381,7 +380,7 @@ async function run() {
         await h.sendText("is it available?", { ...group, userId: senderBase + 13, messageThreadId: 11, isTopicMessage: true, replyToMessageId: approvedMessageId });
         assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === userId)), "the post's author is notified of the reply");
         assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + 13) }), 0, "a reply to a post is not captured");
-        await sleep(QUIET_MS);
+        await idle();
         live.approvedTopicId = 1;
 
         // Critical regression (prod): in the General topic (approvedTopicId 1) a reply to a bot post carries
@@ -396,7 +395,7 @@ async function run() {
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage" && Number(c.params.chat_id) === userId)),
                 `topic 1 reply-thread reply notifies the author (captureMode ${mode ?? "off"})`);
             assert.strictEqual(await Capture.countDocuments({ senderId: String(senderBase + offset) }), 0, "a reply-thread reply is not captured");
-            await sleep(QUIET_MS);
+            await idle();
         }
         live.captureMode = "shadow";
 
@@ -467,7 +466,7 @@ async function run() {
                 h.calls.length = 0;
                 await h.pressButton(data, opts);
                 assert.ok(await waitFor(() => h.calls.some((c) => c.method === "answerCallbackQuery")), `${data} is answered`);
-                await sleep(QUIET_MS);
+                await idle();
                 assert.strictEqual(h.calls.filter((c) => c.method === "answerCallbackQuery").length, 1, "exactly one answer");
                 return {
                     toast: String(h.calls.find((c) => c.method === "answerCallbackQuery")!.params.text),
@@ -569,7 +568,7 @@ async function run() {
             const sectionMsgs = async (chatId: number) => {
                 h.calls.length = 0;
                 await h.sendText("/myposts", { userId: chatId, chatId });
-                await sleep(QUIET_MS * 2);
+                await idle();
                 return h.calls.filter((c) => c.method === "sendMessage" && String(c.params.text).startsWith(tt("endedSectionTitle")));
             };
             await Listing.deleteMany({ sellerId: String(SELLER) });
@@ -593,12 +592,12 @@ async function run() {
             const ex = await lcBot("expired");
             h.calls.length = 0;
             await h.sendText(`/start l_${ex.listing._id}`, { userId: SELLER, chatId: SELLER });
-            await sleep(QUIET_MS * 2);
+            await idle();
             const card = h.calls.filter((c) => c.method === "sendMessage").at(-1)!;
             assert.deepStrictEqual(kbOf(card).flat().map((b) => b.callback_data), [`lc_r_${ex.listing._id}`], "expired bot card has Relist");
             h.calls.length = 0;
             await h.sendText(`/start l_${rlSold.listing._id}`, { userId: SELLER, chatId: SELLER });
-            await sleep(QUIET_MS * 2);
+            await idle();
             assert.deepStrictEqual(kbOf(h.calls.filter((c) => c.method === "sendMessage").at(-1)!), [], "a sold listing never gets Relist");
 
             await Listing.deleteMany({ sellerId: String(SELLER) });
@@ -641,7 +640,7 @@ async function run() {
             await seedLegacy("100001", "Hi-capa beta");
             await seedLegacy("100002", "Scope gamma");
             await expectCalls("/stalecheck dry run", () => h.sendText("/stalecheck", { userId: adminId }));
-            await sleep(QUIET_MS);
+            await idle();
             const msgs = sent();
             const pid = (m: { result?: unknown }) => (m.result as { message_id: number }).message_id;
             const previewId = pid(msgs[1]);
@@ -655,14 +654,14 @@ async function run() {
             // a non-admin pressing sc_go is refused
             h.calls.length = 0;
             await h.pressButton("sc_go", { userId, chatId: adminId, messageId: previewId });
-            await sleep(QUIET_MS);
+            await idle();
             assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 3, "USER press refused");
 
             // confirm
             h.calls.length = 0;
             await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
             assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "seller DMs sent");
-            await sleep(QUIET_MS);
+            await idle();
             assert.strictEqual((await Listing.countDocuments({ hold: false, nudgedAt: { $exists: true } })), 3, "all three claimed");
             assert.ok(sent().some((c) => String(c.params.chat_id) === String(adminId)), "admin told the result");
             assert.ok(!(await adminSession()).includes("pendingStalecheck"), "pending gone");
@@ -670,7 +669,7 @@ async function run() {
             assert.ok(l1Raw && l1Raw.hold === false);
             h.calls.length = 0;
             await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
-            await sleep(QUIET_MS);
+            await idle();
             const toast = h.calls.find((c) => c.method === "answerCallbackQuery");
             assert.strictEqual(toast?.params.text, t("staleButton"), "second press -> staleButton");
             assert.ok(!sent().some((c) => ["100001", "100002"].includes(String(c.params.chat_id))), "second press sends nothing");
@@ -682,7 +681,7 @@ async function run() {
             const againId = pid(sent()[1]);
             h.calls.length = 0;
             await h.pressButton("sc_no", { userId: adminId, messageId: againId });
-            await sleep(QUIET_MS);
+            await idle();
             assert.ok(!sent().length, "sc_no sends nothing");
             assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "sc_no drops the keyboard");
             assert.ok(!(await adminSession()).includes("pendingStalecheck"), "sc_no clears pending");
@@ -698,7 +697,7 @@ async function run() {
             const fullId = pid(sent()[1]);
             h.calls.length = 0;
             await h.pressButton("sc_go", { userId: adminId, messageId: pilotId });
-            await sleep(QUIET_MS);
+            await idle();
             assert.ok(!sent().length, "Send on the superseded dry run sends nothing");
             assert.strictEqual(h.calls.find((c) => c.method === "answerCallbackQuery")?.params.text, t("staleButton"), "superseded press -> staleButton");
             assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "superseded keyboard dropped");
@@ -707,12 +706,12 @@ async function run() {
             // a bad arg sends nothing and keeps pending
             h.calls.length = 0;
             await h.pressButton("sc_xx", { userId: adminId, messageId: fullId });
-            await sleep(QUIET_MS);
+            await idle();
             assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 2, "bad arg sends nothing");
             h.calls.length = 0;
             await h.pressButton("sc_go", { userId: adminId, messageId: fullId });
             assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "the newer dry run sends its own sellers");
-            await sleep(QUIET_MS);
+            await idle();
             await clean();
         }
 
