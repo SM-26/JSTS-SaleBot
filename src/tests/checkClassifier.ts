@@ -1,4 +1,5 @@
 import assert from "assert";
+import { parseQuery } from "../services/matchService";
 import { classify, normalize, textHash, tokenOverlap, tokens, Parsed, Tier } from "../services/classifier";
 
 // [name, text, hasMedia, expected tier, expected parsed fields (only the listed keys are compared)]
@@ -65,6 +66,11 @@ check("textHash ignores whitespace", () => assert.strictEqual(textHash("גלוק
 check("alias overlap", () => assert.ok(tokenOverlap(tokens("גלוק 17 למכירה"), tokens("glock 17")) >= 0.8));
 check("overlap empty", () => assert.strictEqual(tokenOverlap([], ["x"]), 0));
 check("overlap different", () => assert.ok(tokenOverlap(tokens("גלוק 17"), tokens("כוונת אדומה")) < 0.8));
+
+check("alias gluk = glock", () => assert.deepStrictEqual(tokens("גלוק"), tokens("glock")));
+check("alias אם 4 = m4", () => assert.deepStrictEqual(tokens("אם 4"), tokens("m4")));
+check("ceiling with comma", () => assert.strictEqual(parseQuery("מחפש glock עד 1,000").maxPrice, 1000));
+check("עד inside a word is no ceiling", () => assert.strictEqual(parseQuery("מחפש glock מועד 2025").maxPrice, undefined));
 
 if (failed) {
     console.error(`[FAIL] ${failed} classifier check(s) failed`);
