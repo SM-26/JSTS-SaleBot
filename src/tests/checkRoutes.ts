@@ -14,6 +14,7 @@ import { createHarness, BOT_USERNAME } from "./harness";
 import { seedCapture } from "./fixtures";
 import { AuthLevel, BotConfig } from "../types";
 import type { Message } from "node-telegram-bot-api/types";
+import { renderStaleDm } from "../services/staleCheckService";
 
 // Smoke test for BotController.registerRoutes on the offline harness: every
 // user command is routed, look-alikes are not, the /newPost wizard answers
@@ -526,6 +527,23 @@ async function run() {
             assert.strictEqual(textEdit.length, 1, "DM text edited");
             assert.ok(String(textEdit[0].params.text).startsWith("Still for sale?") && String(textEdit[0].params.text).endsWith(tt("listingRefreshedToast")), "outcome line appended");
             assert.deepStrictEqual(kbOf(textEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${gd._id}`, `lc_s_${gd._id}`], "the other listing's row stays");
+
+            // the real multi-item DM: each result line starts with its item's number, and the rows keep their numbers
+            const ge = await lcGroup();
+            const gf = await lcGroup();
+            const dmItem = (l: { _id: unknown }) => ({ listingId: String(l._id), title: "t", price: "100", postedAt: new Date("2026-01-01T00:00:00Z") });
+            for (const lang of ["en", "he", "ru"]) {
+                const labels = renderStaleDm({ firstName: "x", items: [dmItem(ge), dmItem(gf)], locale: lang }).keyboard.flat().map((b) => b.text);
+                assert.deepStrictEqual(labels.map((l) => /^\d+/.exec(l)?.[0]), ["1", "1", "2", "2"], `${lang}: a stale button starts with its item's number (the result line reads it)`);
+            }
+            const staleDm = renderStaleDm({ firstName: "x", items: [dmItem(ge), dmItem(gf)], locale: config.lang });
+            const second = await press(`lc_s_${gf._id}`, { ...dm, text: staleDm.text, replyMarkup: { inline_keyboard: staleDm.keyboard } });
+            const secondEdit = second.of("editMessageText");
+            assert.ok(String(secondEdit[0].params.text).endsWith(`\n\n${localeService.t(config.lang, "lcItemResult", { i: 2, result: tt("listingSoldToast") })}`), "the line says item 2");
+            assert.deepStrictEqual(kbOf(secondEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${ge._id}`, `lc_s_${ge._id}`], "item 1's row stays");
+            const first = await press(`lc_r_${ge._id}`, { ...dm, text: String(secondEdit[0].params.text), replyMarkup: { inline_keyboard: [staleDm.keyboard[0]] } });
+            const firstText = String(first.of("editMessageText")[0].params.text);
+            assert.ok(firstText.includes(localeService.t(config.lang, "lcItemResult", { i: 2, result: tt("listingSoldToast") })) && firstText.endsWith(localeService.t(config.lang, "lcItemResult", { i: 1, result: tt("listingRefreshedToast") })), "both lines keep their numbers");
 
             // from a note: never editMessageText/ReplyMarkup (message_id is 0)
             const nb = await lcBot("expired");

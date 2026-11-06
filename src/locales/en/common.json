@@ -234,6 +234,7 @@
     "staleDmIntro": "Hi {firstName} 👋\nThis is the sales group bot. We are tidying up the market, and you have posts marked as active for over a month:",
     "staleDmItem": "{i}. {title} · {price} (from {date})",
     "staleDmOutro": "What is the status? One tap per post.\nThis is a one-time message. A post with no answer is removed from the market in 7 days. The message in the group stays as it is.",
+    "lcItemResult": "{i} · {result}",
     "staleStillButton": "{i} ✅ Still for sale",
     "staleSoldButton": "{i} 🤝 Sold",
     "staleDryRun": "Dry run: {listings} posts from {sellers} sellers ({scope}) would get a one-time message. Nothing is sent until you confirm. The first seller's message is shown below.",
