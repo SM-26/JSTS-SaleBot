@@ -15,6 +15,7 @@ import { groupMessageLink } from "./deepLinks";
 import { editNote } from "./ephemeralNotes";
 import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
 import { localeService } from "./localeService";
+import { groupCardKeyboard } from "./takeDownService";
 
 export type AddResult =
     | { kind: "added"; listing: IListing }
@@ -36,7 +37,7 @@ const TOASTS = { s: "listingSoldToast", f: "listingRefreshedToast", r: "listingR
 
 // A member's own group message, once they said yes: Add, then Sold / Refresh /
 // Remove from the private note or the bot, and edit sync. A member's message in the
-// group is never touched, and every ls_ button is refused on a bot post.
+// group is never touched (only a moderator tx_ delete does), and every ls_ button is refused on a bot post.
 export class GroupListingService {
     private groupUsername?: string;
 
@@ -99,7 +100,7 @@ export class GroupListingService {
     }
 
     // One card in the moderation topic for a seller's first captured listing; the
-    // existing td_ button takes it down without touching the member's message.
+    // td_ button takes it down and leaves the member's message; tx_ also deletes it (moderators only).
     private async notifyNewSeller(listing: IListing): Promise<void> {
         if (!this.config.moderationGroupId) return;
         try {
@@ -114,7 +115,7 @@ export class GroupListingService {
                     price: listing.price ?? "",
                     link: await this.groupLink(listing.messageIds[0]),
                 }),
-                reply_markup: { inline_keyboard: [[{ text: t("takeDownButton"), callback_data: `td_${listing._id}` }]] },
+                reply_markup: { inline_keyboard: groupCardKeyboard(String(listing._id), t) },
             });
         } catch (err) {
             console.error("[ERROR - GroupListingService.notifyNewSeller]", (err as Error).message);
