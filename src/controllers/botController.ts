@@ -79,7 +79,7 @@ export class BotController {
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
-        this.takeDownService = new TakeDownService(api, this.config);
+        this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
         this.paymentService = new PaymentService(api, this.config);

@@ -1567,9 +1567,9 @@ async function run() {
                 const edit = noteEdits(h)[0];
                 assert.strictEqual(String(edit.params.text), tp("listingRefreshedCard", { title: FIELDS.title, price: FIELDS.price }));
                 const rows = noteKeyboard(edit) as { callback_data?: string; url?: string }[][];
-                assert.deepStrictEqual(rows.map((r) => r.length), [3, 1]);
-                assert.deepStrictEqual(rows[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
-                assert.ok(rows[1][0].url?.includes(`?start=l_${id}`));
+                assert.deepStrictEqual(rows.map((r) => r.length), [2, 2]);
+                assert.deepStrictEqual(rows.flat().slice(0, 3).map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.ok(rows[1][1].url?.includes(`?start=l_${id}`));
                 console.log("  [OK] (v7) Refresh renews the clock and re-edits the note.");
             }
 
@@ -1887,7 +1887,7 @@ async function run() {
                 assert.deepStrictEqual([...l.messageIds], [...cap.messageIds]);
                 const sent = ephemerals(h);
                 assert.strictEqual(sent.length, 1);
-                assert.deepStrictEqual(rows(sent[0])[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.deepStrictEqual(rows(sent[0]).flat().slice(0, 3).map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
                 assert.strictEqual(String(sent[0].params.text), tp("listingRefreshedCard", { title: FIELDS.title, price: FIELDS.price }));
                 assert.deepStrictEqual(deletedNotes(h).map((c) => Number(c.params.ephemeral_message_id)), [OLD_NOTE]);
                 assert.strictEqual(l.note?.ephemeralMessageId, ephemeralId(sent[0]));
@@ -2037,8 +2037,8 @@ async function run() {
                     [APPROVED_GROUP, a, NOTE_ID]);
                 assert.ok(String(e[0].params.text).includes("גלוק 17 למכירה"));
                 const r = rows(e[0]);
-                assert.deepStrictEqual(r[0].map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
-                assert.strictEqual(r[1][0].url, `https://t.me/${BOT_USERNAME}?start=l_${id}`);
+                assert.deepStrictEqual(r.flat().slice(0, 3).map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
+                assert.strictEqual(r[1][1].url, `https://t.me/${BOT_USERNAME}?start=l_${id}`);
                 assert.deepStrictEqual(toasts(h), [T6("captureAddedToast")]);
                 assert.strictEqual(listings[0].note?.ephemeralMessageId, NOTE_ID);
 
@@ -2673,6 +2673,23 @@ async function run() {
                 assert.strictEqual((await Capture.findById(cap._id))!.state, "asked");
                 assert.ok(callsTo(h, "sendMessage").some((c) => Number(c.params.chat_id) === u && String(c.params.text) === T("generalError")));
                 console.log("  [OK] (f9) a capture draft without a price is refused.");
+            }
+
+            // (f10) a moderator take-down closes the seller's private note (found in the live test)
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                const id = await addListing(ctrl, u);
+                h.calls.length = 0;
+                await tdPress(h, mod, id, 9100);
+                await settle();
+                assert.strictEqual((await Listing.findById(id))!.status, "taken_down");
+                const e = callsTo(h, "editEphemeralMessageText");
+                assert.strictEqual(e.length, 1);
+                assert.strictEqual(Number(e[0].params.ephemeral_message_id), NOTE_ID);
+                assert.strictEqual(String(e[0].params.text), T("listingEnded"));
+                assert.ok(!String(e[0].params.reply_markup ?? "").includes("callback_data"));
+                console.log("  [OK] (f10) a take-down closes the private note.");
             }
             await ShadowLog.deleteMany({ senderId: { $in: userIds.map(String) } });
         })();

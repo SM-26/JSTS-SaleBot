@@ -13,7 +13,7 @@ import { isApiError } from "../config/telegramErrors";
 // the public message goes, the seller is told. The post itself stays "approved";
 // a member's own message in a group is never touched.
 export class TakeDownService {
-    constructor(private api: Api, private config: BotConfig) { }
+    constructor(private api: Api, private config: BotConfig, private syncNote?: (listing: IListing) => Promise<void>) { }
 
     async handleCallback(query: CallbackQuery, listingId: string): Promise<void> {
         const mod = await userRepository.findByUserId(String(query.from.id));
@@ -68,6 +68,14 @@ export class TakeDownService {
         }
 
         await step("notify seller", () => this.notifySeller(taken.sellerId, title));
+
+        // A group listing's private note must stop offering Sold/Refresh/Remove.
+        if (taken.note && this.syncNote) {
+            await step("sync note", async () => {
+                const ended = await listingRepository.findById(listingId);
+                if (ended) await this.syncNote!(ended);
+            });
+        }
 
         // Closes the card (drops the button).
         const msg = query.message;

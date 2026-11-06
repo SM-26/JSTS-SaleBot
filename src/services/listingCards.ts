@@ -52,12 +52,15 @@ type CardOptions = { surface: "n"; botUsername: string; refreshed?: boolean } | 
 export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" | "title" | "price">, o: CardOptions): Card {
     const id = String(listing._id);
     const params = { title: listing.title ?? "", price: listing.price ?? "" };
-    const keyboard: InlineKeyboardButton[][] = [[
-        { text: t("listingSoldButton"), callback_data: listingActionData(id, "s", o.surface) },
-        { text: t("listingRefreshButton"), callback_data: listingActionData(id, "f", o.surface) },
-        { text: t("listingRemoveButton"), callback_data: listingActionData(id, "r", o.surface) },
-    ]];
-    if (o.surface === "n") keyboard.push([{ text: t("listingManageButton"), url: deepLink(o.botUsername, `l_${id}`) }]);
+    // Two to a row: three in a row clip the labels on a phone.
+    const keyboard: InlineKeyboardButton[][] = [
+        [
+            { text: t("listingSoldButton"), callback_data: listingActionData(id, "s", o.surface) },
+            { text: t("listingRefreshButton"), callback_data: listingActionData(id, "f", o.surface) },
+        ],
+        [{ text: t("listingRemoveButton"), callback_data: listingActionData(id, "r", o.surface) }],
+    ];
+    if (o.surface === "n") keyboard[1].push({ text: t("listingManageButton"), url: deepLink(o.botUsername, `l_${id}`) });
     return { text: t(o.refreshed ? "listingRefreshedCard" : "listingCard", params), keyboard };
 }
 
