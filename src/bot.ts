@@ -65,6 +65,7 @@ async function main() {
                     // read live: /config can switch captureMode without a restart
                     { name: "captures", everyMs: 10_000, run: async () => { if (isCaptureOn(controller.config)) await tick(controller.config, new Date(), (event, now) => controller.captureNotes.onClassified(event, now)); } },
                     { name: "reconcile", everyMs: 3_600_000, run: reconcile },
+                    ...controller.lifecycleJobs(),
                 ]);
             },
             close: async () => {

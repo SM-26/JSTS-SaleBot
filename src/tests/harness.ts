@@ -44,6 +44,12 @@ export interface PressButtonOptions {
     chatType?: "private" | "group" | "supergroup";
     /** Omits `message` from the callback_query (like a press on an ephemeral note). */
     noMessage?: boolean;
+    /** A press on a private note: `ephemeral_message_id` set and `message_id` 0, like the real thing. */
+    ephemeralMessageId?: number;
+    /** The pressed message's keyboard. */
+    replyMarkup?: { inline_keyboard: Record<string, unknown>[][] };
+    /** The pressed message's text. */
+    text?: string;
 }
 
 export const BOT_USERNAME = "JSTS_testing_bot";
@@ -145,7 +151,7 @@ export function createHarness(options: HarnessOptions = {}) {
     const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>
         message({ photo: [{ file_id: fileId, file_unique_id: fileId, width: 10, height: 10 }] }, options);
 
-    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false }: PressButtonOptions = {}) => {
+    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false, ephemeralMessageId, replyMarkup, text }: PressButtonOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             callback_query: {
@@ -155,9 +161,12 @@ export function createHarness(options: HarnessOptions = {}) {
                 data,
                 ...(noMessage ? {} : {
                     message: {
-                        message_id: messageId,
+                        message_id: ephemeralMessageId === undefined ? messageId : 0,
+                        ...(ephemeralMessageId === undefined ? {} : { ephemeral_message_id: ephemeralMessageId }),
                         date: Math.floor(Date.now() / 1000),
-                        chat: { id: chat, type: chatType }
+                        chat: { id: chat, type: chatType },
+                        ...(text ? { text } : {}),
+                        ...(replyMarkup ? { reply_markup: replyMarkup } : {})
                     }
                 })
             }

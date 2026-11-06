@@ -6,8 +6,10 @@ import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import { PostService } from "./postService";
 import { GroupListingService } from "./groupListingService";
+import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
-import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
+import { buildEndedCard, buildManagementCard, Card, lifecycleActionData } from "./listingCards";
+import { safeTrustLine } from "./trustService";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
 
@@ -16,7 +18,8 @@ export class MyPostsService {
         private api: Api,
         private config: BotConfig,
         private postService: PostService,
-        private groupListings: GroupListingService
+        private groupListings: GroupListingService,
+        private lifecycle: LifecycleService
     ) { }
 
     private get lang() {
@@ -61,6 +64,24 @@ export class MyPostsService {
     }
 
     async showPosts(msg: Message): Promise<void> {
+        await this.sendPosts(msg);
+        await this.sendRelistSection(msg);
+    }
+
+    // Expired bot listings, one Relist row each (expired group listings already have a 🔄 in the group section).
+    private async sendRelistSection(msg: Message): Promise<void> {
+        const userId = String(msg.from!.id);
+        const expired = await listingRepository.findSellerExpired(userId, 10);
+        if (!expired.length) return;
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        await this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text: localeService.t(locale, 'endedSectionTitle'),
+            reply_markup: { inline_keyboard: expired.map((l) => [{ text: localeService.t(locale, 'relistButton', { title: l.title ?? "" }), callback_data: lifecycleActionData(String(l._id), "r") }]) },
+        });
+    }
+
+    private async sendPosts(msg: Message): Promise<void> {
         const userId = String(msg.from!.id);
         const user: User | null = await userRepository.findByUserId(userId);
         const locale = localeService.resolveUserLocale(user); //
@@ -138,7 +159,18 @@ export class MyPostsService {
         }
         const active = listing.status === "live" || listing.status === "expired";
         if (listing.source === "group") {
-            await sendCard(active ? buildManagementCard(t, listing, { surface: "c" }) : buildEndedCard(t, listing));
+            if (!active) {
+                await sendCard(buildEndedCard(t, listing));
+                return;
+            }
+            const card = buildManagementCard(t, listing, { surface: "c" });
+            const trustLine = await safeTrustLine(userId, locale, "showListingCard");
+            await sendCard(trustLine ? { ...card, text: `${card.text}\n${trustLine}` } : card);
+            return;
+        }
+        if (listing.status === "expired") {
+            const card = buildEndedCard(t, listing);
+            await sendCard({ ...card, keyboard: [[{ text: t("relistButton", { title: listing.title ?? "" }), callback_data: lifecycleActionData(String(listing._id), "r") }]] });
             return;
         }
         const post = listing.status === "live" && listing.postId ? await postRepository.findById(listing.postId) : null;
@@ -159,7 +191,7 @@ export class MyPostsService {
             userId: Number(post.userId),
             username: user?.userName || undefined,
             firstName: user?.firstName || "User",
-        });
+        }, { trustLine: await safeTrustLine(post.userId, locale, "sendApprovedPostDetail") });
 
         const buttons = [[
             { text: localeService.t(locale, 'markSoldButton'), callback_data: `sold_${post._id}` },
@@ -226,35 +258,17 @@ export class MyPostsService {
 
         if (await this.refuseIfTakenDown(query, postId)) return;
 
-        await postRepository.updateStatus(postId, "sold");
+        const richMessage = await this.postService.setPostSold(post);
         // Best-effort: Sold also ends the listing, so a moderator's take-down finds nothing to remove.
         try {
-            const listing = await listingRepository.findByPostId(postId);
-            if (listing) await listingRepository.markSold(String(listing._id), new Date());
+            await this.lifecycle.syncSoldForPost(postId, new Date());
         } catch (err) {
             console.error(`[ERROR - handleSoldCallback] post ${postId}`, (err as Error).message);
         }
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
-
-        const postUser = await userRepository.findByUserId(post.userId);
-        const richMessage = this.postService.formatPostRichMessage({
-            title: post.title,
-            description: post.description,
-            descriptionEntities: post.descriptionEntities,
-            price: post.price,
-            location: post.location,
-            media: post.media,
-            userId: Number(post.userId),
-            username: postUser?.userName || undefined,
-            firstName: postUser?.firstName || "User",
-        }, { sold: true });
-
-        // Edit the message in the approved group
-        if (post.approvedMessageId) {
-            await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
-        }
+        if (post.approvedMessageId) await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
 
         // The pressed card stays: re-render it as sold (photos kept), no buttons.
         // The /myposts summary is never touched by a card press.
@@ -321,6 +335,7 @@ export class MyPostsService {
 
         // Fetch user for formatting
         const postUser: User | null = await userRepository.findByUserId(post.userId);
+        const trustLine = await safeTrustLine(post.userId, this.config.lang, "handleBumpCallback");
         const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
@@ -331,7 +346,7 @@ export class MyPostsService {
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
-        }, { showCta: true });
+        }, { showCta: true, trustLine });
 
         const newMessageId = await this.postService.sendToApproved(richMessage);
 
@@ -339,6 +354,11 @@ export class MyPostsService {
         await postRepository.updateBump(postId, bumpCount + 1);
         if (newMessageId) {
             await postRepository.setApprovedMessageId(postId, newMessageId);
+        }
+        try {
+            await this.lifecycle.refreshForPost(postId, new Date());
+        } catch (err) {
+            console.error(`[ERROR - handleBumpCallback] post ${postId}`, (err as Error).message);
         }
     }
 }
