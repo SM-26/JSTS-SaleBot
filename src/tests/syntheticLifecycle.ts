@@ -37,8 +37,13 @@ async function main(): Promise<number> {
     const wrappedFetch: typeof fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const method = url.split("/").pop()!.split("?")[0];
-        // Requests without files are urlencoded; anything else is not read and fails closed.
-        const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams();
+        // The library sends a file-less request as URLSearchParams (core/encode.js); a string or Blob is
+        // read the same way. Anything else (a multipart stream) is unreadable and fails closed.
+        const raw = init?.body;
+        const body = raw instanceof URLSearchParams ? raw
+            : typeof raw === "string" ? new URLSearchParams(raw)
+            : raw instanceof Blob ? new URLSearchParams(await raw.text())
+            : new URLSearchParams();
         const chat = body.has("chat_id") ? Number(body.get("chat_id")) : undefined;
         if (!(method === "getMe" || (method === "sendMessage" && chat === OWNER))) {
             violations.push(`${method} to ${chat === undefined ? "an unreadable chat" : chat}`);
@@ -85,8 +90,9 @@ async function main(): Promise<number> {
         const report = await new StaleCheckService(bot.api, cfg).run([sellerId], new Date());
         check("stale-check sent one DM with two listings", report.sellersSent === 1 && report.listingsSent === 2, JSON.stringify(report));
 
-        const tick = await controller.lifecycle.tick(new Date());
-        check("tick sent the nudge", tick.nudged === 1, JSON.stringify(tick));
+        // the aged listing only: the global tick could DM other sellers
+        const nudge = await controller.lifecycle.nudgeOne(live, new Date());
+        check("nudge sent for the aged listing", nudge === "sent", nudge);
 
         const refreshed = await controller.lifecycle.refreshListing(String(live._id), sellerId, new Date());
         const afterRefresh = await listingRepository.findById(String(live._id));

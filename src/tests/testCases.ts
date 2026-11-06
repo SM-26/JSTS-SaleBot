@@ -689,8 +689,8 @@ async function seedTestPost(userId: string, title: string, now: Date) {
 }
 
 /**
- * Ages the tester's own bot listing (no group message) and runs one lifecycle tick, so the nudge
- * (7 days) or the expiry (30 days) happens at once. Test bot only; the tick is global.
+ * Ages the tester's own bot listing (no group message) and nudges or expires just it, so the nudge
+ * (7 days) or the expiry (30 days) happens at once, for that listing only.
  */
 async function ageTestListing(
     days: number,
@@ -724,12 +724,19 @@ async function ageTestListing(
         if (listing.status === "live" && !listing.nudgedAt) {
             await listingRepository.setClockForTest(String(listing._id), new Date(now.getTime() - days * DAY_MS));
         }
-        const username = (await api.getMe()).username ?? "";
-        const result = await new LifecycleService(api, config, postService, () => username).tick(new Date());
+        // this one listing only: the global tick could DM other sellers and expire theirs
+        let outcome: string;
+        if (days >= 30) {
+            outcome = (await listingRepository.markExpired(String(listing._id), new Date())) ? "expired" : "unchanged";
+        } else {
+            const username = (await api.getMe()).username ?? "";
+            const fresh = await listingRepository.findById(String(listing._id));
+            outcome = fresh ? await new LifecycleService(api, config, postService, () => username).nudgeOne(fresh, new Date()) : "gone";
+        }
         const after = await listingRepository.findById(String(listing._id));
         await api.sendMessage({
             chat_id: msg.chat.id,
-            text: `⏩ Aged ${days} days. Listing is now ${after?.status ?? "gone"}. Tick: ${JSON.stringify(result)}.${days >= 30 ? " Expiry sends no message." : ""}`,
+            text: `⏩ Aged ${days} days: ${outcome}. Listing is now ${after?.status ?? "gone"}.${days >= 30 ? " Expiry sends no message." : ""}`,
         });
     } catch (err) {
         console.error("[ERROR - ageTestListing]", (err as Error).message);
