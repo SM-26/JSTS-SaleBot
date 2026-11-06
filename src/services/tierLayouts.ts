@@ -33,7 +33,7 @@ function trustFooter(lang: string, tier: TierLayoutOpts["tier"], stats?: TierLay
     const label = localeService.t(lang, tier === "top" ? "tierTopLabel" : tier === "verified" ? "tierVerifiedLabel" : "tierBothLabel");
     return [
         label,
-        stats && stats.sold > 0 ? localeService.t(lang, "tierSales", { n: stats.sold }) : "",
+        stats && stats.sold > 0 ? (stats.sold === 1 ? localeService.t(lang, "tierSalesOne") : localeService.t(lang, "tierSales", { n: stats.sold })) : "",
         stats?.since ? localeService.t(lang, "tierSince", { since: stats.since }) : "",
     ].filter(Boolean).join(" · ");
 }

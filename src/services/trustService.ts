@@ -27,7 +27,7 @@ export async function trustLineFor(sellerId: string, locale: string, now: Date):
     const n = await listingRepository.countSold(sellerId);
     const since = await marketSince(sellerId);
     if (n === 0 && (!since || now.getTime() - since.getTime() < NEW_SELLER_DAYS * 24 * 3600 * 1000)) return null;
-    return localeService.t(locale, "trustLine", { n, since: since ? formatSince(since, locale) : "" });
+    return localeService.t(locale, n === 1 ? "trustLineOne" : "trustLine", { n, since: since ? formatSince(since, locale) : "" });
 }
 
 // A trust line must never break a publish or a button: failure = no line, logged.
