@@ -539,12 +539,17 @@ async function run() {
             assert.ok(!edits()[0].params.text, "a rich edit, not the summary text");
             const markup = edits()[0].params.reply_markup as Keyboard | undefined;
             assert.ok(!markup || markup.inline_keyboard.flat().length === 0, "no buttons on the sold card");
+            assert.strictEqual((await Listing.findOne({ source: "bot", postId: soldId }))?.status, "sold", "sold_ ends the listing, created on demand");
 
+            const old = new Date(Date.now() - 5 * 24 * 3600 * 1000);
+            await Listing.create({ source: "bot", origin: "dm", postId: bumpId, sellerId: String(u), title: "Card2", status: "live", createdAt: old, refreshedAt: old, nudgedAt: old });
             h.calls.length = 0;
             await h.pressButton(`bump_${bumpId}`, { userId: u, messageId: 502 });
             await settle();
             assert.strictEqual(edits().length, 0, "Bump leaves the card alone");
             assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery"), "Bump still answers with a popup");
+            const bumped = (await Listing.collection.findOne({ postId: bumpId }))!;
+            assert.ok(Date.now() - bumped.refreshedAt.getTime() < 5000 && !("nudgedAt" in bumped), "bump restarts the listing clock and clears nudgedAt");
 
             h.calls.length = 0;
             await h.pressButton("clear_sold", { userId: u, messageId: 500 });

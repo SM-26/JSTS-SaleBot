@@ -6,6 +6,7 @@ import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import { PostService } from "./postService";
 import { GroupListingService } from "./groupListingService";
+import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
 import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
 import { isApiError } from "../config/telegramErrors";
@@ -16,7 +17,8 @@ export class MyPostsService {
         private api: Api,
         private config: BotConfig,
         private postService: PostService,
-        private groupListings: GroupListingService
+        private groupListings: GroupListingService,
+        private lifecycle: LifecycleService
     ) { }
 
     private get lang() {
@@ -226,17 +228,17 @@ export class MyPostsService {
 
         if (await this.refuseIfTakenDown(query, postId)) return;
 
-        const { richMessage } = await this.postService.markPostSold(post);
+        const richMessage = await this.postService.setPostSold(post);
         // Best-effort: Sold also ends the listing, so a moderator's take-down finds nothing to remove.
         try {
-            const listing = await listingRepository.findByPostId(postId);
-            if (listing) await listingRepository.markSold(String(listing._id), new Date());
+            await this.lifecycle.syncSoldForPost(postId, new Date());
         } catch (err) {
             console.error(`[ERROR - handleSoldCallback] post ${postId}`, (err as Error).message);
         }
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
+        if (post.approvedMessageId) await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
 
         // The pressed card stays: re-render it as sold (photos kept), no buttons.
         // The /myposts summary is never touched by a card press.
@@ -321,6 +323,11 @@ export class MyPostsService {
         await postRepository.updateBump(postId, bumpCount + 1);
         if (newMessageId) {
             await postRepository.setApprovedMessageId(postId, newMessageId);
+        }
+        try {
+            await this.lifecycle.refreshForPost(postId, new Date());
+        } catch (err) {
+            console.error(`[ERROR - handleBumpCallback] post ${postId}`, (err as Error).message);
         }
     }
 }

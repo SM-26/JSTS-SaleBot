@@ -791,6 +791,27 @@ async function run() {
             const rec = await reconcileBotListings(LT0);
             assert.ok(rec.sold >= 1, "reconcile marks the 2.0.1-sold listing");
             assert.strictEqual((await listingRepository.findById(lid(sp.listing)))?.status, "sold");
+
+            // the sold_/bump_ entry points: the caller already handled the post
+            const sy = await seedPost(sid("sy1"), "sold");
+            await svc.syncSoldForPost(String(sy._id), LT0);
+            assert.strictEqual((await Listing.findOne({ source: "bot", postId: String(sy._id) }))?.status, "sold", "syncSoldForPost creates on demand and sells");
+            const sy2 = await bl("sy2");
+            const soldBefore = ps.sold.length;
+            await svc.syncSoldForPost(String(sy2.post._id), LT0);
+            assert.strictEqual((await listingRepository.findById(lid(sy2.listing)))?.status, "sold");
+            assert.strictEqual((await postRepository.findById(String(sy2.post._id)))?.status, "approved", "syncSoldForPost leaves the post alone");
+            assert.strictEqual(ps.sold.length, soldBefore);
+            const rf2 = await bl("rf2");
+            await Listing.updateOne({ _id: rf2.listing._id }, { $set: { nudgedAt: LT0 } });
+            await svc.refreshForPost(String(rf2.post._id), plusDays(3));
+            const rf2l = (await Listing.collection.findOne({ _id: rf2.listing._id }))!;
+            assert.ok(rf2l.refreshedAt.getTime() === plusDays(3).getTime() && !("nudgedAt" in rf2l), "refreshForPost moves the clock, clears nudgedAt");
+            const rf3 = await bl("rf3");
+            await Listing.updateOne({ _id: rf3.listing._id }, { $set: { status: "taken_down" } });
+            await svc.refreshForPost(String(rf3.post._id), plusDays(3));
+            const rf3l = (await listingRepository.findById(lid(rf3.listing)))!;
+            assert.ok(rf3l.status === "taken_down" && rf3l.refreshedAt.getTime() === LT0.getTime(), "refreshForPost leaves taken_down alone");
             console.log("[OK] lifecycle refresh, sold, remove.");
         }
     } finally {

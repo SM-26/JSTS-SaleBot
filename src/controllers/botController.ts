@@ -24,6 +24,7 @@ import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { GroupListingService } from "../services/groupListingService";
+import { LifecycleService } from "../services/lifecycleService";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
@@ -63,6 +64,7 @@ export class BotController {
     private captureService: CaptureService;
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
+    readonly lifecycle: LifecycleService;
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
 
@@ -72,13 +74,14 @@ export class BotController {
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
+        this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings, this.lifecycle);
         this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
