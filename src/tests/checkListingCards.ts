@@ -2,7 +2,7 @@ import assert from "assert";
 import { Types } from "mongoose";
 import {
     buildAskNote, buildCatchupList, buildCatchupNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
-    catchupActionData, parseCaptureArg, parseCatchupArg, parseListingArg, type Card,
+    catchupActionData, nudgeKeyboard, parseCaptureArg, parseCatchupArg, parseListingArg, type Card,
 } from "../services/listingCards";
 import type { CatchupItem } from "../services/catchupScan";
 
@@ -73,6 +73,14 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     assert.strictEqual(urls(c)[0], `https://t.me/${BOT}?start=c_${ID}`);
     assert.strictEqual(datas(c)[0], undefined);
     assert.deepStrictEqual(datas(c).slice(1), [`mk_${ID}_n`, `mk_${ID}_x`]);
+}
+
+// nudge keyboard: lc_ formats, remove only for a group listing
+{
+    const g = nudgeKeyboard({ _id: new Types.ObjectId(ID), source: "group" }, t, BOT).flat().map((b) => ("callback_data" in b ? b.callback_data : undefined));
+    assert.deepStrictEqual(g, [`lc_r_${ID}`, `lc_s_${ID}`, `lc_x_${ID}`, undefined]);
+    const b = nudgeKeyboard({ _id: new Types.ObjectId(ID), source: "bot" }, t).flat().map((x) => ("callback_data" in x ? x.callback_data : undefined));
+    assert.deepStrictEqual(b, [`lc_r_${ID}`, `lc_s_${ID}`]);
 }
 
 // management card n / c

@@ -1,7 +1,7 @@
 import { RichMessageBuilder, RichTextBuilder, richListItem } from "node-telegram-bot-api";
 import type { Api } from "node-telegram-bot-api";
 import type { Message, InputRichMessage, InlineKeyboardButton, SendRichMessageParams } from "node-telegram-bot-api/types";
-import { BotConfig, MediaItem, SendMessageOptions } from "../types";
+import { BotConfig, MediaItem, Post, SendMessageOptions } from "../types";
 import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
@@ -51,7 +51,7 @@ export class PostService {
     // plain objects because RichTextBuilder.build() always wraps in an array.
     formatPostRichMessage(
         data: PostData,
-        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string } } = {}
+        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string }; trustLine?: string } = {}
     ): InputRichMessage {
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
@@ -64,6 +64,7 @@ export class PostService {
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
                 richListItem(b => b.paragraph(`📍 ${data.location}`)),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
+                ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
 
         const addMedia = (b: RichMessageBuilder, m: MediaItem) =>
@@ -150,6 +151,33 @@ export class PostService {
         const sent = await this.api.sendMessage({ chat_id: approvedGroupId, text, ...options });
 
         return sent.message_id;
+    }
+
+    // Sets the post sold, builds the sold card and edits the group message. A failed group
+    // edit is reported, never thrown; a failed status update throws (nothing was changed yet).
+    async markPostSold(post: Post): Promise<{ richMessage: InputRichMessage; groupEdited: boolean }> {
+        const richMessage = await this.setPostSold(post);
+        const groupEdited = post.approvedMessageId ? await this.markSoldInGroup(post.approvedMessageId, richMessage) : false;
+        return { richMessage, groupEdited };
+    }
+
+    // The status change and the sold card, without touching the group: lets a button answer before the edit.
+    async setPostSold(post: Post): Promise<InputRichMessage> {
+        const postId = String(post._id);
+        await postRepository.updateStatus(postId, "sold");
+        const postUser = await userRepository.findByUserId(post.userId);
+        const richMessage = this.formatPostRichMessage({
+            title: post.title,
+            description: post.description,
+            descriptionEntities: post.descriptionEntities,
+            price: post.price,
+            location: post.location,
+            media: post.media,
+            userId: Number(post.userId),
+            username: postUser?.userName || undefined,
+            firstName: postUser?.firstName || "User",
+        }, { sold: true });
+        return richMessage;
     }
 
     async markSoldInGroup(approvedMessageId: number, richMessage: InputRichMessage): Promise<boolean> {

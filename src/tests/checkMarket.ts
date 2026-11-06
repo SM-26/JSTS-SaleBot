@@ -8,21 +8,23 @@ import PostModel from "../models/Post";
 import ShadowLog from "../models/ShadowLog";
 import captureRepository from "../repositories/captureRepository";
 import draftRepository from "../repositories/draftRepository";
-import listingRepository, { priceValueOf } from "../repositories/listingRepository";
+import postRepository from "../repositories/postRepository";
+import listingRepository,{ priceValueOf } from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
-import type { CatchupFile, CatchupItem } from "../services/catchupScan";
-import { CatchupService } from "../services/catchupService";
-import { GroupListingService } from "../services/groupListingService";
 import { textHash } from "../services/classifier";
+import { LifecycleService } from "../services/lifecycleService";
+import { asPostService, plusDays, fakeApi, seedPost, stubPostService, T0 as LT0 } from "./lifecycleFakes";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
-import { isTrustedSeller, TRUST_REVOKE_MS } from "../services/trustService";
+import { formatSince, isTrustedSeller, trustLineFor, TRUST_REVOKE_MS } from "../services/trustService";
+import User from "../models/User";
 import { tick } from "../services/shadowService";
+import { StaleCheckService, parseSellerIds, renderStaleDm } from "../services/staleCheckService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
 import { seedCapture } from "./fixtures";
-import { createHarness, type HarnessOptions } from "./harness";
+import { catchupMarketChecks } from "./catchupMarketChecks";
 
 // Market collections (slice 0). Needs a real Mongo: the guarantees under test
 // are atomic updates and index behaviour (TTL, partial unique), which a mock
@@ -589,221 +591,679 @@ async function run() {
         assert.ok(!("captureId" in (await Draft.collection.findOne({ userId: du }))!), "captureId is gone from the document");
         console.log("[OK] draft startFromCapture.");
 
-        // catch-up offers on members (slice 6)
+        await catchupMarketChecks(RUN, CHAT, odIds);
+
+        // slice 3: lifecycle clock fields and atomic claims (fake clock, nothing calls new Date())
         {
-        const CU = new Date();
-        const DAYMS = 24 * 3600 * 1000;
-        const ago = (days: number) => new Date(CU.getTime() - days * DAYMS);
-        const cuItem = (id: number): CatchupItem => ({ messageId: id, date: ago(2).toISOString(), title: "Glock", price: "1,300", text: "Glock 17 1,300", tier: "strict" });
-        const cu = (n: string) => `${RUN}-cu-${n}`;
+            const T0 = new Date("2026-12-01T10:00:00Z");
+            const L = (n: number) => new Date(T0.getTime() + n * 24 * 3600 * 1000);
+            const HR = 3600 * 1000;
+            const P = `${RUN}-s3`;
+            const mk = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: T0, refreshedAt: T0, ...extra,
+            });
+            const mine = <T extends { sellerId: string }>(rows: T[]) => rows.filter(r => r.sellerId.startsWith(P));
+            const id = (l: { _id: unknown }) => String(l._id);
 
-        const m1 = cu("a");
-        assert.strictEqual(await memberRepository.importCatchup(m1, [cuItem(1), cuItem(2)], CU), true, "import");
-        assert.strictEqual(await memberRepository.claimCatchupDelivery(m1, CU), null, "claim before arming");
-        assert.strictEqual(await memberRepository.armCatchup(CU) >= 1, true, "arm counts");
-        const won = await memberRepository.claimCatchupDelivery(m1, CU);
-        assert.ok(won?.catchup?.sentAt && won.pendingCatchup?.length === 2, "claim after arming returns the member with sentAt");
-        assert.strictEqual(await memberRepository.claimCatchupDelivery(m1, CU), null, "second claim");
-        assert.strictEqual(await memberRepository.importCatchup(m1, [cuItem(3)], CU), false, "import on a sent member");
+            const n1 = await mk("n1");
+            assert.strictEqual(await listingRepository.claimNudge(id(n1), new Date(L(7).getTime() - 1)), null, "claimNudge one ms early");
+            const claimed = await listingRepository.claimNudge(id(n1), L(7));
+            assert.ok(claimed && claimed.nudgedAt?.getTime() === L(7).getTime(), "claimNudge at day 7 sets nudgedAt");
+            assert.strictEqual(await listingRepository.claimNudge(id(n1), L(7)), null, "claimNudge only once");
+            await listingRepository.holdNudge(id(n1));
+            await listingRepository.releaseNudgeClaim(id(n1));
+            const rel = await Listing.collection.findOne({ _id: n1._id });
+            assert.ok(rel && !("nudgedAt" in rel) && !("nudgeHeld" in rel), "releaseNudgeClaim unsets both");
+            console.log("[OK] claimNudge.");
 
-        const m2 = cu("race");
-        await memberRepository.importCatchup(m2, [cuItem(1)], CU);
-        await memberRepository.armCatchup(CU);
-        const claims = await Promise.all([1, 2, 3, 4, 5].map(() => memberRepository.claimCatchupDelivery(m2, CU)));
-        assert.strictEqual(claims.filter(Boolean).length, 1, "5 concurrent claims, one winner");
-        await memberRepository.releaseCatchupDelivery(m2);
-        assert.ok(!(await Member.collection.findOne({ userId: m2 }))!.catchup.sentAt, "release unsets sentAt");
-        assert.ok(await memberRepository.claimCatchupDelivery(m2, CU), "claimable again after release");
+            await mk("c-hold", { refreshedAt: L(23), hold: true });
+            await mk("c-nudged", { refreshedAt: L(23), nudgedAt: L(30) });
+            await mk("c-sold", { refreshedAt: L(23), status: "sold" });
+            await mk("c-old", { refreshedAt: L(0) });
+            const okL = await mk("c-ok", { refreshedAt: L(23) });
+            const found = mine(await listingRepository.findNudgeCandidates(L(31), 500)).filter(r => r.sellerId.startsWith(`${P}-c-`));
+            assert.deepStrictEqual(found.map(id), [id(okL)], "only the 8-day-old live unheld un-nudged listing");
+            console.log("[OK] nudge candidates filter.");
 
-        const m3 = cu("old");
-        await memberRepository.importCatchup(m3, [cuItem(1)], CU);
-        await memberRepository.armCatchup(ago(31));
-        assert.strictEqual(await memberRepository.claimCatchupDelivery(m3, CU), null, "armed 31 days ago");
-        await memberRepository.dropExpiredCatchups(CU);
-        const m3doc = (await Member.collection.findOne({ userId: m3 }))!;
-        assert.ok(m3doc.pendingCatchup === undefined && m3doc.catchup.armedAt, "expired armed: items gone, stamps stay");
+            const r1 = await mk("r1", { nudgedAt: L(1), nudgeHeld: true, staleSentAt: L(1), hold: true, endedAt: L(2), endedBy: "system" });
+            assert.ok(await listingRepository.refresh(id(r1), L(3)), "refresh returns the listing");
+            const r1raw = await Listing.collection.findOne({ _id: r1._id });
+            assert.ok(r1raw && r1raw.hold === false && r1raw.status === "live" && +r1raw.refreshedAt === +L(3), "refresh sets clock, hold false");
+            for (const f of ["nudgedAt", "nudgeHeld", "staleSentAt", "endedAt", "endedBy"]) assert.ok(!(f in r1raw), `refresh unsets ${f}`);
+            const r2 = await mk("r2", { status: "expired", endedAt: L(1), endedBy: "system" });
+            assert.strictEqual((await listingRepository.refresh(id(r2), L(3)))?.status, "live", "expired -> live");
+            const r3 = await mk("r3", { status: "sold" });
+            assert.strictEqual(await listingRepository.refresh(id(r3), L(3)), null, "sold stays sold");
+            assert.strictEqual((await listingRepository.findById(id(r3)))?.status, "sold");
+            console.log("[OK] refresh clears everything.");
 
-        const m4 = cu("neverarmed");
-        await memberRepository.importCatchup(m4, [cuItem(1)], ago(31));
-        await memberRepository.dropExpiredCatchups(CU);
-        assert.strictEqual((await Member.collection.findOne({ userId: m4 }))!.pendingCatchup, undefined, "never-armed import older than 30 days purged");
-        const m4b = cu("neverarmed-fresh");
-        await memberRepository.importCatchup(m4b, [cuItem(1)], ago(29));
-        await memberRepository.dropExpiredCatchups(CU);
-        assert.ok((await Member.collection.findOne({ userId: m4b }))!.pendingCatchup, "fresh never-armed import kept");
+            const e1 = await mk("e1");
+            const e2 = await mk("e2", { hold: true });
+            const e3 = await mk("e3", { status: "sold" });
+            assert.deepStrictEqual(mine(await listingRepository.expireDue(new Date(L(30).getTime() - 1))), [], "nothing expires at day 30 minus 1 ms");
+            assert.ok(mine(await listingRepository.expireDue(L(30))).some(r => id(r) === id(e1)), "expireDue returns e1");
+            const e1raw = await Listing.collection.findOne({ _id: e1._id });
+            assert.ok(e1raw?.status === "expired" && e1raw.endedBy === "system" && +e1raw.endedAt === +L(30), "expired by system at now");
+            assert.strictEqual((await listingRepository.findById(id(e2)))?.status, "live", "hold untouched");
+            assert.strictEqual((await listingRepository.findById(id(e3)))?.status, "sold", "sold untouched");
+            console.log("[OK] expireDue.");
 
-        for (const [name, days, kept] of [["sent29", 29, true], ["sent31", 31, false]] as const) {
-            const id = cu(name);
-            await memberRepository.importCatchup(id, [cuItem(1)], ago(40));
-            await Member.updateOne({ userId: id }, { $set: { "catchup.armedAt": ago(40), "catchup.sentAt": ago(days) } });
-            await memberRepository.dropExpiredCatchups(CU);
-            assert.strictEqual(!!(await Member.collection.findOne({ userId: id }))!.pendingCatchup, kept, `delivered ${days} days ago`);
+            const s1 = await mk("s1", { staleSentAt: T0, refreshedAt: L(5) });
+            const s2 = await mk("s2", { nudgedAt: T0, refreshedAt: L(5) });
+            assert.deepStrictEqual(mine(await listingRepository.expireStaleUnanswered(new Date(L(7).getTime() - 1))), [], "stale window not over");
+            assert.deepStrictEqual(mine(await listingRepository.expireStaleUnanswered(L(7))).map(id), [id(s1)], "expired exactly at 7 days");
+            assert.strictEqual((await listingRepository.findById(id(s1)))?.endedBy, "system");
+            assert.strictEqual((await listingRepository.findById(id(s2)))?.status, "live", "nudged without staleSentAt untouched");
+            console.log("[OK] expireStaleUnanswered.");
+
+            const st = await mk("st", { origin: "legacy", hold: true, source: "bot", chatId: undefined });
+            const stId = id(st);
+            assert.ok(mine(await listingRepository.findStaleEligible([`${P}-st`])).some(r => id(r) === stId), "eligible for its seller");
+            assert.ok(!mine(await listingRepository.findStaleEligible([`${P}-other`])).some(r => id(r) === stId), "not for another seller");
+            assert.ok(mine(await listingRepository.findStaleEligible(null)).some(r => id(r) === stId), "null = everyone");
+            const both = await Promise.all([listingRepository.claimStale(stId, L(2)), listingRepository.claimStale(stId, L(2))]);
+            assert.strictEqual(both.filter(Boolean).length, 1, "exactly one claimStale wins");
+            const stRaw = await Listing.collection.findOne({ _id: st._id });
+            assert.ok(stRaw && stRaw.hold === false && +stRaw.nudgedAt === +L(2) && +stRaw.staleSentAt === +L(2) && +stRaw.refreshedAt === +L(2), "claimStale sets all three clocks");
+            await listingRepository.unclaimStale(stId);
+            const stBack = await Listing.collection.findOne({ _id: st._id });
+            assert.ok(stBack && stBack.hold === true && !("nudgedAt" in stBack) && !("staleSentAt" in stBack), "unclaimStale restores");
+            // unclaim on a row that is no longer a live stale claim changes nothing
+            const uc = await mk("uc", { source: "bot", hold: false, status: "sold", staleSentAt: L(2), nudgedAt: L(2) });
+            await listingRepository.unclaimStale(id(uc));
+            assert.strictEqual((await Listing.collection.findOne({ _id: uc._id }))!.hold, false, "unclaimStale skips a sold row");
+            const uc2 = await mk("uc2", { source: "bot", hold: false });
+            await listingRepository.unclaimStale(id(uc2));
+            assert.strictEqual((await Listing.collection.findOne({ _id: uc2._id }))!.hold, false, "unclaimStale skips a refreshed row (no staleSentAt)");
+            // holdNudge needs a live nudge claim; countHeld counts live rows only
+            const hn = await mk("hn");
+            await listingRepository.holdNudge(id(hn));
+            assert.ok(!("nudgeHeld" in (await Listing.collection.findOne({ _id: hn._id }))!), "holdNudge skips an unclaimed (refreshed) row");
+            const heldBefore = await listingRepository.countHeld();
+            await mk("hs", { hold: true, status: "sold" });
+            assert.strictEqual(await listingRepository.countHeld(), heldBefore, "countHeld ignores ended rows");
+            console.log("[OK] claimStale once.");
+
+            const h = await mk("h1", { nudgedAt: L(7) });
+            await listingRepository.holdNudge(id(h));
+            assert.ok(mine(await listingRepository.findHeldNudges()).some(r => id(r) === id(h)), "findHeldNudges");
+            const rels = await Promise.all([listingRepository.claimHeldRelease(id(h)), listingRepository.claimHeldRelease(id(h))]);
+            assert.strictEqual(rels.filter(Boolean).length, 1, "exactly one release wins");
+            console.log("[OK] claimHeldRelease once.");
+
+            const m1 = await mk("m1");
+            const sys = await listingRepository.markSold(id(m1), L(1), "system");
+            assert.ok(sys?.status === "sold" && sys.endedBy === "system", "markSold by system");
+            const m2 = await mk("m2");
+            assert.strictEqual((await listingRepository.markSold(id(m2), L(1)))?.endedBy, "seller", "markSold defaults to seller");
+            const m3 = await mk("m3");
+            const ex = await listingRepository.markExpired(id(m3), L(2));
+            assert.ok(ex?.status === "expired" && ex.endedBy === "system" && +ex.endedAt! === +L(2), "markExpired");
+            assert.strictEqual(await listingRepository.markExpired(id(m3), L(3)), null, "markExpired only from live");
+            assert.strictEqual(await listingRepository.markExpired(id(m1), L(3)), null, "markExpired not from sold");
+            assert.strictEqual(await listingRepository.countSold(`${P}-m1`), 1, "countSold");
+            assert.strictEqual(await listingRepository.countSold(`${P}-m3`), 0);
+            const x1 = await mk("xp", { source: "bot", status: "expired", endedAt: L(4) });
+            const x2 = await mk("xp", { source: "bot", status: "expired", endedAt: L(6) });
+            await mk("xp", { source: "group", status: "expired", endedAt: L(8) });
+            await mk("xp", { source: "bot", status: "live" });
+            assert.deepStrictEqual((await listingRepository.findSellerExpired(`${P}-xp`, 10)).map(id), [id(x2), id(x1)], "bot expired only, newest endedAt first");
+            assert.strictEqual((await listingRepository.findSellerExpired(`${P}-xp`, 1)).length, 1, "limit");
+            const ck = await mk("ck");
+            await listingRepository.setClockForTest(id(ck), L(9));
+            assert.strictEqual(+(await listingRepository.findById(id(ck)))!.refreshedAt, +L(9), "setClockForTest");
+            console.log("[OK] markSold by, markExpired, countSold, findSellerExpired, setClockForTest.");
+
+            const pu = `${P}-pu`;
+            const mkPost = (title: string, createdAt: Date) => PostModel.create({ userId: pu, title, description: "d", price: "1", location: "l", media: [], status: "approved", createdAt });
+            const pA = await mkPost("a", L(3));
+            const pB = await mkPost("b", L(1));
+            assert.strictEqual((await postRepository.findByIds([String(pA._id), String(pB._id)])).length, 2, "findByIds");
+            assert.deepStrictEqual(await postRepository.findByIds([]), [], "findByIds empty");
+            assert.strictEqual(+(await postRepository.firstCreatedAt(pu))!, +L(1), "firstCreatedAt is the oldest");
+            assert.strictEqual(await postRepository.firstCreatedAt(`${P}-nobody`), null, "firstCreatedAt none");
+            await PostModel.collection.insertOne({ userId: `${P}-nodate`, title: "t", status: "approved" } as never);
+            assert.strictEqual(await postRepository.firstCreatedAt(`${P}-nodate`), null, "a post with no date is not a first date");
+            await PostModel.collection.deleteMany({ userId: `${P}-nodate` });
+            console.log("[OK] postRepository.findByIds, firstCreatedAt.");
+
+            const cs = `${P}-cap`;
+            const base = { chatId: CHAT, senderId: cs, senderName: "s", messageIds: [1], parts: [], text: "x", media: [], mediaGroupIds: [], firstAt: T0 };
+            await Capture.collection.insertOne({ ...base, state: "classified", lastAt: new Date(T0.getTime() + HR) });
+            await Capture.collection.insertOne({ ...base, state: "open", lastAt: new Date(T0.getTime() + HR) });
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + 2 * HR)), true, "settled capture inside range");
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + HR / 2)), false, "settledBefore too early");
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, `${P}-cap2`, T0, new Date(T0.getTime() + 2 * HR)), false, "other sender");
+            await Capture.deleteMany({ senderId: cs, state: "classified" });
+            assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + 2 * HR)), false, "an open capture does not count");
+            console.log("[OK] hasSettledSince.");
         }
 
-        const nv = cu("never");
-        await memberRepository.setAskMode(nv, "never", CU);
-        assert.strictEqual(await memberRepository.importCatchup(nv, [cuItem(1)], CU), false, "import on askMode never");
-        const re = cu("reimport");
-        await memberRepository.importCatchup(re, [cuItem(1)], CU);
-        await memberRepository.armCatchup(CU);
-        assert.strictEqual(await memberRepository.importCatchup(re, [cuItem(9)], CU), true, "re-import");
-        const redoc = (await Member.collection.findOne({ userId: re }))!;
-        assert.ok(!redoc.catchup.armedAt && redoc.pendingCatchup.length === 1 && redoc.pendingCatchup[0].messageId === 9, "re-import clears armedAt and replaces items");
+        // slice 3: LifecycleService refresh, sold, remove
+        {
+            const P = `${RUN}-lc`;
+            const ps = stubPostService();
+            const svc = new LifecycleService(fakeApi().api, {} as BotConfig, asPostService(ps), () => "bot");
+            const gl = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: LT0, refreshedAt: LT0, ...extra,
+            });
+            const bl = async (seller: string) => {
+                const post = await seedPost(`${P}-${seller}`);
+                return { post, listing: await listingRepository.createForPost(post, "dm", false, LT0) };
+            };
+            const sid = (n: string) => `${P}-${n}`;
+            const lid = (l: { _id: unknown }) => String(l._id);
 
-        const tk = cu("take");
-        const tid = async () => String((await memberRepository.findByUserId(tk))!._id);
-        await memberRepository.importCatchup(tk, [cuItem(1), cuItem(2)], CU);
-        assert.strictEqual(await memberRepository.takeCatchupItem(await tid(), 1), null, "take before sentAt");
-        await memberRepository.armCatchup(CU);
-        await memberRepository.claimCatchupDelivery(tk, CU);
-        const tidv = await tid();
-        const taken = await memberRepository.takeCatchupItem(await tid(), 1);
-        assert.strictEqual(taken?.messageId, 1, "first take");
-        assert.strictEqual(await memberRepository.takeCatchupItem(await tid(), 1), null, "second take");
-        await memberRepository.restoreCatchupItem(await tid(), taken!);
-        const takes = await Promise.all([1, 2, 3, 4, 5].map(() => memberRepository.takeCatchupItem(tidv, 1)));
-        assert.strictEqual(takes.filter(Boolean).length, 1, "restored item takable once among 5 concurrent");
-        await memberRepository.setCatchupNote(tk, 77);
-        assert.strictEqual((await memberRepository.findByUserId(tk))!.catchup?.note?.ephemeralMessageId, 77, "setCatchupNote");
-        await memberRepository.dropCatchup(await tid());
-        const tkdoc = (await Member.collection.findOne({ userId: tk }))!;
-        assert.ok(tkdoc.pendingCatchup === undefined && tkdoc.catchup.sentAt, "dropCatchup unsets items only");
-        const counts = await memberRepository.catchupCounts();
-        assert.ok(counts.imported >= 1 && counts.sent >= 1 && counts.armed >= 1 && counts.items >= 1, "catchupCounts");
+            const b1 = await bl("b1");
+            const r1 = await svc.sellListing(lid(b1.listing), sid("b1"), LT0);
+            assert.strictEqual(r1.outcome, "ok");
+            assert.strictEqual((await postRepository.findById(String(b1.post._id)))?.status, "sold", "post sold");
+            const l1 = await listingRepository.findById(lid(b1.listing));
+            assert.ok(l1?.status === "sold" && l1.endedBy === "seller", "listing sold by seller");
+            assert.strictEqual(ps.sold.length, 1, "markPostSold once");
+            const r1b = await svc.sellListing(lid(b1.listing), sid("b1"), LT0);
+            assert.ok(r1b.outcome === "ended" && r1b.listing?.status === "sold", "sold twice is ended");
+            assert.strictEqual(ps.sold.length, 1, "markPostSold still once");
 
-        const item = cuItem(4242);
-        const cl = await listingRepository.createFromCatchup({ chatId: CHAT, messageId: 4242, sellerId: cu("l"), sellerName: "L", item, isBundle: false }, CU);
-        assert.ok(cl.origin === "catchup" && cl.source === "group" && cl.status === "live" && cl.media.length === 0, "createFromCatchup fields");
-        assert.strictEqual(cl.refreshedAt.getTime(), new Date(item.date).getTime(), "refreshedAt is the post date");
-        assert.strictEqual(cl.createdAt.getTime(), CU.getTime(), "createdAt is now");
-        assert.strictEqual(cl.priceValue, 1300);
-        assert.strictEqual((await listingRepository.findLiveByMessage(CHAT, 4242))?._id.toString(), String(cl._id), "findLiveByMessage finds it");
+            const g1 = await gl("g1");
+            assert.strictEqual((await svc.sellListing(lid(g1), sid("g1"), LT0)).outcome, "ok");
+            assert.strictEqual(ps.sold.length, 1, "group sold leaves posts alone");
 
-        const raw = (await Member.collection.findOne({ userId: m1 }))!;
-        assert.ok(raw.firstSeenAt && raw.askMode === "ask" && raw.catchup, "3.1.0 fields intact, catchup added");
-        const album = await listingRepository.createFromCatchup({ chatId: CHAT, messageId: 4250, sellerId: cu("l"), sellerName: "L", item: { ...cuItem(4250), messageIds: [4250, 4251] }, isBundle: false }, CU);
-        assert.deepStrictEqual([...album.messageIds], [4250, 4251], "a listing keeps every message of the window");
-        console.log("[OK] catch-up offers.");
+            const g2 = await gl("g2");
+            const rf = await svc.sellListing(lid(g2), sid("other"), LT0);
+            assert.ok(rf.outcome === "forbidden" && rf.listing, "sold by another user");
+            assert.strictEqual((await listingRepository.findById(lid(g2)))?.status, "live");
+            assert.strictEqual((await svc.sellListing("000000000000000000000000", sid("g2"), LT0)).outcome, "not_found");
+
+            const b2 = await bl("b2");
+            ps.groupEdited = false;
+            const r2 = await svc.sellListing(lid(b2.listing), sid("b2"), LT0);
+            ps.groupEdited = true;
+            assert.ok(r2.outcome === "ok" && r2.groupEdited === false, "deleted group message");
+            assert.strictEqual((await listingRepository.findById(lid(b2.listing)))?.status, "sold");
+            assert.strictEqual((await postRepository.findById(String(b2.post._id)))?.status, "sold");
+
+            const b3 = await bl("b3");
+            const rn = await svc.removeListing(lid(b3.listing), sid("b3"), LT0);
+            const b3l = await listingRepository.findById(lid(b3.listing));
+            assert.ok(rn.outcome === "not_allowed" && b3l?.status === "live" && b3l.text, "remove bot listing refused");
+            const g3 = await gl("g3");
+            assert.strictEqual((await svc.removeListing(lid(g3), sid("g3"), LT0)).outcome, "ok");
+            const g3l = (await Listing.collection.findOne({ _id: g3._id }))!;
+            assert.ok(g3l.status === "removed" && g3l.endedBy === "seller" && !("text" in g3l) && !("title" in g3l) && !("media" in g3l), "remove group scrubs");
+
+            const g4 = await gl("g4", { nudgedAt: LT0 });
+            const rr = await svc.refreshListing(lid(g4), sid("g4"), plusDays(8));
+            const g4l = (await Listing.collection.findOne({ _id: g4._id }))!;
+            assert.ok(rr.outcome === "ok" && g4l.refreshedAt.getTime() === plusDays(8).getTime() && !("nudgedAt" in g4l), "refresh restarts the clock");
+            const g5 = await gl("g5", { status: "expired" });
+            assert.strictEqual((await svc.refreshListing(lid(g5), sid("g5"), plusDays(1))).outcome, "ok");
+            assert.strictEqual((await listingRepository.findById(lid(g5)))?.status, "live", "expired relisted");
+            assert.strictEqual((await svc.refreshListing(lid(g1), sid("g1"), plusDays(1))).outcome, "ended", "sold is final");
+
+            const ep = await seedPost(sid("e1"));
+            const [e1, e2] = await Promise.all([svc.ensureBotListing(String(ep._id), LT0), svc.ensureBotListing(String(ep._id), LT0)]);
+            assert.ok(e1 && e2 && lid(e1) === lid(e2), "ensureBotListing race returns one row");
+            assert.strictEqual(await Listing.countDocuments({ source: "bot", postId: String(ep._id) }), 1);
+            assert.strictEqual(await svc.ensureBotListing(String((await seedPost(sid("e2"), "pending"))._id), LT0), null, "pending post has no listing");
+
+            const sp = await bl("s1");
+            await PostModel.updateOne({ _id: sp.post._id }, { $set: { status: "sold" } });
+            const rec = await reconcileBotListings(LT0);
+            assert.ok(rec.sold >= 1, "reconcile marks the 2.0.1-sold listing");
+            assert.strictEqual((await listingRepository.findById(lid(sp.listing)))?.status, "sold");
+
+            // the sold_/bump_ entry points: the caller already handled the post
+            const sy = await seedPost(sid("sy1"), "sold");
+            await svc.syncSoldForPost(String(sy._id), LT0);
+            assert.strictEqual((await Listing.findOne({ source: "bot", postId: String(sy._id) }))?.status, "sold", "syncSoldForPost creates on demand and sells");
+            const sy2 = await bl("sy2");
+            const soldBefore = ps.sold.length;
+            await svc.syncSoldForPost(String(sy2.post._id), LT0);
+            assert.strictEqual((await listingRepository.findById(lid(sy2.listing)))?.status, "sold");
+            assert.strictEqual((await postRepository.findById(String(sy2.post._id)))?.status, "approved", "syncSoldForPost leaves the post alone");
+            assert.strictEqual(ps.sold.length, soldBefore);
+            const rf2 = await bl("rf2");
+            await Listing.updateOne({ _id: rf2.listing._id }, { $set: { nudgedAt: LT0 } });
+            await svc.refreshForPost(String(rf2.post._id), plusDays(3));
+            const rf2l = (await Listing.collection.findOne({ _id: rf2.listing._id }))!;
+            assert.ok(rf2l.refreshedAt.getTime() === plusDays(3).getTime() && !("nudgedAt" in rf2l), "refreshForPost moves the clock, clears nudgedAt");
+            const rf3 = await bl("rf3");
+            await Listing.updateOne({ _id: rf3.listing._id }, { $set: { status: "taken_down" } });
+            await svc.refreshForPost(String(rf3.post._id), plusDays(3));
+            const rf3l = (await listingRepository.findById(lid(rf3.listing)))!;
+            assert.ok(rf3l.status === "taken_down" && rf3l.refreshedAt.getTime() === LT0.getTime(), "refreshForPost leaves taken_down alone");
+            console.log("[OK] lifecycle refresh, sold, remove.");
         }
 
-        // catch-up offer delivery (slice 6): CatchupService against a recording fake Telegram
+        // slice 3: day-7 nudge, day-30 expiry, held nudges (ticks are called directly, never timers)
         {
-        const DAYMS = 24 * 3600 * 1000;
-        const ago = (days: number) => new Date(Date.now() - days * DAYMS);
-        const item = (id: number, days = 2): CatchupItem => ({ messageId: id, date: ago(days).toISOString(), title: "Glock", price: "1,300", text: "Glock 17 1,300", tier: "strict" });
-        const cfg = { captureMode: "optin", approvedGroupId: CHAT, approvedTopicId: 1, lang: "en" } as BotConfig;
-        let odSeq = 8_100_000_000 + (Date.now() % 100_000_000) * 10;
-        const fresh = () => { const id = String(odSeq++); odIds.push(id); return id; };
-        const boot = (responses?: HarnessOptions["responses"]) => {
-            const h = createHarness({ responses });
-            const svc = new CatchupService(h.bot.api, cfg, new GroupListingService(h.bot.api, cfg, () => "bot"), () => "bot");
-            return { h, svc };
-        };
-        const notes = (h: ReturnType<typeof boot>["h"]) => h.calls.filter(c => c.method === "sendMessage");
-        const stamps = async (id: string) => (await Member.collection.findOne({ userId: id }))!;
-        const now = () => new Date();
+            const ps = stubPostService();
+            const setup = async (nudges = true) => {
+                await Listing.deleteMany({}); // throwaway DB: leftovers from other blocks must not be due in these ticks
+                const f = fakeApi();
+                const config = { nudges, approvedGroupId: CHAT, lang: "en" } as BotConfig;
+                return { f, config, svc: new LifecycleService(f.api, config, asPostService(ps), () => "bot") };
+            };
+            type Fake = ReturnType<typeof fakeApi>;
+            const dms = (f: Fake) => f.calls.filter(c => c.method === "sendMessage" && !c.params.ephemeral_message_parameters);
+            const notes = (f: Fake) => f.calls.filter(c => c.method === "sendMessage" && c.params.ephemeral_message_parameters);
+            const buttons = (call: { params: Record<string, unknown> }) =>
+                (call.params.reply_markup as { inline_keyboard: { callback_data?: string; url?: string }[][] }).inline_keyboard.flat();
+            const sid = (n: number) => String(100000 + n);
+            const botL = async (seller: string) => {
+                const post = await seedPost(seller);
+                return { post, listing: await listingRepository.createForPost(post, "dm", false, LT0, LT0) };
+            };
+            const grpL = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: seller, chatId: CHAT, messageIds: [1], title: "gt", price: "5",
+                text: "x", media: [], status: "live", createdAt: LT0, refreshedAt: LT0, ...extra,
+            });
+            const lid = (l: { _id: unknown }) => String(l._id);
+            const raw = async (l: { _id: unknown }) => (await Listing.collection.findOne({ _id: l._id as never }))!;
+            const DAY = 24 * 3600 * 1000;
+            const ms = (n: number) => new Date(LT0.getTime() + n);
+            const settledCapture = (seller: string, lastAt: Date) => Capture.collection.insertOne({
+                chatId: CHAT, senderId: seller, senderName: "s", messageIds: [1], parts: [], text: "x", media: [], mediaGroupIds: [], firstAt: lastAt, state: "classified", lastAt,
+            });
 
-        // unarmed: nothing goes out
-        {
-            const { h, svc } = boot();
-            const u = fresh();
-            await memberRepository.importCatchup(u, [item(1)], now());
-            await svc.onSaleTopicMessage(u, now());
-            assert.strictEqual(notes(h).length, 0, "unarmed offer: no sendMessage");
+            // day 7 exactly once; a bot listing has no remove
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(1));
+                assert.strictEqual((await svc.tick(ms(7 * DAY - 1))).nudged, 0);
+                assert.strictEqual(dms(f).length, 0, "nothing before day 7");
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 1);
+                const sent = dms(f);
+                assert.strictEqual(sent.length, 1);
+                assert.strictEqual(String(sent[0].params.chat_id), sid(1));
+                const cb = buttons(sent[0]).map(x => x.callback_data);
+                assert.ok(cb.includes(`lc_r_${lid(b.listing)}`) && cb.includes(`lc_s_${lid(b.listing)}`) && !cb.some(x => x?.startsWith("lc_x_")), "bot nudge keyboard");
+                assert.ok(!buttons(sent[0]).some(x => x.url), "DM has no manage link");
+                await svc.tick(ms(7 * DAY + 600_000));
+                assert.strictEqual(dms(f).length, 1, "nudged once");
+            }
+            // group nudge offers remove
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(2));
+                await svc.tick(ms(7 * DAY));
+                assert.ok(buttons(dms(f)[0]).some(x => x.callback_data === `lc_x_${lid(g)}`), "group nudge has remove");
+            }
+            // refresh restarts the clock
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(3));
+                await svc.tick(ms(7 * DAY));
+                await svc.refreshListing(lid(g), sid(3), ms(8 * DAY));
+                await svc.tick(ms(14 * DAY));
+                assert.strictEqual(dms(f).length, 1, "no new nudge at day 14");
+                await svc.tick(ms(15 * DAY));
+                assert.strictEqual(dms(f).length, 2, "second nudge at day 15");
+            }
+            // expiry at day 30 sends nothing and leaves the post alone
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(4));
+                await svc.tick(ms(7 * DAY));
+                assert.strictEqual((await svc.tick(ms(30 * DAY))).expired, 1);
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+                assert.strictEqual(dms(f).length, 1, "expiry sends no DM");
+                assert.strictEqual((await postRepository.findById(String(b.post._id)))?.status, "approved", "post stays approved");
+            }
+            // catch-up tick
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(5));
+                await svc.tick(ms(31 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+                assert.strictEqual(dms(f).length, 0, "catch-up sends nothing");
+            }
+            // nudges false still expires
+            {
+                const { f, svc } = await setup(false);
+                const b = await botL(sid(6));
+                await svc.tick(ms(8 * DAY));
+                assert.strictEqual(dms(f).length, 0);
+                await svc.tick(ms(30 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+            }
+            // hold is untouched
+            {
+                const { f, svc } = await setup();
+                const h = await grpL(sid(7), { hold: true });
+                await svc.tick(ms(60 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(h)))?.status, "live");
+                assert.strictEqual(dms(f).length, 0);
+            }
+            // a post sold by 2.0.1
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(8));
+                await PostModel.updateOne({ _id: b.post._id }, { $set: { status: "sold" } });
+                await svc.tick(ms(7 * DAY));
+                const l = await listingRepository.findById(lid(b.listing));
+                assert.ok(dms(f).length === 0 && l?.status === "sold" && l.endedBy === "system", "sold post: no DM, listing sold by system");
+            }
+            // batch cap
+            {
+                const { f, svc } = await setup();
+                for (let i = 0; i < 30; i++) await grpL(String(100100 + i));
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 25);
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 5);
+                assert.strictEqual(dms(f).length, 30);
+            }
+            // transient error: claim released, the next tick sends
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(9));
+                f.failSend(Number(sid(9)));
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 0);
+                assert.ok(!("nudgedAt" in (await raw(g))), "claim released after a plain error");
+                const healthy = fakeApi();
+                await new LifecycleService(healthy.api, { nudges: true, approvedGroupId: CHAT, lang: "en" } as BotConfig, asPostService(ps), () => "bot").tick(ms(7 * DAY + 600_000));
+                assert.strictEqual(dms(healthy).length, 1, "next tick sends");
+            }
+            // concurrent ticks
+            {
+                const { f, svc } = await setup();
+                await grpL(sid(10));
+                await Promise.all([svc.tick(ms(7 * DAY)), svc.tick(ms(7 * DAY))]);
+                assert.strictEqual(dms(f).length, 1, "concurrent ticks send once");
+            }
+            // 403 and 400 chat not found hold the nudge; released after the member's next settled message
+            for (const [code, desc, n] of [[403, "Forbidden: bot was blocked by the user", 11], [400, "Bad Request: chat not found", 12]] as const) {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(n), { note: { ephemeralMessageId: 77, sentAt: LT0 } });
+                f.failSend(Number(sid(n)), code, desc);
+                const r = await svc.tick(ms(7 * DAY));
+                const held = await raw(g);
+                assert.ok(r.held === 1 && held.nudgeHeld === true && held.nudgedAt, `${code} holds the nudge`);
+                assert.strictEqual(dms(f).length, 1, "attempted once");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY)), 0, "no capture yet");
+                await settledCapture(sid(n), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 119_000)), 0, "too early");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 120_000)), 1, "released after 2 min");
+                const note = notes(f)[0];
+                assert.ok(String(note.params.text).includes("gt"), "note carries the title");
+                assert.ok(buttons(note).some(x => x.url === `https://t.me/bot?start=l_${lid(g)}`), "manage link");
+                assert.ok(!(await raw(g)).nudgeHeld, "held cleared");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 130_000)), 0, "once");
+                const after = await listingRepository.findById(lid(g));
+                assert.ok(after?.note && after.note.ephemeralMessageId !== 77, "new note id stored");
+                assert.ok(f.calls.some(c => c.method === "deleteEphemeralMessage" && c.params.ephemeral_message_id === 77), "previous note deleted");
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            // held nudge cancelled by a refresh
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(13));
+                f.failSend(Number(sid(13)), 403);
+                await svc.tick(ms(7 * DAY));
+                await listingRepository.refresh(lid(g), ms(8 * DAY));
+                await settledCapture(sid(13), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(9 * DAY)), 0);
+                assert.strictEqual(notes(f).length, 0);
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            // a held nudge never released expires
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(14));
+                f.failSend(Number(sid(14)), 403);
+                await svc.tick(ms(7 * DAY));
+                await svc.tick(ms(30 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(g)))?.status, "expired");
+            }
+            // held nudge off switch, and the registered jobs
+            {
+                const { svc } = await setup(false);
+                const g = await grpL(sid(15), { nudgeHeld: true, nudgedAt: ms(7 * DAY) });
+                await settledCapture(sid(15), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(9 * DAY)), 0, "off switch");
+                assert.strictEqual((await raw(g)).nudgeHeld, true, "still held");
+                assert.deepStrictEqual(svc.jobs().map(j => [j.name, j.everyMs]), [["lifecycle", 600_000], ["held-nudges", 10_000]]);
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            await Listing.deleteMany({});
+            await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+            console.log("[OK] nudge, expiry and held nudges.");
         }
 
-        // armed: exactly one ephemeral note, never twice
-        const sentUser = fresh();
+        // slice 3: trust line
         {
-            const { h, svc } = boot();
-            await memberRepository.importCatchup(sentUser, [item(1), item(2)], now());
-            await memberRepository.armCatchup(now());
-            await svc.onSaleTopicMessage(sentUser, now());
-            assert.strictEqual(notes(h).length, 1, "armed: one note");
-            const p = notes(h)[0].params;
-            assert.strictEqual((p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(sentUser));
-            assert.strictEqual(Number(p.chat_id), CHAT);
-            const memberId = String((await stamps(sentUser))._id);
-            const buttons = (p.reply_markup as { inline_keyboard: { url?: string }[][] }).inline_keyboard.flat();
-            assert.ok(buttons.some(b => b.url === `https://t.me/bot?start=k_${memberId}`), "the k_ URL");
-            assert.ok((await stamps(sentUser)).catchup.note.ephemeralMessageId >= 5000, "note id stored");
-            await svc.onSaleTopicMessage(sentUser, now());
-            assert.strictEqual(notes(h).length, 1, "second message: nothing more");
+            const DAYS = 24 * 3600 * 1000;
+            const NOW = new Date("2027-01-15T12:00:00Z");
+            const ago = (d: number) => new Date(NOW.getTime() - d * DAYS);
+            const P = `${RUN}-tl`;
+            const lst = (seller: string, extra: Record<string, unknown>) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: NOW, refreshedAt: NOW, ...extra,
+            });
+            await Member.create({ userId: `${P}-new`, firstSeenAt: ago(10), askMode: "ask" });
+            assert.strictEqual(await trustLineFor(`${P}-new`, "en", NOW), null, "trust line hidden for a new seller");
+            await Member.create({ userId: `${P}-vet`, firstSeenAt: ago(90), askMode: "ask" });
+            assert.strictEqual(await trustLineFor(`${P}-vet`, "en", NOW), `🤝 0 sales · in the market since ${formatSince(ago(90), "en")}`, "trust line shown for a veteran with no sales");
+            await lst("sold", { status: "sold" });
+            await lst("sold", { status: "sold", source: "bot", origin: "legacy", chatId: undefined, messageIds: [], postId: `${P}-p` });
+            await lst("sold", { status: "live" });
+            const line = await trustLineFor(`${P}-sold`, "en", NOW);
+            assert.ok(line !== null && line.startsWith("🤝 2 sales"), "trust line counts sold across sources");
+            await Member.create({ userId: `${P}-ear`, firstSeenAt: ago(20), askMode: "ask" });
+            await User.create({ userId: `${P}-ear`, authLevel: 0, createdAt: ago(200) });
+            await PostModel.create({ userId: `${P}-ear`, title: "t", description: "d", price: "1", location: "l", media: [], status: "pending", createdAt: ago(100) });
+            const earLine = await trustLineFor(`${P}-ear`, "en", NOW);
+            assert.strictEqual(earLine, `🤝 0 sales · in the market since ${formatSince(ago(200), "en")}`, "since is the earliest");
+            assert.strictEqual(formatSince(new Date("2026-11-15T00:00:00Z"), "en"), "November 2026");
+            console.log("[OK] trust line.");
         }
 
-        // shadow mode holds the offer; optin then delivers
+        // slice 3: /stalecheck
         {
-            const { h, svc } = boot();
-            const u = fresh();
-            await memberRepository.importCatchup(u, [item(1)], now());
-            await memberRepository.armCatchup(now());
-            cfg.captureMode = "shadow";
-            try { await svc.onSaleTopicMessage(u, now()); } finally { cfg.captureMode = "optin"; }
-            assert.strictEqual(notes(h).length, 0, "shadow: nothing sent");
-            assert.ok((await stamps(u)).pendingCatchup && !(await stamps(u)).catchup.sentAt, "shadow: offer still held");
-            await svc.onSaleTopicMessage(u, now());
-            assert.strictEqual(notes(h).length, 1, "optin delivers the held offer");
-        }
+            const HOUR = 3600 * 1000;
+            const DAYMS = 24 * HOUR;
+            const T = new Date("2027-02-01T10:00:00Z");
+            const at = (ms: number) => new Date(T.getTime() + ms);
+            const S1 = "100001", S2 = "100002", S3 = "100003";
+            const cfg = { nudges: false, approvedGroupId: CHAT, lang: "en" } as BotConfig;
+            type Fake = ReturnType<typeof fakeApi>;
+            const dms = (f: Fake) => f.calls.filter(c => c.method === "sendMessage");
+            const rows = (f: Fake, uid: string) => dms(f).filter(c => String(c.params.chat_id) === uid);
+            const created = new Date("2026-03-05T22:30:00Z");
+            const raw1 = async (l: { _id: unknown }) => (await Listing.collection.findOne({ _id: l._id as never }))!;
+            const seed = async (seller: string, title: string, legacy = true) => {
+                const post = await PostModel.create({ userId: seller, title, description: "d", price: "100", location: "l", media: [], status: "approved", createdAt: created });
+                const listing = await Listing.create({
+                    source: "bot", origin: legacy ? "legacy" : "dm", hold: legacy, postId: String(post._id), sellerId: seller, title, price: "100",
+                    messageIds: [], media: [], status: "live", createdAt: created, refreshedAt: created,
+                });
+                return { post, listing };
+            };
+            const mkSvc = (f: Fake, c: BotConfig = cfg) => {
+                const lifecycle = new LifecycleService(f.api, c, asPostService(stubPostService()), () => "bot");
+                return { lifecycle, svc: new StaleCheckService(f.api, c) };
+            };
+            const fresh = async () => {
+                await Listing.deleteMany({});
+                await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+                const f = fakeApi();
+                return { f, ...mkSvc(f) };
+            };
+            const seedAll = async () => {
+                const a1 = await seed(S1, "Glock 17 alpha"); const a2 = await seed(S1, "Hi-capa beta");
+                const b1 = await seed(S2, "Scope gamma"); const c1 = await seed(S3, "Normal delta", false);
+                return { a1, a2, b1, c1 };
+            };
 
-        // armed 31 days ago: no note, purge drops it
-        {
-            const { h, svc } = boot();
-            const u = fresh();
-            await memberRepository.importCatchup(u, [item(1)], ago(32));
-            await Member.updateOne({ userId: u }, { $set: { "catchup.armedAt": ago(31) } });
-            await svc.onSaleTopicMessage(u, now());
-            assert.strictEqual(notes(h).length, 0, "armed 31 days ago: no note");
-            await memberRepository.dropExpiredCatchups(now());
-            assert.strictEqual((await stamps(u)).pendingCatchup, undefined, "purge drops it");
-        }
+            assert.deepStrictEqual(parseSellerIds("100001 100002"), { ids: ["100001", "100002"], invalid: [] });
+            assert.deepStrictEqual(parseSellerIds("abc 12"), { ids: [], invalid: ["abc", "12"] });
+            assert.deepStrictEqual(parseSellerIds(""), { ids: [], invalid: [] });
 
-        // every item older than 30 days: no note, items dropped
-        {
-            const { h, svc } = boot();
-            const u = fresh();
-            await memberRepository.importCatchup(u, [item(1, 40), item(2, 35)], now());
-            await memberRepository.armCatchup(now());
-            await svc.onSaleTopicMessage(u, now());
-            assert.strictEqual(notes(h).length, 0, "stale items: no note");
-            assert.strictEqual((await stamps(u)).pendingCatchup, undefined, "stale items dropped");
-            assert.ok(!(await stamps(u)).catchup.sentAt, "nothing sent: the claim is released");
-        }
+            // render
+            {
+                const items = [
+                    { listingId: "a".repeat(24), title: "Alpha", price: "100", postedAt: created },
+                    { listingId: "b".repeat(24), title: "Beta", price: "5", postedAt: new Date("2026-12-25T00:00:00Z") },
+                ];
+                const r = renderStaleDm({ firstName: "Dana", items, locale: "en" });
+                assert.ok(r.text.includes("Dana") && r.text.includes("Alpha") && r.text.includes("Beta"), "names and titles");
+                assert.ok(r.text.includes("1.") && r.text.includes("2."), "numbered");
+                assert.ok(r.text.includes("5.3.2026") && r.text.includes("25.12.2026"), "UTC D.M.YYYY");
+                assert.deepStrictEqual(r.keyboard.map(row => row.map(b => b.callback_data)), [
+                    [`lc_r_${"a".repeat(24)}`, `lc_s_${"a".repeat(24)}`], [`lc_r_${"b".repeat(24)}`, `lc_s_${"b".repeat(24)}`]]);
+                assert.ok(!JSON.stringify(r.keyboard).includes("lc_x_"), "no remove button");
+                assert.ok(!renderStaleDm({ firstName: "", items, locale: "en" }).text.includes("  "), "no double space without a name");
+            }
 
-        // a failing send releases the claim; the next message delivers once
-        {
-            let fail = true;
-            const { h, svc } = boot({ sendMessage: () => (fail ? { ok: false, error_code: 400, description: "Bad Request: nope" } : undefined) });
-            const u = fresh();
-            await memberRepository.importCatchup(u, [item(1)], now());
-            await memberRepository.armCatchup(now());
-            const realError = console.error;
-            console.error = () => {};
-            try { await svc.onSaleTopicMessage(u, now()); } finally { console.error = realError; }
-            assert.ok(!(await stamps(u)).catchup.sentAt, "failed send: claim released");
-            fail = false;
-            await svc.onSaleTopicMessage(u, now());
-            await svc.onSaleTopicMessage(u, now());
-            assert.strictEqual(notes(h).filter(c => (c.result as { ephemeral_message_id?: number }).ephemeral_message_id !== undefined).length, 1, "delivered once after the retry");
-        }
+            // plan counts
+            {
+                const { svc } = await fresh();
+                await seedAll();
+                const all = await svc.plan(null);
+                assert.deepStrictEqual([all.sellers.length, all.sellers.reduce((n, s) => n + s.listings.length, 0)], [2, 3]);
+                const one = await svc.plan([S1]);
+                assert.deepStrictEqual([one.sellers.length, one.sellers[0].listings.length], [1, 2]);
+                assert.deepStrictEqual((await svc.plan(["999999"])).unknownIds, ["999999"]);
+            }
 
-        // importFile end to end
-        {
-            const { svc } = boot();
-            const a = fresh();
-            const b = fresh();
-            const c = fresh();
-            const file: CatchupFile = { version: 1, generatedAt: now().toISOString(), sellers: [
-                { userId: a, name: "A", items: [item(1), item(2)] },
-                { userId: b, name: "B", items: [item(3)] },
-                { userId: sentUser, name: "S", items: [item(4)] }, // already offered
-                { userId: c, name: "C", items: [] },
-            ] };
-            assert.deepStrictEqual(await svc.importFile(file, now()), { sellers: 2, items: 3, skipped: 2 }, "import counts");
-            assert.strictEqual((await stamps(a)).pendingCatchup.length, 2);
-            assert.ok(!(await stamps(a)).catchup.armedAt && !(await stamps(a)).catchup.sentAt, "imported, not armed, not sent");
-            assert.strictEqual((await stamps(sentUser)).pendingCatchup.length, 2, "sent member untouched");
-        }
-        console.log("[OK] catch-up offer delivery.");
+            // pilot sends only to listed; no resend
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2, b1 } = await seedAll();
+                const r = await svc.run([S1], T);
+                assert.deepStrictEqual([r.sellersSent, r.listingsSent, r.busy], [1, 2, false]);
+                assert.strictEqual(dms(f).length, 1, "exactly one DM");
+                const dm = dms(f)[0];
+                assert.strictEqual(String(dm.params.chat_id), S1);
+                assert.ok(String(dm.params.text).includes("Glock 17 alpha") && String(dm.params.text).includes("Hi-capa beta"), "both titles in one DM");
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === false && +raw.nudgedAt === +T && +raw.staleSentAt === +T && +raw.refreshedAt === +T, "claimed clocks");
+                }
+                assert.strictEqual((await raw1(b1.listing)).hold, true, "unlisted seller untouched");
+                await svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(f).length, 1, "second run does not resend");
+                await svc.run(null, at(HOUR));
+                assert.deepStrictEqual(dms(f).map(c => String(c.params.chat_id)), [S1, S2], "all-run reaches only S2");
+                await svc.run(null, at(HOUR));
+                assert.strictEqual(dms(f).length, 2, "third run sends nothing");
+            }
+
+            // 403 and 400 chat not found expire
+            for (const [code, desc] of [[403, "Forbidden: bot was blocked by the user"], [400, "Bad Request: chat not found"]] as const) {
+                const { f, svc } = await fresh();
+                const { b1 } = await seedAll();
+                f.failSend(Number(S2), code, desc);
+                const r = await svc.run([S2], T);
+                const raw = await raw1(b1.listing);
+                assert.ok(raw.status === "expired" && raw.endedBy === "system" && r.blocked === 1, `${code} expires`);
+            }
+
+            // transient failure restores the hold
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2 } = await seedAll();
+                f.failSend(Number(S1));
+                const realErr = console.error; console.error = () => {};
+                let r;
+                try { r = await svc.run([S1], T); } finally { console.error = realErr; }
+                assert.strictEqual(r.failed, 1);
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === true && !("nudgedAt" in raw) && !("staleSentAt" in raw), "hold restored");
+                }
+                const ok = fakeApi();
+                await mkSvc(ok).svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(ok).length, 1, "re-run sends");
+            }
+
+            // an error between claim and send unclaims every claimed row and counts as failed
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2 } = await seedAll();
+                const real = postRepository.findByIds;
+                postRepository.findByIds = async () => { throw new Error("db down"); };
+                const realErr = console.error; console.error = () => {};
+                let r;
+                try { r = await svc.run([S1], T); } finally { postRepository.findByIds = real; console.error = realErr; }
+                assert.strictEqual(r.failed, 1);
+                assert.strictEqual(dms(f).length, 0, "no DM");
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === true && !("nudgedAt" in raw) && !("staleSentAt" in raw), "unclaimed after the error");
+                }
+                const ok = fakeApi();
+                await mkSvc(ok).svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(ok).length, 1, "re-run sends");
+            }
+
+            // a claimed listing whose post is missing is unclaimed (ledger)
+            {
+                const { f, svc } = await fresh();
+                const { a1 } = await seedAll();
+                await PostModel.deleteOne({ _id: a1.post._id });
+                await svc.run([S1], T);
+                assert.ok(!String(rows(f, S1)[0].params.text).includes("Glock 17 alpha"), "missing post dropped from the DM");
+                const raw = await raw1(a1.listing);
+                assert.ok(raw.hold === true && !("staleSentAt" in raw), "missing post: unclaimed");
+            }
+
+            // concurrent runs
+            {
+                const { f, svc } = await fresh();
+                await seedAll();
+                const [r1, r2] = await Promise.all([svc.run(null, T), svc.run(null, T)]);
+                assert.strictEqual([r1, r2].filter(r => r.busy).length, 1, "one run is busy");
+                assert.strictEqual(dms(f).length, 2, "one DM per seller");
+            }
+
+            // a post sold by 2.0.1 is dropped
+            {
+                const { f, svc } = await fresh();
+                const { a1, b1 } = await seedAll();
+                await PostModel.updateOne({ _id: a1.post._id }, { $set: { status: "sold" } });
+                await svc.run([S1], T);
+                const text = String(rows(f, S1)[0].params.text);
+                assert.ok(!text.includes("Glock 17 alpha") && text.includes("Hi-capa beta"), "sold post dropped from the DM");
+                const soldRaw = await raw1(a1.listing);
+                assert.ok(soldRaw.status === "sold" && soldRaw.endedBy === "system", "its listing is sold by system");
+                await PostModel.updateOne({ _id: b1.post._id }, { $set: { status: "sold" } });
+                const n = dms(f).length;
+                await svc.run([S2], T);
+                assert.strictEqual(dms(f).length, n, "all sold: no DM");
+                assert.strictEqual((await raw1(b1.listing)).status, "sold");
+            }
+
+            // 7-day answer window, relist and sell after expiry
+            {
+                const { f, lifecycle, svc } = await fresh();
+                const { a1, a2, b1 } = await seedAll();
+                await svc.run(null, T);
+                assert.strictEqual(dms(f).length, 2);
+                await lifecycle.refreshListing(String(a1.listing._id), S1, at(2 * DAYMS));
+                await lifecycle.tick(at(7 * DAYMS - 1));
+                assert.strictEqual((await raw1(a2.listing)).status, "live", "not yet");
+                await lifecycle.tick(at(7 * DAYMS));
+                const exp = await raw1(a2.listing);
+                assert.ok(exp.status === "expired" && exp.endedBy === "system", "unanswered expires at 7d");
+                assert.strictEqual((await raw1(a1.listing)).status, "live", "answered stays live");
+                const nf = fakeApi();
+                const nl = mkSvc(nf, { ...cfg, nudges: true } as BotConfig).lifecycle;
+                await nl.tick(at(7 * DAYMS));
+                assert.ok(!nf.calls.some(c => String(c.params.chat_id) === S1), "not nudged at day 7 (refreshed day 2)");
+                await nl.tick(at(9 * DAYMS));
+                assert.ok(nf.calls.some(c => String(c.params.chat_id) === S1), "nudged at day 9");
+                const rl = await lifecycle.refreshListing(String(a2.listing._id), S1, at(10 * DAYMS));
+                assert.strictEqual(rl.listing?.status, "live", "relist after expiry");
+                const sl = await lifecycle.sellListing(String(b1.listing._id), S2, at(10 * DAYMS));
+                assert.strictEqual(sl.listing?.status, "sold", "sell after expiry");
+                assert.strictEqual((await PostModel.findById(b1.post._id))?.status, "sold", "post sold");
+            }
+            await Listing.deleteMany({});
+            await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+            console.log("[OK] /stalecheck service.");
         }
     } finally {
         await Member.deleteMany({ userId: { $in: odIds } });
@@ -813,6 +1273,7 @@ async function run() {
             Listing.deleteMany({ sellerId: like }),
             PostModel.deleteMany({ userId: like }),
             Member.deleteMany({ userId: like }),
+            User.deleteMany({ userId: like }),
             Draft.deleteMany({ userId: like }),
             ShadowLog.deleteMany({ chatId: CHAT }),
         ]);

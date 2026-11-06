@@ -9,6 +9,7 @@ export interface IUser extends Document {
     authLevel: AuthLevel;
     languageCode: string | null;
     preferredLocale: string | null;
+    createdAt?: Date;
 }
 
 const userSchema = new Schema<IUser>(

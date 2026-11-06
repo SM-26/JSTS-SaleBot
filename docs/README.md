@@ -34,7 +34,9 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
 - **Shadow Classifier (market groundwork)** — With `captureMode: "shadow"` the bot records messages in the sale topic into per-sender posting windows (90 s, closed after 30 s of quiet), classifies each (`strict`, `ask`, `wtb`, `none`) and logs what automatic capture *would* have done (`shadow_log`, 120 days). It **sends nothing** to the group or to members. Captured text lives 7 days. `buyerMatches: "shadow"` also logs which live listings a "wanted" message would match
 - **Opt-in Capture Notes** — With `captureMode: "optin"`, a member who posts a sale message in the sale topic gets a **private note** (an ephemeral message only they see, nothing public) asking whether to add it to the market: **Add**, **Not now** or **Don't ask again**. Add makes a *group listing* that points at their own message; the member can mark it **Sold**, **Refresh** or **Remove** from the note, from `/myposts` or from a bot card, and editing the message keeps the listing in step. Reposting the same item refreshes the listing and brings its text and price up to date. The bot never touches the member's message and a seller can never remove an approved bot post. At most 3 notes per seller per 24 h; a text a note was already sent for is not asked again for 30 days. A seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) gets a **Take down** card in the moderation topic (group listings are post-moderated). The card offers **Take down** (the member's message stays) or **Take down and delete original post**, which asks once more and then deletes the member's message and all its photos (moderators only; Telegram lets a bot delete only messages under 48 h old, and the card says how many were left). A seller's Remove never deletes anything
-- **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group listing
+- **Listing Lifecycle** — With `nudges: true` a listing not refreshed for 7 days gets a DM with **Refresh** and **Sold** (group listings also **Remove**); after 30 days it expires (this runs whatever `nudges` says). An approved bot post stays `approved` when its listing expires, and `/myposts` offers **Relist**. A held nudge (seller not reachable) arrives as a private note (with **Manage**) after their next sale-topic message; held nudges need capture on (`captureMode` not `off`). **Bump** lifts a legacy hold, which shrinks the `/stalecheck` count. New group cards carry a short trust line about the seller
+- **`/stalecheck`** — Admin DM command: asks the sellers of legacy (held) listings whether each is still for sale. A dry run first, nothing is sent before **Send** is pressed; unanswered listings expire 7 days later
+- **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group or bot listing
 - **`/label` and `/stats`** — Admins hand-label would-list rows as sale / not sale (`/label`); moderators see tier counts, merge counts and label precision against the go/no-go gate (`/stats`)
 - **Catch-up Scan** — A one-off, owner-run way to offer posts members made before the bot was listening. A script reads a group export on the owner's machine and writes a review file; `/catchup import` stores it, and after `/catchup send` each seller gets one private note with a button into the bot, where they Add the items they want as group listings. Nothing is sent before the owner arms it, and delivery also needs `captureMode: "optin"`
 - **User Mentions** — Deep-links (`tg://user`) for users without a username
@@ -103,6 +105,7 @@ Every published post card carries **🚫 Take down** (when its listing exists). 
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
 | `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
+| `/stalecheck` | DM only. Dry run of the legacy-listing check, then **Send** to ask the sellers (`/stalecheck <userId ...>` limits it to those sellers). |
 | `/label` | Label a random unlabeled would-list row as sale / not sale (or skip) to measure the shadow classifier. |
 | `/catchup` | Catch-up offers (private chat). Alone: counts. Send `catchup.json` as a file with the caption `/catchup import` to store the offers; `/catchup send` arms them. See the runbook below. |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
@@ -291,6 +294,8 @@ src/
 │   ├── captureNoteService.ts # Private opt-in capture notes: ask, refresh, Add / Not now / Don't ask again (mk_)
 │   ├── catchupScan.ts        # Pure scan of a group export into a catch-up file (also used by `scripts/catchup.ts`)
 │   ├── catchupService.ts     # `/catchup` import and send, held offer note, `k_` DM and `ck_` buttons
+│   ├── lifecycleService.ts   # Refresh / sold / remove for any listing, 7-day nudge, 30-day expiry, lc_ buttons
+│   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
 │   ├── groupListingService.ts # Group listings: Add, Sold / Refresh / Remove (ls_), edit sync, /myposts section
 │   ├── listingCards.ts       # Pure card builders (ask note, management card) and callback_data helpers
 │   ├── ephemeralNotes.ts     # The only caller of the ephemeral Bot API methods (send, edit, delete a note)
@@ -306,6 +311,7 @@ src/
 │   ├── checkClassifier.ts    # Classifier fixtures
 │   ├── checkMarket.ts        # Market collections, capture windows, sweeper, shadow pipeline (needs MONGO_URI)
 │   ├── syntheticCapture.ts   # Manual: 20 messages through the controller on the TEST bot/group; sends nothing
+│   ├── syntheticLifecycle.ts # Manual: a stale-check DM and a nudge DM to the owner on the TEST bot
 │   ├── syntheticOptin.ts     # Manual: one real private note + one moderation card on the TEST bot/groups, cleaned up after
 │   ├── checkListingCards.ts  # Card builders, callback_data and start payload formats (`pnpm run check-cards`)
 │   ├── fixtures.ts           # `seedCapture`: a classified capture straight through the model
@@ -473,7 +479,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
 | `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
-| `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
+| `nudges`             | boolean | `true` sends the 7-day refresh nudge to sellers (default `false`; expiry runs regardless) |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |
 

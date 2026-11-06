@@ -4,14 +4,6 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased
-  - Added:
-    - **Take down and delete original post.** A group listing's take-down card has a second button (`tx_<listingId>_<d|y|n>`, moderators only) that also deletes the member's message and all its photos, after one confirm step that survives a restart. A double press acts once, the press is logged with the moderator, listing and message ids, and if Telegram refuses some deletions (48 h limit, missing right) the card says how many are left. The listing still ends and the seller is told as for a take-down. Bot listings keep the single button; a seller's Remove still never deletes anything.
-
-Unreleased - Dependency update.
-  - Changed:
-    - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
-
 Unreleased - Catch-up scan (slice 6 of "the market", #104).
   - Added:
     - **Catch-up scan.** A one-off way to offer the sale-topic posts members already made, before the bot was listening, as group listings. The owner exports the group history and runs `pnpm run catchup -- <export.json>` on their own machine (no database, no network). It reads the last 30 days, groups posts the way the live capture does, keeps the `strict` and `ask` tiers, merges reposts and writes `catchup.json` (gitignored) plus a counts-only summary. Posts without a title are dropped and counted.
@@ -21,9 +13,26 @@ Unreleased - Catch-up scan (slice 6 of "the market", #104).
     - Tests: `check-catchup` (new, in `pnpm test`), plus coverage in `check-callbacks`, `check-cards`, `check-market`, `check-flows` and `check-routes`. `/test` gained "Catch-up offer to me" (test bot only).
   - Notes:
     - Data: additive only. `members` gains the optional `pendingCatchup` and `catchup` (stamps `importedAt`, `armedAt`, `sentAt`); `listings` gets an optional `origin: "catchup"`; `posts` and `users` are unchanged. `catchup.json` and the export hold member text: delete both after the import.
-    - **Rollback caveat:** to 3.1.0. `ck_` buttons fall to the stale-button catch-all, `k_` links fall to the greeting, and `members.catchup` is ignored. Listings members already added stay. Stamps are harmless leftovers.
+    - **Rollback caveat:** to 3.2.0 or older. `ck_` buttons fall to the stale-button catch-all, `k_` links fall to the greeting, and `members.catchup` is ignored. Listings members already added stay. Stamps are harmless leftovers.
     - **Owner gates:** (1) the owner reviews `catchup.json` before the import; (2) the owner approves the final note text, as sent by "Catch-up offer to me" on the test bot; (3) `/catchup send` needs the owner's go-ahead. Delivery also needs `captureMode: optin`, which is a separate switch: with `shadow` armed offers wait (their clock keeps running).
     - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead.
+
+3.2.0 - Listing lifecycle (slice 3 of "the market", #104).
+  - Added:
+    - **Nudge.** With `nudges: true`, a listing not refreshed for 7 days gets a DM to its seller (Refresh and Sold; a group listing also gets Remove). A seller the bot cannot DM is held: the nudge arrives as a private note (with Manage) after their next sale-topic message. Held nudges need capture on (`captureMode` not `off`). Bump lifts `hold`, so it shrinks the `/stalecheck` count.
+    - **Expiry.** A live listing not refreshed for 30 days expires. This runs whatever `nudges` says (legacy `hold` listings are skipped). An approved bot post stays `approved` when its listing expires; the group message is not touched.
+    - **Relist.** `/myposts` shows the seller's expired bot listings with a Relist button. Callbacks `lc_<r|s|x>_<listingId>` (refresh/relist, sold, remove) are frozen. A seller can still never remove an approved bot post: it ends only by Sold, expiry or take-down.
+    - **Trust line** on new group cards (sales count plus the date the seller started; nothing extra for a new seller).
+    - **`/stalecheck`** (admin, DM only): asks the sellers of the legacy listings that are on hold whether each is still for sale (`sc_go` to send after a dry run, `sc_no` to cancel; the buttons in the seller's DM use `lc_`). `/stalecheck <userId ...>` limits it to those sellers. Unanswered listings expire 7 days after the DM, a blocked seller's expire at once.
+    - Tests: `/test` gained "Age my test listing 7 days" / "30 days" and "Stale-check dry run (to me only)" (test bot only); `check-callbacks`, `check-cards` and `check-market` cover the new formats and flows; `src/tests/syntheticLifecycle.ts` (manual, TEST bot only, sends two real DMs to the owner).
+    - **Take down and delete original post.** A group listing's take-down card has a second button (`tx_<listingId>_<d|y|n>`, moderators only) that also deletes the member's message and all its photos, after one confirm step that survives a restart. A double press acts once, the press is logged with the moderator, listing and message ids, and if Telegram refuses some deletions (48 h limit, missing right) the card says how many are left. The listing still ends and the seller is told as for a take-down. Bot listings keep the single button; a seller's Remove still never deletes anything.
+  - Changed:
+    - eslint 10.13.0 → 10.14.0, globals 17.13.0 → 17.14.0, mongoose 9.11.4 → 9.12.0 (mongodb driver 7.8). Removed the `node-telegram-bot-api@2.3.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml` (now over 24 h old). TypeScript 7 stays out (blocked by `ts-node` and `typescript-eslint`).
+  - Notes:
+    - Data: additive only. `listings.nudgeHeld` and `listings.staleSentAt` are new optional fields; `posts` and `users` are unchanged. Rolling back to 3.1.0 is safe: the old image ignores the fields and the `lc_`/`sc_` buttons do nothing.
+    - **Rollout order** (owner gates, nothing automatic): (1) deploy with `nudges: false`: legacy listings stay on hold and nothing is sent; expiry runs for non-hold listings. (2) Run `/stalecheck` on the test bot, read the dry run, finalize the text, then "Stale-check dry run (to me only)". (3) On prod, `/stalecheck <pilot ids>`, wait for answers, then `/stalecheck` for the rest. (4) `/config nudges true` only on the owner's go-ahead; at most 25 nudges go out per tick, so the first batch spreads over several ticks.
+    - Do not deploy during a `/stalecheck` send. Before deploying, this read-only query should return 0: `db.listings.countDocuments({status:"live",hold:false,refreshedAt:{$lte:new Date(Date.now()-30*864e5)}})`.
+    - Take the `mongodump` from `docs/BACKUP.md` first. Deploys need the owner's go-ahead.
 
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
   - Added:
