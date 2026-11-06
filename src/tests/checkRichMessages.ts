@@ -77,7 +77,7 @@ function goldenPost(config: BotConfig, data: PostData, opts: Opts = {}): unknown
     return { blocks };
 }
 
-function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { enableFaq?: boolean; donationsEnabled?: boolean }): unknown {
+function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { enableFaq?: boolean; donationsEnabled?: boolean; buyerMatches?: string }): unknown {
     const heading = (key: string, size: number) => ({ type: "heading", text: t(key).replace(/<\/?b>/g, ""), size });
     const cmd = (key: string) => {
         const line = t(key);
@@ -89,6 +89,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
     const generalCmds = ["helpStart", "helpNewPost", "helpCancel", "helpMyPosts", "helpLang", "helpHelp"];
     if (config.enableFaq !== false) generalCmds.push("helpFaq");
     if (config.donationsEnabled !== false) generalCmds.push("helpDonate");
+    if (config.buyerMatches === "on") generalCmds.push("helpAlerts");
 
     const blocks: unknown[] = [
         heading("helpTitle", 2),
@@ -221,9 +222,11 @@ function checkHelp(): number {
         for (const level of [AuthLevel.USER, AuthLevel.MOD, AuthLevel.ADMIN]) {
             for (const enableFaq of flags) {
                 for (const donationsEnabled of flags) {
-                    const cfg = { enableFaq, donationsEnabled };
-                    assertSame(buildHelpMessage(t, level, cfg), goldenHelp(t, level, cfg), `help [${lang}, level ${level}, ${JSON.stringify(cfg)}]`);
-                    cases++;
+                    for (const buyerMatches of [undefined, "shadow", "on"]) {
+                        const cfg = { enableFaq, donationsEnabled, buyerMatches };
+                        assertSame(buildHelpMessage(t, level, cfg), goldenHelp(t, level, cfg), `help [${lang}, level ${level}, ${JSON.stringify(cfg)}]`);
+                        cases++;
+                    }
                 }
             }
         }

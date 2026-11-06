@@ -24,6 +24,7 @@ import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { BuyerNoteService } from "../services/buyerNoteService";
+import { SavedSearchService } from "../services/savedSearchService";
 import { GroupListingService } from "../services/groupListingService";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
@@ -67,6 +68,7 @@ export class BotController {
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
     readonly buyerNotes: BuyerNoteService;
+    private savedSearches: SavedSearchService;
 
     constructor(api: Api) {
         this.api = api;
@@ -79,6 +81,7 @@ export class BotController {
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
+        this.savedSearches = new SavedSearchService(api, this.config);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
@@ -134,11 +137,15 @@ export class BotController {
         }
     }
 
-    async HandleStart(msg: Message, args = ""): Promise<void> {
-        // Deep links from capture notes; slices 4-6 add s_ and k_ here.
+    async HandleStart(msg: Message, args = "", ctx?: Context): Promise<void> {
+        // Deep links from capture notes; slice 6 adds k_ here.
         const payload = parseStartPayload(args);
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
+        if (payload?.kind === "s" && this.config.buyerMatches === "on") {
+            await this.savedSearches.handleStartLink(msg, payload.id, ctx && this.session.find(ctx)?.data);
+            return;
+        }
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
@@ -368,6 +375,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "alerts") {
+            await this.savedSearches.handleCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -505,11 +517,11 @@ export class BotController {
             return next();
         });
 
-        bot.use(cmd("start", (msg, args) => {
+        bot.use(cmd("start", (msg, args, ctx) => {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
             if (args === "sell") return this.wizardService.handleNewPost(msg);
-            return this.HandleStart(msg, args);
+            return this.HandleStart(msg, args, ctx);
         }));
         bot.use(cmd("newpost", (msg) => {
             if (!isPrivate(msg)) return;
@@ -528,6 +540,10 @@ export class BotController {
         bot.use(cmd("myposts", (msg) => {
             if (!isPrivate(msg)) return;
             return this.myPostsService.showPosts(msg);
+        }));
+        bot.use(cmd("alerts", (msg, args, ctx) => {
+            if (!isPrivate(msg)) return;
+            return this.savedSearches.handleAlerts(msg, args, this.session.find(ctx)?.data);
         }));
         bot.use(cmd("help", (msg) => {
             if (!isPrivate(msg)) return;
@@ -629,7 +645,12 @@ export class BotController {
             return this.handleDonate(msg);
         }));
 
-        // After the commands: a private non-command message is the answer to the user's wizard step.
+        // After the commands: the answer to a saved search's one-reply fix, else the user's wizard step.
+        bot.use(async (ctx, next) => {
+            const msg = ctx.message;
+            if (msg && isPrivate(msg) && await this.savedSearches.handleFixReply(msg, this.session.find(ctx)?.data)) return;
+            return next();
+        });
         bot.use(async (ctx, next) => {
             const msg = ctx.message;
             if (msg && isPrivate(msg) && await this.wizardService.handleMessage(msg)) return;

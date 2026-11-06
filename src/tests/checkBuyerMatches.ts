@@ -17,7 +17,7 @@ import type { GroupListingService } from "../services/groupListingService";
 import { isSearchable, matchListings, parseQuery } from "../services/matchService";
 import { processOneClosed, type ClassifiedEvent } from "../services/shadowService";
 import { seedCapture } from "./fixtures";
-import { createHarness } from "./harness";
+import { BOT_USERNAME, createHarness } from "./harness";
 
 // Buyer query parsing and matching (slice 4). The pure part always runs; the
 // Mongo part (later tasks) prints [SKIP] without MONGO_URI.
@@ -261,6 +261,156 @@ async function checkBuyerNote() {
     console.log("[OK] buyer note.");
 }
 
+async function checkSavedSearchDm() {
+    // config.json is read at import time, so load the controller only after the SKIP check.
+    const { BotController } = await import("../controllers/botController");
+    const { default: Draft } = await import("../models/Draft");
+    const h = createHarness();
+    const controller = new BotController(h.bot.api);
+    controller.registerRoutes(h.bot, BOT_USERNAME);
+    const original = controller.config.buyerMatches;
+    const base = 7_100_000_000 + (Date.now() % 1_000_000_000);
+    const [u1, u2, u3] = [base, base + 1, base + 2];
+    const WANT = "מחפש glock 17";
+    const rows = (u: number) => SavedSearch.find({ userId: String(u) }).sort({ createdAt: 1 });
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const sent = () => h.calls.filter((c) => c.method === "sendMessage");
+    const lastText = () => String(sent().at(-1)?.params.text);
+    const say = async (text: string, o: { userId: number; replyToMessageId?: number }) => {
+        h.calls.length = 0;
+        await h.sendText(text, o);
+        await sleep(150);
+    };
+    const press = async (data: string, userId: number, messageId = 7) => {
+        h.calls.length = 0;
+        await h.pressButton(data, { userId, messageId });
+        await sleep(150);
+        return h.calls.filter((c) => c.method === "answerCallbackQuery");
+    };
+    const t = (key: string) => localeService.t("en", key);
+    const cap = async (senderId: number, text: string) => String((await seedCapture({ senderId: String(senderId), text, state: "classified" }))._id);
+    const promptId = () => Number((sent().at(-1)?.result as { message_id: number }).message_id);
+    const { localeService } = await import("../services/localeService");
+
+    try {
+        controller.config.buyerMatches = "on";
+        const c1 = await cap(u1, WANT);
+        await say(`/start s_${c1}`, { userId: u1 });
+        assert.strictEqual((await rows(u1)).length, 1, "the s_ link saves a search");
+        assert.ok(lastText().includes("glock 17"), "the reply has the parsed query");
+        await say(`/start s_${c1}`, { userId: u1 });
+        assert.strictEqual((await rows(u1)).length, 1, "a second press leaves one row");
+
+        await say(`/start s_${c1}`, { userId: u2 });
+        assert.strictEqual((await rows(u2)).length, 0, "another user's link saves nothing");
+        assert.ok(!lastText().includes("glock"), "and does not show the text");
+        assert.strictEqual(lastText(), t("alertLinkExpired"));
+        await say(`/start s_${"0".repeat(24)}`, { userId: u1 });
+        assert.strictEqual(lastText(), t("alertLinkExpired"), "unknown id");
+
+        controller.config.buyerMatches = "shadow";
+        await say(`/start s_${await cap(u3, WANT)}`, { userId: u3 });
+        assert.strictEqual((await rows(u3)).length, 0, "shadow: no row");
+        assert.strictEqual(lastText(), t("greeting"), "shadow: the greeting");
+        controller.config.buyerMatches = "on";
+
+        // not searchable, then a plain text fixes it
+        await say(`/start s_${await cap(u3, "מחפש וסט")}`, { userId: u3 });
+        assert.strictEqual((await rows(u3)).length, 0);
+        assert.strictEqual(lastText(), t("alertNotSearchable"));
+        await say("glock 17", { userId: u3 });
+        assert.strictEqual((await rows(u3)).length, 1, "plain text saves after a failed link");
+
+        // saved, then plain text changes the same row, a third text goes the normal path
+        await say("glock 19", { userId: u1 });
+        const after = await rows(u1);
+        assert.strictEqual(after.length, 1);
+        assert.strictEqual(after[0].query, "glock 19", "same row, query changed");
+        assert.strictEqual(lastText(), t("alertUpdated"));
+        await say("glock 26", { userId: u1 });
+        assert.strictEqual((await rows(u1))[0].query, "glock 19", "pending was cleared");
+
+        // an open wizard draft wins over a plain text, but not over a true reply
+        await say(`/start s_${c1}`, { userId: u1 }); // saves glock 17 again (new row)
+        const pid = promptId();
+        await say("/newPost", { userId: u1 });
+        assert.ok(await Draft.findOne({ userId: String(u1) }), "wizard draft open");
+        await say("A bicycle", { userId: u1 });
+        assert.strictEqual((await Draft.findOne({ userId: String(u1) }))?.title, "A bicycle", "the wizard saw it");
+        assert.ok(!(await rows(u1)).some((r) => r.query === "a bicycle"), "search unchanged");
+        await say("glock 43", { userId: u1, replyToMessageId: pid });
+        assert.ok((await rows(u1)).some((r) => r.query === "glock 43"), "a true reply changes the search");
+
+        // pending older than an hour is ignored
+        await Draft.deleteMany({ userId: String(u1) });
+        await say("glock 43", { userId: u3 }); // u3 has no pending: warm-up no-op
+        await say(`/start s_${await cap(u2, WANT)}`, { userId: u2 });
+        const realNow = Date.now;
+        Date.now = () => realNow() + 2 * 3600_000;
+        try {
+            await say("glock 99", { userId: u2 });
+        } finally {
+            Date.now = realNow;
+        }
+        assert.deepStrictEqual((await rows(u2)).map((r) => r.query), ["glock 17"], "an hour-old fix is ignored");
+
+        // limit
+        await SavedSearch.deleteMany({ userId: String(u2) });
+        for (const m of ["glock 17", "cz 75", "sig 226", "beretta 92", "glock 34"]) await say(`/alerts ${m}`, { userId: u2 });
+        assert.strictEqual((await rows(u2)).length, 5);
+        await say("/alerts glock 45", { userId: u2 });
+        assert.strictEqual(lastText(), t("alertLimit"));
+        assert.strictEqual((await rows(u2)).length, 5, "still five");
+        await say("/alerts glock 17", { userId: u2 });
+        assert.notStrictEqual(lastText(), t("alertLimit"), "an existing query is a duplicate, not a sixth");
+
+        // /alerts list: own rows only, a bin per row
+        await say("/alerts", { userId: u2 });
+        const kb = (sent().at(-1)?.params.reply_markup as { inline_keyboard: { text: string; callback_data: string }[][] }).inline_keyboard;
+        assert.strictEqual(kb.length, 5);
+        assert.ok(kb.every((r) => r[0].text.startsWith("🗑")));
+        const list3 = String((await (async () => { await say("/alerts", { userId: u3 }); return sent().at(-1)?.params.text; })()));
+        assert.ok(!list3.includes("cz 75"), "another user's list is not shown");
+
+        // buttons
+        const mine = await rows(u2);
+        const victim = String(mine[0]._id);
+        let answers = await press(`al_${victim}_d`, u3);
+        assert.strictEqual(await SavedSearch.countDocuments({ _id: victim }), 1, "someone else cannot delete");
+        assert.strictEqual(answers[0].params.text, t("notYourButton"));
+        const exp = (await SavedSearch.findById(victim))!.expiresAt.getTime();
+        await SavedSearch.updateOne({ _id: victim }, { $set: { expiresAt: new Date(exp - 10 * 24 * 3600_000) } });
+        answers = await press(`al_${victim}_r`, u2);
+        assert.ok((await SavedSearch.findById(victim))!.expiresAt.getTime() > exp - 1000, "renew moves expiresAt");
+        assert.strictEqual(answers.length, 1);
+        answers = await press(`al_${victim}_d`, u2);
+        assert.strictEqual(await SavedSearch.countDocuments({ _id: victim }), 0, "the owner deletes");
+        assert.strictEqual(answers.length, 1, "answered once");
+        answers = await press(`al_${victim}_d`, u2);
+        assert.strictEqual(answers[0].params.text, t("staleButton"), "press on a deleted row");
+
+        // off: /alerts with text is refused; the list still shows existing rows
+        controller.config.buyerMatches = "off";
+        await SavedSearch.deleteMany({ userId: String(u3) });
+        await say("/alerts glock 17", { userId: u3 });
+        assert.strictEqual(lastText(), t("alertsNotAvailable"));
+        assert.strictEqual((await rows(u3)).length, 0);
+
+        // help
+        for (const [mode, expected] of [["on", true], ["shadow", false]] as const) {
+            controller.config.buyerMatches = mode;
+            await say("/help", { userId: u3 });
+            const rich = JSON.stringify(h.calls.find((c) => c.method === "sendRichMessage")?.params);
+            assert.strictEqual(rich.includes("/alerts"), expected, `help under ${mode}`);
+        }
+    } finally {
+        controller.config.buyerMatches = original;
+        const ids = [u1, u2, u3].map(String);
+        await Promise.all([SavedSearch.deleteMany({ userId: { $in: ids } }), Draft.deleteMany({ userId: { $in: ids } }), Capture.deleteMany({ senderId: { $in: ids } })]);
+    }
+    console.log("[OK] saved searches in the DM.");
+}
+
 async function run() {
     checkPure();
     if (!MONGO_URI) {
@@ -272,6 +422,7 @@ async function run() {
         assert.ok(/test/i.test(mongoose.connection.name), `refusing to run on database "${mongoose.connection.name}" (name must contain "test")`);
         await checkCollections();
         await checkBuyerNote();
+        await checkSavedSearchDm();
     } finally {
         await mongoose.disconnect();
     }
