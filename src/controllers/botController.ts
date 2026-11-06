@@ -25,6 +25,7 @@ import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { GroupListingService } from "../services/groupListingService";
 import { LifecycleService } from "../services/lifecycleService";
+import type { SweeperJob } from "../services/sweeper";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
@@ -425,6 +426,10 @@ export class BotController {
 
     private captureOn(): boolean {
         return isCaptureOn(this.config);
+    }
+
+    lifecycleJobs(): SweeperJob[] {
+        return this.lifecycle.jobs();
     }
 
     registerRoutes(bot: Bot, botUsername: string): void {

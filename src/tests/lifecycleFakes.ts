@@ -25,7 +25,7 @@ export function fakeApi(): FakeApi {
             calls.push({ method, params });
             const failure = method === "sendMessage" ? failures.get(Number(params.chat_id)) : undefined;
             if (failure) throw failure;
-            return { message_id: 1000 + calls.length };
+            return { message_id: 1000 + calls.length, ...(params.ephemeral_message_parameters ? { ephemeral_message_id: 5000 + calls.length } : {}) };
         },
     }) as unknown as Api;
     return {

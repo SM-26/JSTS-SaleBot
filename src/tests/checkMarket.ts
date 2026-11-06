@@ -814,6 +814,200 @@ async function run() {
             assert.ok(rf3l.status === "taken_down" && rf3l.refreshedAt.getTime() === LT0.getTime(), "refreshForPost leaves taken_down alone");
             console.log("[OK] lifecycle refresh, sold, remove.");
         }
+
+        // slice 3: day-7 nudge, day-30 expiry, held nudges (ticks are called directly, never timers)
+        {
+            const ps = stubPostService();
+            const setup = async (nudges = true) => {
+                await Listing.deleteMany({}); // throwaway DB: leftovers from other blocks must not be due in these ticks
+                const f = fakeApi();
+                const config = { nudges, approvedGroupId: CHAT, lang: "en" } as BotConfig;
+                return { f, config, svc: new LifecycleService(f.api, config, asPostService(ps), () => "bot") };
+            };
+            type Fake = ReturnType<typeof fakeApi>;
+            const dms = (f: Fake) => f.calls.filter(c => c.method === "sendMessage" && !c.params.ephemeral_message_parameters);
+            const notes = (f: Fake) => f.calls.filter(c => c.method === "sendMessage" && c.params.ephemeral_message_parameters);
+            const buttons = (call: { params: Record<string, unknown> }) =>
+                (call.params.reply_markup as { inline_keyboard: { callback_data?: string; url?: string }[][] }).inline_keyboard.flat();
+            const sid = (n: number) => String(100000 + n);
+            const botL = async (seller: string) => {
+                const post = await seedPost(seller);
+                return { post, listing: await listingRepository.createForPost(post, "dm", false, LT0, LT0) };
+            };
+            const grpL = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: seller, chatId: CHAT, messageIds: [1], title: "gt", price: "5",
+                text: "x", media: [], status: "live", createdAt: LT0, refreshedAt: LT0, ...extra,
+            });
+            const lid = (l: { _id: unknown }) => String(l._id);
+            const raw = async (l: { _id: unknown }) => (await Listing.collection.findOne({ _id: l._id as never }))!;
+            const DAY = 24 * 3600 * 1000;
+            const ms = (n: number) => new Date(LT0.getTime() + n);
+            const settledCapture = (seller: string, lastAt: Date) => Capture.collection.insertOne({
+                chatId: CHAT, senderId: seller, senderName: "s", messageIds: [1], parts: [], text: "x", media: [], mediaGroupIds: [], firstAt: lastAt, state: "classified", lastAt,
+            });
+
+            // day 7 exactly once; a bot listing has no remove
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(1));
+                assert.strictEqual((await svc.tick(ms(7 * DAY - 1))).nudged, 0);
+                assert.strictEqual(dms(f).length, 0, "nothing before day 7");
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 1);
+                const sent = dms(f);
+                assert.strictEqual(sent.length, 1);
+                assert.strictEqual(String(sent[0].params.chat_id), sid(1));
+                const cb = buttons(sent[0]).map(x => x.callback_data);
+                assert.ok(cb.includes(`lc_r_${lid(b.listing)}`) && cb.includes(`lc_s_${lid(b.listing)}`) && !cb.some(x => x?.startsWith("lc_x_")), "bot nudge keyboard");
+                assert.ok(!buttons(sent[0]).some(x => x.url), "DM has no manage link");
+                await svc.tick(ms(7 * DAY + 600_000));
+                assert.strictEqual(dms(f).length, 1, "nudged once");
+            }
+            // group nudge offers remove
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(2));
+                await svc.tick(ms(7 * DAY));
+                assert.ok(buttons(dms(f)[0]).some(x => x.callback_data === `lc_x_${lid(g)}`), "group nudge has remove");
+            }
+            // refresh restarts the clock
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(3));
+                await svc.tick(ms(7 * DAY));
+                await svc.refreshListing(lid(g), sid(3), ms(8 * DAY));
+                await svc.tick(ms(14 * DAY));
+                assert.strictEqual(dms(f).length, 1, "no new nudge at day 14");
+                await svc.tick(ms(15 * DAY));
+                assert.strictEqual(dms(f).length, 2, "second nudge at day 15");
+            }
+            // expiry at day 30 sends nothing and leaves the post alone
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(4));
+                await svc.tick(ms(7 * DAY));
+                assert.strictEqual((await svc.tick(ms(30 * DAY))).expired, 1);
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+                assert.strictEqual(dms(f).length, 1, "expiry sends no DM");
+                assert.strictEqual((await postRepository.findById(String(b.post._id)))?.status, "approved", "post stays approved");
+            }
+            // catch-up tick
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(5));
+                await svc.tick(ms(31 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+                assert.strictEqual(dms(f).length, 0, "catch-up sends nothing");
+            }
+            // nudges false still expires
+            {
+                const { f, svc } = await setup(false);
+                const b = await botL(sid(6));
+                await svc.tick(ms(8 * DAY));
+                assert.strictEqual(dms(f).length, 0);
+                await svc.tick(ms(30 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(b.listing)))?.status, "expired");
+            }
+            // hold is untouched
+            {
+                const { f, svc } = await setup();
+                const h = await grpL(sid(7), { hold: true });
+                await svc.tick(ms(60 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(h)))?.status, "live");
+                assert.strictEqual(dms(f).length, 0);
+            }
+            // a post sold by 2.0.1
+            {
+                const { f, svc } = await setup();
+                const b = await botL(sid(8));
+                await PostModel.updateOne({ _id: b.post._id }, { $set: { status: "sold" } });
+                await svc.tick(ms(7 * DAY));
+                const l = await listingRepository.findById(lid(b.listing));
+                assert.ok(dms(f).length === 0 && l?.status === "sold" && l.endedBy === "system", "sold post: no DM, listing sold by system");
+            }
+            // batch cap
+            {
+                const { f, svc } = await setup();
+                for (let i = 0; i < 30; i++) await grpL(String(100100 + i));
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 25);
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 5);
+                assert.strictEqual(dms(f).length, 30);
+            }
+            // transient error: claim released, the next tick sends
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(9));
+                f.failSend(Number(sid(9)));
+                assert.strictEqual((await svc.tick(ms(7 * DAY))).nudged, 0);
+                assert.ok(!("nudgedAt" in (await raw(g))), "claim released after a plain error");
+                const healthy = fakeApi();
+                await new LifecycleService(healthy.api, { nudges: true, approvedGroupId: CHAT, lang: "en" } as BotConfig, asPostService(ps), () => "bot").tick(ms(7 * DAY + 600_000));
+                assert.strictEqual(dms(healthy).length, 1, "next tick sends");
+            }
+            // concurrent ticks
+            {
+                const { f, svc } = await setup();
+                await grpL(sid(10));
+                await Promise.all([svc.tick(ms(7 * DAY)), svc.tick(ms(7 * DAY))]);
+                assert.strictEqual(dms(f).length, 1, "concurrent ticks send once");
+            }
+            // 403 and 400 chat not found hold the nudge; released after the member's next settled message
+            for (const [code, desc, n] of [[403, "Forbidden: bot was blocked by the user", 11], [400, "Bad Request: chat not found", 12]] as const) {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(n), { note: { ephemeralMessageId: 77, sentAt: LT0 } });
+                f.failSend(Number(sid(n)), code, desc);
+                const r = await svc.tick(ms(7 * DAY));
+                const held = await raw(g);
+                assert.ok(r.held === 1 && held.nudgeHeld === true && held.nudgedAt, `${code} holds the nudge`);
+                assert.strictEqual(dms(f).length, 1, "attempted once");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY)), 0, "no capture yet");
+                await settledCapture(sid(n), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 119_000)), 0, "too early");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 120_000)), 1, "released after 2 min");
+                const note = notes(f)[0];
+                assert.ok(String(note.params.text).includes("gt"), "note carries the title");
+                assert.ok(buttons(note).some(x => x.url === `https://t.me/bot?start=l_${lid(g)}`), "manage link");
+                assert.ok(!(await raw(g)).nudgeHeld, "held cleared");
+                assert.strictEqual(await svc.releaseHeldNudges(ms(8 * DAY + 130_000)), 0, "once");
+                const after = await listingRepository.findById(lid(g));
+                assert.ok(after?.note && after.note.ephemeralMessageId !== 77, "new note id stored");
+                assert.ok(f.calls.some(c => c.method === "deleteEphemeralMessage" && c.params.ephemeral_message_id === 77), "previous note deleted");
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            // held nudge cancelled by a refresh
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(13));
+                f.failSend(Number(sid(13)), 403);
+                await svc.tick(ms(7 * DAY));
+                await listingRepository.refresh(lid(g), ms(8 * DAY));
+                await settledCapture(sid(13), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(9 * DAY)), 0);
+                assert.strictEqual(notes(f).length, 0);
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            // a held nudge never released expires
+            {
+                const { f, svc } = await setup();
+                const g = await grpL(sid(14));
+                f.failSend(Number(sid(14)), 403);
+                await svc.tick(ms(7 * DAY));
+                await svc.tick(ms(30 * DAY));
+                assert.strictEqual((await listingRepository.findById(lid(g)))?.status, "expired");
+            }
+            // held nudge off switch, and the registered jobs
+            {
+                const { svc } = await setup(false);
+                const g = await grpL(sid(15), { nudgeHeld: true, nudgedAt: ms(7 * DAY) });
+                await settledCapture(sid(15), ms(8 * DAY));
+                assert.strictEqual(await svc.releaseHeldNudges(ms(9 * DAY)), 0, "off switch");
+                assert.strictEqual((await raw(g)).nudgeHeld, true, "still held");
+                assert.deepStrictEqual(svc.jobs().map(j => [j.name, j.everyMs]), [["lifecycle", 600_000], ["held-nudges", 10_000]]);
+                await Capture.deleteMany({ chatId: CHAT });
+            }
+            await Listing.deleteMany({});
+            await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+            console.log("[OK] nudge, expiry and held nudges.");
+        }
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
