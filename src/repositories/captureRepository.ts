@@ -170,9 +170,9 @@ class CaptureRepository {
         return Capture.countDocuments({ senderId, "note.sentAt": { $gte: since } }).exec();
     }
 
-    // True when the sender has a capture past `open` with lastAt in (since, settledBefore].
+    // True when the sender has a capture past `open` with lastAt in [since, settledBefore] (a hold and its capture can share a millisecond).
     async hasSettledSince(chatId: number, senderId: string, since: Date, settledBefore: Date): Promise<boolean> {
-        return (await Capture.exists({ chatId, senderId, state: { $ne: "open" }, lastAt: { $gt: since, $lte: settledBefore } })) !== null;
+        return (await Capture.exists({ chatId, senderId, state: { $ne: "open" }, lastAt: { $gte: since, $lte: settledBefore } })) !== null;
     }
 
     // /stats: first-ask notes since `since` and how they ended.
