@@ -6,11 +6,11 @@
 
 ## Project Overview
 
-**JSTS-SaleBot** is a Telegram-based marketplace bot built with **TypeScript** (Node.js). It allows users to create sale posts directly inside Telegram, which are then routed through a moderation group before being published to an approved sales channel/group. It supports post lifecycle management (pending → approved/rejected → sold/bumped) and admin runtime configuration.
+**JSTS-SaleBot** is a Telegram-based marketplace bot built with **TypeScript** (Node.js). It allows users to create sale posts directly inside Telegram, which are routed through a moderation group (new sellers) or published at once and reviewed afterwards (trusted sellers) in the approved sales channel/group. It supports post lifecycle management (pending → approved/rejected → sold/bumped) and admin runtime configuration.
 
 **Stack:**
 - Runtime: Node.js + TypeScript
-- Telegram library: `node-telegram-bot-api` **v2.2.0** (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
+- Telegram library: `node-telegram-bot-api` **v2.3.0** (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
 - Database: MongoDB via `mongoose` (collections `posts`, `users`, plus `drafts` and `bot_sessions` for persistent flows)
 - Linting: ESLint + `typescript-eslint`
 - Infrastructure: Docker + Docker Compose (bot + MongoDB + mongo-express)
@@ -25,7 +25,8 @@
 │   ├── bot.ts                    # Entry point: initializes DB, bot, registers routes
 │   ├── config/
 │   │   ├── db.ts                 # Mongoose connection helper
-│   │   └── pollingErrors.ts      # Polling error classification / de-duplicated logging
+│   │   ├── pollingErrors.ts      # Polling error classification / de-duplicated logging
+│   │   └── blockedWords.json     # Built-in blocked-word list (editable on the host, see docs/README.md)
 │   ├── controllers/
 │   │   ├── botController.ts      # Main router: registerRoutes() builds the v2 middleware chain
 │   │   ├── commands.ts           # command(): anchored, case-insensitive matcher, @ourbot only
@@ -35,25 +36,54 @@
 │   │   ├── inputService.ts       # Wizard prompts (step indicator) and price validation
 │   │   ├── wizardService.ts      # /newPost wizard as a step machine over drafts; /cancel; wizard buttons
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
-│   │   ├── moderationService.ts  # Approve/reject callbacks; reject-reason prompt (reply or Skip)
+│   │   ├── moderationService.ts  # Approve/reject callbacks; reject presets (rr_) or reply (legacy Skip still works); once-only author notice
+│   │   ├── publishService.ts     # submitPost(): trusted sellers publish at once with a review card, others go to moderation
+│   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days
+│   │   ├── takeDownService.ts    # Moderator take-down (td_): listing taken_down, group message removed, author told
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
 │   │   ├── userService.ts        # Ensures user record exists in DB on first interaction
-│   │   └── paymentService.ts     # Donation invoice creation & payment event handling
+│   │   ├── paymentService.ts     # Donation invoice creation & payment event handling
+│   │   ├── classifier.ts         # Pure classifier: tier (strict/ask/wtb/none), rules, parsed title/price, text hash
+│   │   ├── classifierData.json   # Classifier word lists and aliases (data only)
+│   │   ├── blockedWords.ts       # Blocked-word matcher, re-read from disk within ~60 s
+│   │   ├── captureService.ts     # Records sale-topic messages into capture windows (silent)
+│   │   ├── shadowService.ts      # tick(): close windows, classify, write shadow_log rows
+│   │   ├── matchService.ts       # Ranks live listings for a "wanted" message
+│   │   ├── marketService.ts      # Reconciles bot posts into listings (LEGACY_CUTOFF)
+│   │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
+│   │   ├── shadowAdminService.ts # /label and /stats
+│   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
+│   │   ├── groupListingService.ts # Group listings: Add, Sold/Refresh/Remove (ls_), edit sync, /myposts section
+│   │   ├── listingCards.ts       # Pure card builders and the mk_/ls_/start-payload helpers
+│   │   ├── ephemeralNotes.ts     # The only caller of the ephemeral Bot API methods (send/edit/delete a note)
+│   │   └── deepLinks.ts          # start=c_/l_ payload parser, bot and group message links
 │   ├── models/
 │   │   ├── Post.ts               # Mongoose schema: Post (pending/approved/rejected/sold)
 │   │   ├── User.ts               # Mongoose schema: User (userId, username, authLevel)
-│   │   └── Draft.ts              # Mongoose schema: Draft (one /newPost wizard per user; collection `drafts`)
+│   │   ├── Draft.ts              # Mongoose schema: Draft (one /newPost wizard per user; collection `drafts`)
+│   │   ├── Listing.ts            # Mongoose schema: Listing (bot post or group message; collection `listings`)
+│   │   ├── Capture.ts            # Mongoose schema: Capture (sale-topic posting window; collection `captures`, 7-day TTL)
+│   │   ├── ShadowLog.ts          # Mongoose schema: ShadowLog (what capture would have done; `shadow_log`, 120-day TTL)
+│   │   └── Member.ts             # Mongoose schema: Member (last seen; collection `members`)
 │   ├── repositories/
 │   │   ├── postRepository.ts     # Post CRUD + status query helpers
 │   │   ├── userRepository.ts     # User lookup and auth-level helpers
 │   │   ├── draftRepository.ts    # Draft CRUD, atomic pushMedia/claim, isDraftExpired (against timeOut)
-│   │   └── sessionStore.ts       # MongoSessionStore: v2 session store (collection `bot_sessions`)
+│   │   ├── sessionStore.ts       # MongoSessionStore: v2 session store (collection `bot_sessions`)
+│   │   ├── listingRepository.ts  # Listing upserts, seller lookups, matching candidates
+│   │   ├── captureRepository.ts  # Capture windows: atomic append, close and classify claims
+│   │   ├── shadowLogRepository.ts # Shadow log rows, labels, stats
+│   │   └── memberRepository.ts   # Member last-seen touches
 │   ├── types/
 │   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, LocaleService, UserSession, etc.)
 │   ├── tests/
 │   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
 │   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
+│   │   ├── fixtures.ts           # seedCapture(): a classified capture straight through the model
+│   │   ├── checkListingCards.ts  # `pnpm run check-cards`: card builders, mk_/ls_ formats, start payloads
+│   │   ├── syntheticCapture.ts   # Manual (not in `pnpm test`): 20 messages through the controller on the TEST bot/group
+│   │   ├── syntheticOptin.ts     # Manual (not in `pnpm test`): one real private note + one moderation card on the TEST bot/groups, cleaned up after
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
 │       ├── en/
@@ -100,6 +130,10 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `minimumPhotos`     | number  | Minimum number of photos/videos required per post (0 = optional) |
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
+| `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`      | string  | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
+| `nudges`            | boolean | Reserved for a later slice; nothing reads it yet          |
+| `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 
 ---
 
@@ -110,12 +144,20 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 User sends /newPost
   → WizardService walks the user's draft (collection `drafts`): title, description, price, location, media
   → PostService shows preview
+      (blocked words, including those in hidden link URLs, are stopped here, for everyone, trusted sellers included)
   → User confirms
   → Post saved to DB (status: "pending")
-  → PostService forwards to moderation group
-      → ModerationService: admin approves → status: "approved", posted to approved group
-      → ModerationService: admin rejects  → status: "rejected"; the moderator REPLIES to the reason prompt
-                                            (or presses Skip), then the user is notified
+  → PublishService.submitPost:
+      → trusted seller (approved or sold post, no moderator take-down in 90 days)
+          → status: "approved", posted to approved group at once; the moderation group gets a
+            "Published (trusted seller)" card with Take down, reviewed after publishing
+      → new seller → PostService forwards to moderation group
+      → ModerationService: admin approves → status: "approved", posted to approved group (card has Take down when its listing exists)
+      → ModerationService: admin rejects  → status: "rejected"; the moderator picks a preset reason (rr_),
+                                            or REPLIES to the prompt (old Skip buttons still work); the user is notified
+                                            exactly once (claimRejectionNotice), with "Fix and resend" and the rules link
+      → TakeDownService: moderator takes down a published post (td_) → listing "taken_down", group message
+                         removed, author told, trust revoked for 90 days; the post can no longer be bumped or sold
   → User can /myposts:
       → Mark as "sold"  → updates approved group message with sold tag
       → Bump post       → re-posts with updated timestamp (subject to dailyBumpLimit)
@@ -126,6 +168,9 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **Wizard state** lives in the `drafts` collection (`Draft` model, `draftRepository`): one document per user with the step, the answers, the media and `promptMessageId`. `WizardService` reads the user's draft on every update. Wizard buttons (Done-media, Confirm, Cancel, Continue/Start over) are valid only against the draft itself: it exists, its step matches and the pressed message is `promptMessageId`. Anything else falls through to `staleButtonCatchAll`, which answers "expired".
 - **Expiry**: `isDraftExpired(draft, config.timeOut)` is checked on every touch against the live `timeOut` (minutes, 0 = never). There is deliberately no TTL index; startup deletes drafts already past `timeOut`.
 - **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag and the moderator's pending reject-reason prompts (`pendingRejects`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
+- **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
+- **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
+- **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -145,6 +190,8 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/faq`    | All users | View airsoft FAQ and frequently asked questions  |
 | `/help`   | All users | Shows available commands (admins see extra items)|
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
+| `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
+| `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
@@ -184,13 +231,18 @@ pnpm run test            # runs every check-* script below, in this order
 | Script | What it checks | Needs `MONGO_URI` |
 |--------|----------------|------------------|
 | `pnpm run check-locals` | Locale files: JSON syntax, no empty values, key parity across `en`/`he`/`ru`, FAQ structure | no |
+| `pnpm run check-config` | `/config` value parsing per key (`configSchema`) | no |
+| `pnpm run check-classifier` | Classifier fixtures: tiers, price/title parsing, blocked words | no |
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
+| `pnpm run check-cards` | Listing and note card builders, `mk_`/`ls_` callback_data and `start=c_`/`l_` payload formats | no |
 | `pnpm run check-platform` | Command matcher and middleware (offline harness) | no |
 | `pnpm run check-store` | `MongoSessionStore` (TTL, expiry on read) | yes |
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
+| `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
+| `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
 
@@ -206,6 +258,8 @@ Never run the bot, or a check, against the production token or database.
 - **Use `unknown` or Union Types**: If a type is truly dynamic (like translation parameters), prefer `Record<string, string | number | boolean>` or `unknown` over `any`.
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
+- **Tell the author once**: any path that notifies a post's author of a rejection must go through `postRepository.claimRejectionNotice`, so a double press or a restart never sends two notices.
+- **Seller-post `/test` cases refuse outside the test bot** (`isTestBotToken`): they publish real posts, so never loosen that guard.
 - **Persist flow state**: flows are persisted (drafts, sessions), so there is no `isIdle` flag. Before acting on a wizard message or button, read the user's draft (`draftRepository.findByUserId`) and check it exists, is not expired (`isDraftExpired`) and is at the expected step. On errors, tell the user and leave the draft consistent, so they can `/cancel` or continue.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
 - **Use `async/await`** with `try/catch` for all async operations, logging errors with a `[ERROR - <context>]` prefix to `console.error`.
@@ -221,7 +275,8 @@ Never run the bot, or a check, against the production token or database.
 - **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
-- **Don't bypass the moderation flow**: posts must pass through `moderationGroupId` before appearing in `approvedGroupId`.
+- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
@@ -253,7 +308,13 @@ Never run the bot, or a check, against the production token or database.
 | `src/services/inputService.ts` | Wizard prompts and price validation |
 | `src/services/postService.ts` | Post formatting & Telegram message management |
 | `src/services/moderationService.ts` | Approve/reject logic, reject-reason prompt |
-| `src/services/myPostsService.ts` | User post management (bump, sold) |
+| `src/services/myPostsService.ts` | User post management (bump, sold; Sold also ends the listing) |
+| `src/services/publishService.ts` | submitPost(): trusted sellers publish at once, others go to moderation |
+| `src/services/trustService.ts` | isTrustedSeller(): approved or sold post, no moderator take-down in 90 days |
+| `src/services/takeDownService.ts` | Moderator take-down (td_) |
+| `src/services/captureNoteService.ts` | Opt-in capture notes and the `mk_` buttons |
+| `src/services/groupListingService.ts` | Group listings, the `ls_` buttons, edit sync |
+| `src/services/ephemeralNotes.ts` | Send/edit/delete a private note (ephemeral Bot API) |
 | `src/services/adminService.ts` | Runtime config command |
 | `src/services/paymentService.ts` | Handles Telegram Stars donations |
 | `src/models/Post.ts` | Post Mongoose schema |

@@ -1,6 +1,6 @@
 import type { Api } from "node-telegram-bot-api";
-import type { CallbackQuery, Message, MessageEntity, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
-import type { StoredEntity } from "../models/Post";
+import type { CallbackQuery, Message, InlineKeyboardMarkup, User as TelegramUser } from "node-telegram-bot-api/types";
+import { storedEntity } from "../models/Post";
 import type { IDraft, DraftStep } from "../models/Draft";
 import draftRepository, { DraftFields, isDraftExpired } from "../repositories/draftRepository";
 import postRepository from "../repositories/postRepository";
@@ -9,12 +9,12 @@ import { BotConfig, MediaItem, Post } from "../types";
 import { InputService } from "./inputService";
 import { PostService, PostData } from "./postService";
 import { localeService } from "./localeService";
-
-// Only the fields we store/render, as a plain object (also detaches Mongoose subdocuments).
-function storedEntity(e: MessageEntity): StoredEntity {
-    const { type, offset, length, url, user, language, custom_emoji_id } = e;
-    return JSON.parse(JSON.stringify({ type, offset, length, url, user, language, custom_emoji_id }));
-}
+import type { PublishService } from "./publishService";
+import type { GroupListingService } from "./groupListingService";
+import type { Parsed } from "./classifier";
+import { buildManagementCard } from "./listingCards";
+import captureRepository from "../repositories/captureRepository";
+import { findBlockedField, withLinkUrls, BlockedFieldName } from "./blockedWords";
 
 type TextStep = "title" | "description" | "price" | "location";
 type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
@@ -27,6 +27,7 @@ const PROMPTS: Record<TextStep | "media", { key: string; index: number }> = {
     location: { key: "enterLocation", index: 4 },
     media: { key: "enterMedia", index: 5 },
 };
+const FIELD_LABEL: Record<BlockedFieldName, string> = { title: "fieldTitle", description: "fieldDescription", price: "fieldPrice", location: "fieldLocation" };
 const NEXT_STEP: Record<TextStep, DraftStep> = { title: "description", description: "price", price: "location", location: "media" };
 
 // Buttons already sent to Telegram keep their callback_data forever: these
@@ -57,11 +58,13 @@ export class WizardService {
         private api: Api,
         private config: BotConfig,
         private inputService: InputService,
-        private postService: PostService
+        private postService: PostService,
+        private publishService: PublishService,
+        private groupListings: GroupListingService
     ) { }
 
-    private t(locale: string, key: string): string {
-        return localeService.t(locale, key);
+    private t(locale: string, key: string, params?: Record<string, string | number | boolean>): string {
+        return localeService.t(locale, key, params);
     }
 
     private async safe(context: string, chatId: number, run: () => Promise<boolean>): Promise<boolean> {
@@ -114,8 +117,27 @@ export class WizardService {
         const markup: InlineKeyboardMarkup | undefined = draft.step === "media"
             ? { inline_keyboard: [[{ text: this.t(draft.locale, "doneMediaButton"), callback_data: `done_media_${draft.userId}` }]] }
             : undefined;
-        const sent = await this.inputService.sendPrompt(draft.chatId, this.t(draft.locale, key), { locale: draft.locale, index, total: TOTAL_STEPS }, markup);
+        // A capture draft skips most steps, so a "n of 5" indicator would lie.
+        const indicator = draft.captureId ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
+        const sent = await this.inputService.sendPrompt(draft.chatId, this.t(draft.locale, key), indicator, markup);
         return sent.message_id;
+    }
+
+    // The gate before the preview: a field with a blocked word is asked for again (the notice names the
+    // word), and the answer comes straight back here. Trusted sellers are no exception.
+    private async previewOrFix(draft: IDraft, from: TelegramUser): Promise<void> {
+        const hit = findBlockedField({ title: draft.title, description: withLinkUrls(draft.description, draft.descriptionEntities), price: draft.price, location: draft.location });
+        if (hit) {
+            await this.api.sendMessage({
+                chat_id: draft.chatId,
+                text: localeService.t(draft.locale, "blockedWordNotice", { field: this.t(draft.locale, FIELD_LABEL[hit.field]), word: hit.word }),
+            });
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field, captureId: draft.captureId }, from);
+            await draftRepository.update(draft.userId, { step: hit.field, promptMessageId: messageId, fixing: true });
+            return;
+        }
+        const messageId = await this.sendPreview(draft, from);
+        await draftRepository.update(draft.userId, { step: "confirm", promptMessageId: messageId, fixing: undefined });
     }
 
     private postData(draft: IDraft, from: TelegramUser): PostData {
@@ -165,6 +187,53 @@ export class WizardService {
         });
     }
 
+    /**
+     * /start c_<captureId> (private): the wizard prefilled from the member's own group post, asking only
+     * for what the note could not read. Never overwrites a live draft.
+     */
+    startFromCapture(msg: Message, captureId: string): Promise<boolean> {
+        return this.safe("startFromCapture", msg.chat.id, async () => {
+            const from = msg.from!;
+            const userId = String(from.id);
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+            const say = async (key: string): Promise<boolean> => {
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, key) });
+                return true;
+            };
+
+            const capture = await captureRepository.findById(captureId);
+            // A foreign id answers like an expired one.
+            if (!capture || capture.senderId !== userId) return say("captureExpired");
+            if (capture.state === "added") return say("captureAlreadyAdded");
+            if (capture.state !== "classified" && capture.state !== "asked") return say("captureExpired");
+            const existing = await draftRepository.findByUserId(userId);
+            if (existing && !isDraftExpired(existing, this.config.timeOut)) return say("captureDraftBusy");
+
+            const parsed: Partial<Parsed> = capture.parsed ?? {};
+            const step: DraftStep = !parsed.title ? "title" : !parsed.price ? "price" : "confirm";
+            const input = {
+                userId, chatId: msg.chat.id, locale, captureId, step,
+                // `parsed` is Mixed: a missing field may come back as null.
+                title: parsed.title || undefined, description: parsed.description || undefined,
+                price: parsed.price || undefined, location: parsed.location || undefined,
+                media: capture.media.map(m => ({ fileId: m.fileId, type: m.type })),
+            };
+            if (step === "confirm") {
+                const draft = await draftRepository.startFromCapture({ ...input, promptMessageId: 0 });
+                try {
+                    await this.previewOrFix(draft, from);
+                } catch (err) {
+                    await draftRepository.delete(userId); // no half-started draft
+                    throw err;
+                }
+                return true;
+            }
+            const promptMessageId = await this.sendStep({ userId, chatId: msg.chat.id, locale, step, captureId }, from);
+            await draftRepository.startFromCapture({ ...input, promptMessageId });
+            return true;
+        });
+    }
+
     /** /cancel in a private chat: drop the user's draft. */
     async cancel(msg: Message): Promise<void> {
         const deleted = await draftRepository.delete(String(msg.from!.id));
@@ -205,6 +274,28 @@ export class WizardService {
             }
             if (draft.step === "price" && !this.inputService.validatePriceValue(msg.text)) {
                 await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "invalidPrice") });
+                return true;
+            }
+
+            if (draft.fixing) {
+                const fields: DraftFields = { [draft.step]: msg.text };
+                if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
+                const updated = await draftRepository.update(draft.userId, fields);
+                if (updated) await this.previewOrFix(updated, msg.from);
+                return true;
+            }
+
+            // A capture draft only ever asks for the title and then the price (description, location and
+            // media come from the post; minimumPhotos does not apply).
+            if (draft.captureId) {
+                const updated = await draftRepository.update(draft.userId, { [draft.step]: msg.text });
+                if (!updated) return true;
+                if (draft.step === "title" && !updated.price) {
+                    const promptMessageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: "price", captureId: draft.captureId }, msg.from);
+                    await draftRepository.update(draft.userId, { step: "price", promptMessageId });
+                } else {
+                    await this.previewOrFix(updated, msg.from);
+                }
                 return true;
             }
 
@@ -252,8 +343,7 @@ export class WizardService {
                         await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "notEnoughMedia") });
                         return true;
                     }
-                    const messageId = await this.sendPreview(draft, query.from);
-                    await draftRepository.update(draft.userId, { step: "confirm", promptMessageId: messageId });
+                    await this.previewOrFix(draft, query.from);
                     return true;
                 }
                 case "confirm": {
@@ -292,6 +382,7 @@ export class WizardService {
 
     // Save & send to moderation (the draft was already taken atomically).
     private async createPost(draft: IDraft, from: TelegramUser): Promise<void> {
+        if (draft.captureId) return this.finishCapture(draft, draft.captureId);
         const postData = this.postData(draft, from);
         const post: Post = await postRepository.createPost({
             userId: draft.userId,
@@ -304,12 +395,38 @@ export class WizardService {
             createdAt: new Date(),
         });
 
-        const modMsgId = await this.postService.sendToModeration(String(post._id), postData);
-        if (modMsgId) {
-            await postRepository.setModerationMessageId(String(post._id), modMsgId);
+        // A published post already got its postApproved DM from PublishService.
+        const outcome = await this.publishService.submitPost(post, postData);
+        if (outcome === "moderation") {
+            await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCreated") });
         }
+        console.info("[INFO - WizardService.createPost] post created", { userId: from.id, postId: String(post._id), outcome });
+    }
 
-        await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCreated") });
-        console.info("[INFO - WizardService.createPost] post created", { userId: from.id, postId: String(post._id) });
+    // A completed capture draft becomes a group listing (the member's own message stays where it is):
+    // no posts row, no moderation message.
+    private async finishCapture(draft: IDraft, captureId: string): Promise<void> {
+        const t = (key: string, params?: Record<string, string | number | boolean>) => this.t(draft.locale, key, params);
+        const say = (text: string, keyboard?: InlineKeyboardMarkup["inline_keyboard"]) =>
+            this.api.sendMessage({ chat_id: draft.chatId, text, ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}) });
+        if (!draft.price) { // the wizard always asks for it: only a hand-edited draft gets here
+            await say(t("generalError"));
+            return;
+        }
+        try {
+            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined });
+            if (result.kind === "gone") await say(t("captureExpired"));
+            else if (result.kind === "already") await say(t("captureAlreadyAdded"));
+            else {
+                await say(t("capturePublished"));
+                const card = buildManagementCard(t, result.listing, { surface: "c" });
+                await say(card.text, card.keyboard);
+                await this.groupListings.syncNote(result.listing);
+            }
+            console.info("[INFO - WizardService.finishCapture]", { userId: draft.userId, captureId, outcome: result.kind });
+        } catch (err) {
+            console.error("[ERROR - WizardService.finishCapture]", { userId: draft.userId, captureId }, (err as Error).message);
+            throw err; // safe() tells the user; the capture was rolled back, so the button still works
+        }
     }
 }

@@ -1,7 +1,8 @@
 # --- Base Stage ---
 FROM node:26-alpine AS base
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries pnpm settings (e.g. minimumReleaseAge exemptions) the install must see.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # node:26 no longer bundles Corepack, so install pnpm directly — pinned to the
 # "packageManager" field in package.json so Docker, CI and local never drift.
 RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
@@ -25,12 +26,17 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 # Only copy what is strictly necessary
-COPY --from=build /app/package.json /app/pnpm-lock.yaml ./
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=build /app/dist ./dist
 # Locales are read from disk at runtime (process.cwd()/src/locales) and tsc only
 # emits .js, so the JSON has to be copied in explicitly or every string falls
 # back to its raw key. config.json is NOT baked in — mount it at /app/config.json.
 COPY --from=build /app/src/locales ./src/locales
+# The blocked-word list is read from disk too. This copy is the built-in list and the
+# fallback. compose.prod.yaml bind-mounts the host folder ./blocklist at /app/blocklist and
+# sets BLOCKED_WORDS_PATH=/app/blocklist/blockedWords.json, so the owner edits the list
+# without a rebuild; if that file is missing or invalid at boot, the bot uses this copy.
+COPY --from=build /app/src/config/blockedWords.json ./src/config/blockedWords.json
 
 # Install only production dependencies (same pinned pnpm as the base stage)
 RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")" \

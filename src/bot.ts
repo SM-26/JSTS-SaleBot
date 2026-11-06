@@ -8,6 +8,10 @@ import { connectDB, disconnectDB } from "./config/db";
 import { BotController } from "./controllers/botController";
 import { errorBoundary } from "./controllers/middleware";
 import { createPollErrorLogger } from "./config/pollingErrors";
+import { reconcileBotListings } from "./services/marketService";
+import { isCaptureOn } from "./services/captureService";
+import { tick } from "./services/shadowService";
+import { startSweeper } from "./services/sweeper";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -21,6 +25,8 @@ if (!token) {
 process.on("unhandledRejection", (err) => {
     console.error("[unhandledRejection]", err);
 });
+
+const ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "pre_checkout_query"];
 
 async function main() {
     await connectDB();
@@ -36,15 +42,35 @@ async function main() {
     // that up. Registered BEFORE the session middleware (inside registerRoutes) so
     // close(), which runs in reverse order, disconnects Mongo after the session
     // store has closed. The sweeps catch and log their own errors, so a failed init
-    // never stops the bot.
+    // never stops the bot. The sweeper (capture windows, hourly reconcile) starts
+    // in init and stops in close BEFORE disconnectDB, so no job runs on a closed
+    // connection.
+    let sweeper: { stop(): void } | undefined;
+    const reconcile = async () => {
+        try {
+            const { created, sold } = await reconcileBotListings(new Date());
+            if (created || sold) console.log(`[reconcile] ${created} listing(s) created, ${sold} marked sold`);
+        } catch (err) {
+            console.error("[ERROR - reconcile]", (err as Error).message);
+        }
+    };
     const lifecycle: Middleware<Context> = Object.assign(
         (_ctx: Context, next: () => Promise<void>) => next(),
         {
             init: async () => {
                 await controller.syncSoldPosts();
                 await controller.deleteExpiredDrafts();
+                await reconcile();
+                sweeper = startSweeper([
+                    // read live: /config can switch captureMode without a restart
+                    { name: "captures", everyMs: 10_000, run: async () => { if (isCaptureOn(controller.config)) await tick(controller.config, new Date(), (event, now) => controller.captureNotes.onClassified(event, now)); } },
+                    { name: "reconcile", everyMs: 3_600_000, run: reconcile },
+                ]);
             },
-            close: () => disconnectDB(),
+            close: async () => {
+                sweeper?.stop();
+                await disconnectDB();
+            },
         }
     );
     bot.use(lifecycle);
@@ -59,7 +85,10 @@ async function main() {
 
     // run() installs the SIGINT/SIGTERM handlers (`docker stop` sends SIGTERM,
     // and Node running as a container's PID 1 ignores it without a handler).
-    await run(bot, { exitOnError: true, onError: createPollErrorLogger() });
+    // Always name the update types: without the list Telegram reuses the last one any
+    // poller set for this token, which once silently dropped every button press on
+    // the test bot. Add a type here when a handler for it is added.
+    await run(bot, { exitOnError: true, onError: createPollErrorLogger(), allowedUpdates: ALLOWED_UPDATES });
 }
 
 main().catch((err) => {

@@ -14,5 +14,9 @@
     "faqAllowInGroups": false,
     "faqMaxButtonsPerRow": 3,
     "faqMaxDepth": null,
-    "broadcastTopicId": null
+    "broadcastTopicId": null,
+    "captureMode": "shadow",
+    "buyerMatches": "shadow",
+    "nudges": false,
+    "rulesUrl": ""
 }

@@ -4,6 +4,7 @@ import { command, parseCommand } from "../controllers/commands";
 import { ensureUserMiddleware, errorBoundary, requireAuthLevel, sessionKey, staleButtonCatchAll } from "../controllers/middleware";
 import { createHarness, BOT_USERNAME } from "./harness";
 import { AuthLevel } from "../types";
+import { isTestBotToken, isTestDbUri, TEST_BOT_ID_PREFIX } from "./testBot";
 
 /**
  * Offline checks for the v2 platform modules (command matcher, middleware).
@@ -176,6 +177,45 @@ async function main() {
         assert.deepStrictEqual(keys, ["42:42", "-100:7", "5:9", undefined]);
     }
     console.log("  [SUCCESS] sessionKey is chat:user, undefined without a chat.");
+
+    console.log("[INFO] Checking harness ephemeral support...");
+    {
+        const eph = { chat_id: -100, text: "note", ephemeral_message_parameters: { receiver_user_id: 42 } };
+        const h = createHarness();
+        const a = await h.bot.api.sendMessage(eph) as unknown as Record<string, unknown>;
+        const b = await h.bot.api.sendMessage(eph) as unknown as Record<string, unknown>;
+        const plain = await h.bot.api.sendMessage({ chat_id: -100, text: "x" }) as unknown as Record<string, unknown>;
+        assert.deepStrictEqual([a.ephemeral_message_id, b.ephemeral_message_id], [5000, 5001], "ephemeral id counter starts at 5000");
+        assert.deepStrictEqual((a.receiver_user as { id: number }).id, 42);
+        assert.ok(!("ephemeral_message_id" in plain), "a plain message has no ephemeral id");
+        assert.strictEqual(await h.bot.api.deleteEphemeralMessage({ chat_id: -100, receiver_user_id: 42, ephemeral_message_id: 5000 }), true, "delete defaults to true");
+
+        // a responses function returning undefined falls back to the default
+        const h2 = createHarness({ responses: { sendMessage: (p: Record<string, unknown>) => (p.ephemeral_message_parameters ? { ok: false, error_code: 400, description: "no" } : undefined) } });
+        const ok = await h2.bot.api.sendMessage({ chat_id: -100, text: "x" }) as unknown as { message_id: number };
+        assert.ok(typeof ok.message_id === "number", "undefined falls back to the default result");
+        await assert.rejects(h2.bot.api.sendMessage(eph), "the ephemeral send fails");
+
+        // noMessage drops the message from the callback_query
+        const seen: (boolean)[] = [];
+        const h3 = createHarness();
+        h3.bot.use((ctx: Context, next) => { seen.push((ctx.update as { callback_query?: { message?: unknown } }).callback_query?.message !== undefined); return next(); });
+        await h3.pressButton("x");
+        await h3.pressButton("x", { noMessage: true });
+        assert.deepStrictEqual(seen, [true, false]);
+    }
+    console.log("  [SUCCESS] harness answers ephemeral sends, falls back on undefined, drops the message on noMessage.");
+
+    assert.ok(isTestBotToken(`${TEST_BOT_ID_PREFIX}AAHx`));
+    for (const t of [undefined, "", "1234567890:AAHx", "9299714864", "x9299714864:AAHx"]) {
+        assert.strictEqual(isTestBotToken(t), false, String(t));
+    }
+    assert.ok(isTestDbUri("mongodb://127.0.0.1:27031/SalesBotTestDB"));
+    assert.ok(isTestDbUri("mongodb://u:p@h1:1,h2:2/mytest?replicaSet=rs"));
+    for (const u of [undefined, "", "mongodb://127.0.0.1:27017", "mongodb://127.0.0.1:27017/", "mongodb://test@prod-host/SalesBotDB", "mongodb://prod/SalesBotDB?x=test", "not a uri"]) {
+        assert.strictEqual(isTestDbUri(u), false, String(u));
+    }
+    console.log("  [SUCCESS] test-bot token and test-db gates refuse everything else.");
 
     console.log("[SUCCESS] All platform checks passed.");
 }

@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
+  - Added:
+    - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of the same item (same text, or a near-identical text with the same title) refreshes the listing, which follows the newest repost (message, text, price, photos), and sends a short refresh note; a different item that reads alike gets its own note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
+    - **Group listings.** Sold, Refresh and Remove (`ls_<listingId>_<s|f|r>_<n|c|l>`) from the note, from a bot card or from `/myposts`; editing the member's message keeps the listing in step (a blocked word ends it). The member's message is never touched, and a seller can never remove an approved bot post (every `ls_` button is refused on one). A seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a **Take down** card (`td_`) to the moderation topic: group listings are post-moderated.
+    - **Deep links.** `?start=c_<captureId>` opens a draft prefilled from a captured message (refused while another draft is open); `?start=l_<listingId>` opens a listing's management card.
+    - `/myposts` lists group listings with Sold / Refresh / Remove and a stop/resume-asking toggle. `/stats` gained an opt-in line (notes, added, rate).
+    - `captureMode` accepts `optin` besides `off` and `shadow`. `config.json.example` stays `shadow`; `/config captureMode shadow` is the kill switch (notes stop at once, existing listings stay manageable in every mode).
+    - Tests: `check-cards` (new, in `pnpm test`), plus coverage in `check-callbacks`, `check-routes`, `check-flows` and `check-market`. `/test` gained "Send me a capture note" (test bot only). `src/tests/syntheticOptin.ts` (manual, TEST bot and groups only) sends one real note and one moderation card through the real controller and cleans both up.
+  - Fixed:
+    - The bot now always names the update types it polls for (`allowedUpdates`). Without the list, Telegram reuses the last one set for the token; on the test bot that dropped every button press.
+    - A moderator take-down closes the seller's private note.
+  - Notes:
+    - Private notes are best effort: they reach only apps online when sent, silently in the background and not at all to a closed app (tested on Telegram Desktop 7.4 and Android 13.2.0). `/myposts` stays the durable path.
+    - Data: additive only. `captures.note.kind`, `members.declined` (hashes of the texts a note was sent for, 30 days, 20 max) and `drafts.captureId` are new optional fields; `listings` gained nothing, `posts` and `users` are unchanged.
+    - **Rollback caveat:** an older image's wizard would post a draft that has `captureId` as a bot post, so `/start c_` refuses to overwrite a live draft and nothing else creates capture drafts. After a rollback the `mk_` and `ls_` buttons do nothing (no route) and `/myposts` does not show group listings. Listings the members added stay in the database.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
+    - Deploys need the owner's go-ahead.
+    - Deploy with `captureMode: shadow` (no behaviour change). Turn on `optin` only on the owner's go-ahead, and only after a second account (not the poster, not an admin) confirmed in the test group that other members do not see the note (#104).
+
+3.0.0 - Trust-based moderation (slice 1 of "the market", #104).
+  - Added:
+    - **Trusted sellers publish at once.** A seller with an approved or sold bot post and no moderator take-down in the last 90 days is trusted: their new post goes straight to the sales group, and the moderation group gets a "Published (trusted seller)" card to review afterwards. Everyone else still goes through moderation. Captured group listings never grant trust.
+    - **Take down.** Every published card (trusted or moderator-approved) carries a Take down button (`td_<listingId>`) when its listing exists. It is atomic (one press wins), removes the group message, marks the listing `taken_down` (the post stays `approved`), and tells the author. A taken-down post can't be bumped or marked sold, and a take-down revokes trust for 90 days. The effects are independent and best-effort, so one failure doesn't block the rest.
+    - **Reject presets.** Rejecting shows four preset reasons as buttons (`rr_<postId>_<n>`); the moderator can instead reply to the prompt with their own reason. New prompts have no Skip button; Skip buttons on prompts sent before the upgrade keep working. The reject message to the author has a "Fix and resend" button and, when `rulesUrl` is set, a "Group rules" button.
+    - **Blocked-word check at the preview.** A blocked word in the title, description, price or location stops the post before the preview, for everyone including trusted sellers (the hidden URL of a text link in the description counts too): the bot names the word and asks for that field again, then returns to the preview.
+    - `/config rulesUrl` is now used (it was reserved in 2.1.0).
+    - Seller-post `/test` cases (trusted and new sellers, synthetic preset reject) and `src/tests/syntheticModeration.ts` (manual, test bot and group only). The `/test` cases refuse to run outside the test bot.
+  - Changed:
+    - The author is told about a rejection exactly once, whichever way the reason arrives (preset, reply, Skip, or a double press): the notice goes through a new atomic claim (`claimRejectionNotice`). The reject itself keeps its atomic claim.
+    - Marking a post sold now also ends its listing, so a moderator's Take down finds nothing to remove on a sold post.
+    - The rule "every post passes moderation before the sales group" now reads: new sellers pass moderation; trusted sellers publish at once and are reviewed after (`Agents.md`).
+    - `pnpm test` gained coverage of these flows in `check-flows`, `check-callbacks` (the `rr_` and `td_` formats are pinned and frozen), `check-claim`, `check-market` and `check-platform`. `check-locals` also fails if a `he` string contains a blocked word.
+  - Notes:
+    - Data: additive only. `posts` gains the optional `rejectionNotifiedAt` and `drafts` the optional `fixing`; no existing field changes.
+    - **Rollback caveat:** the realistic rollback target is 2.1.0, and the 2.0.1 image also runs against the same database. Neither knows about take-down or the new buttons, so after a rollback:
+      - Bump and Sold still work on a post a moderator took down (and it shows in `/myposts`).
+      - `rr_` and `td_` buttons answer "expired"; a new reject prompt can only be resolved by a typed reply.
+      - A typed reply after another moderator's preset can DM the author twice (2.1.0 has no once-only notice claim).
+      - Trust revocation survives: the 2.1.0 reconcile leaves `taken_down` listings alone.
+      If you roll back after take-downs, treat these as known.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying.
+    - Deploys need the owner's go-ahead.
+    - `rulesUrl` (`https://t.me/airsoft_yad2/54833/115880`) is already set in prod by the owner; with it empty the rules button is hidden.
+    - Security: Dependabot alert #21 (GHSA-g3hv-75wg-m249, minimatch globparts DoS). Dev-only (nodemon, eslint, typescript-eslint); production installs with `--prod` and was not affected. No newer nodemon, eslint or typescript-eslint depends on a patched minimatch, so `pnpm-workspace.yaml` now overrides `minimatch` to `^11.0.4`. Lint, build and tests are unchanged.
+
+2.1.0 - Dependency update, and the market core in shadow mode (slice 0 of "the market", #104).
+  - **Market core, shadow mode only: nothing is sent to the group or to any member.** `captureMode: "shadow"` records messages in the sale topic (`approvedTopicId`) into per-sender windows (90 s; closed after 30 s of quiet), classifies each as `strict`, `ask`, `wtb` or `none` with a pure Hebrew-aware classifier, and logs what automatic capture would have done. `buyerMatches: "shadow"` also logs up to 5 live listings a "wanted" message would match. Both keys accept only `off` or `shadow` in this slice. New keys `nudges` and `rulesUrl` are accepted by `/config` but unused until a later slice.
+  - New `/label` (admin, private chat) shows a random would-list row with its link, tier and parsed price (as a number; no member text is stored), to mark it sale / not sale / skip. New `/stats` (moderator, private chat) shows the numbers behind the go/no-go on automatic capture: rows per tier, would-list and merge counts, label precision.
+  - Blocked words: a message containing an entry of `src/config/blockedWords.json` is classified `none`.
+  - Existing approved bot posts get a matching `listings` row at startup and then hourly (idempotent). Posts made before `LEGACY_CUTOFF` (2026-11-04, confirm at deploy) are legacy: held out of matching.
+  - Data: **new, additive collections** `listings`, `captures` (7-day TTL), `shadow_log` (120-day TTL) and `members`. No existing collection or field changed, and rolling back to 2.0.1 leaves them as harmless leftovers.
+  - Tests: `pnpm test` gained `check-config`, `check-classifier` and `check-market` (the last needs `MONGO_URI`); `check-callbacks` and `check-routes` cover the new buttons and commands. `/test` gained "Classify fixtures" and "Shadow: last 5 rows". `src/tests/syntheticCapture.ts` (manual, TEST bot and group only) feeds 20 messages through the real controller and checks the tiers.
+  - The blocked-word list (`src/config/blockedWords.json`) is read from disk and re-read within about 60 s of a change, so the owner can edit it on the server with no rebuild or restart. `compose.prod.yaml` mounts a host folder (`./blocklist`) and points `BLOCKED_WORDS_PATH` into it, falling back to the built-in list when the file is missing; see the deploy note in `docs/README.md`. A bad edit keeps the last good list. `/config` now treats `constructor`, `toString` and other `Object.prototype` names as unknown keys.
+  - Upgraded `node-telegram-bot-api` 2.2.0 → 2.3.0 (pinned exactly). No code changes were needed and nothing the user sees changes. Notable library changes: a graceful stop (`SIGINT`/`SIGTERM`) now confirms the update being handled, so a deploy no longer redelivers it; `bot.init()` calls `getMe()` once at startup. The bot's own command matcher is unchanged.
+  - `pnpm-workspace.yaml` exempts `node-telegram-bot-api@2.3.0` from pnpm's `minimumReleaseAge` (the release was under 24 hours old). It can be removed after 2026-11-05. The Docker build now copies `pnpm-workspace.yaml` too, so image builds honour the same pnpm settings as CI.
+
 2.0.1 - UX fixes found while testing 2.0.0.
   - `/lang`: picking a language removes the menu's buttons, so it can't keep switching (#97).
   - Sellers' formatting in the description (spoiler, bold, italic, links, ...) is kept and shown in the post. It is stored in a new optional `descriptionEntities` field (additive; posts without formatting are unchanged) (#98).

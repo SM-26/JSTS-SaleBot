@@ -12,12 +12,19 @@ import { InputService } from "../services/inputService";
 import { WizardService } from "../services/wizardService";
 import { PostService } from "../services/postService";
 import { ModerationService } from "../services/moderationService";
+import { PublishService } from "../services/publishService";
 import { UserService } from "../services/userService";
 import { MyPostsService } from "../services/myPostsService";
 import { AdminService } from "../services/adminService";
 import { PendingService } from "../services/pendingService";
 import { PaymentService } from "../services/paymentService";
 import { FaqService } from "../services/faqService";
+import { CaptureService, isCaptureOn } from "../services/captureService";
+import { ShadowAdminService } from "../services/shadowAdminService";
+import { TakeDownService } from "../services/takeDownService";
+import { CaptureNoteService } from "../services/captureNoteService";
+import { GroupListingService } from "../services/groupListingService";
+import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -44,6 +51,8 @@ export class BotController {
     private wizardService: WizardService;
     private postService: PostService;
     private moderationService: ModerationService;
+    private publishService: PublishService;
+    private botUsername = "";
     private userService: UserService;
     private myPostsService: MyPostsService;
     private adminService: AdminService;
@@ -51,6 +60,11 @@ export class BotController {
     private paymentService: PaymentService;
     private faqService: FaqService;
     private broadcastUsersService: BroadcastUsersService;
+    private captureService: CaptureService;
+    private shadowAdminService: ShadowAdminService;
+    private takeDownService: TakeDownService;
+    readonly groupListings: GroupListingService;
+    readonly captureNotes: CaptureNoteService;
 
     constructor(api: Api) {
         this.api = api;
@@ -58,15 +72,21 @@ export class BotController {
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService);
-        this.moderationService = new ModerationService(api, this.config, this.postService);
+        this.publishService = new PublishService(api, this.config, this.postService);
+        this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
+        this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
+        this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
-        this.myPostsService = new MyPostsService(api, this.config, this.postService);
+        this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);
+        this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
         this.adminService = new AdminService(api, this.config);
         this.pendingService = new PendingService(api, this.config, this.postService);
         this.paymentService = new PaymentService(api, this.config);
         this.faqService = new FaqService(api, this.config);
         this.broadcastUsersService = new BroadcastUsersService(api);
+        this.captureService = new CaptureService(this.config);
+        this.shadowAdminService = new ShadowAdminService(api, this.config);
     }
 
     async syncSoldPosts(): Promise<void> {
@@ -111,7 +131,11 @@ export class BotController {
         }
     }
 
-    async HandleStart(msg: Message): Promise<void> {
+    async HandleStart(msg: Message, args = ""): Promise<void> {
+        // Deep links from capture notes; slices 4-6 add s_ and k_ here.
+        const payload = parseStartPayload(args);
+        if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         const user = await userRepository.findByUserId(String(msg.from!.id));
         const locale = localeService.resolveUserLocale(user);
         this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'greeting') });
@@ -319,6 +343,33 @@ export class BotController {
             return;
         }
 
+        if (route.action === "rejectReason") {
+            await this.moderationService.handleReasonCallback(ctx, query, route.arg);
+            return;
+        }
+
+        if (route.action === "takeDown") {
+            await this.takeDownService.handleCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "capture") {
+            // set_ask / set_never are the /myposts settings row; the capture parser rejects them.
+            if (route.arg.startsWith("set_")) await this.myPostsService.handleAskToggle(query, route.arg);
+            else await this.captureNotes.handleCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "listing") {
+            await this.groupListings.handleListingCallback(query, route.arg);
+            return;
+        }
+
+        if (route.action === "label") {
+            await this.shadowAdminService.handleLabelCallback(query, route.arg);
+            return;
+        }
+
         if (route.action === "lang") {
             const lang = route.arg;
             await userRepository.updateUser(String(query.from.id), { preferredLocale: lang });
@@ -369,7 +420,12 @@ export class BotController {
         task.catch((err) => console.error(`[ERROR - ${name}]`, err));
     }
 
+    private captureOn(): boolean {
+        return isCaptureOn(this.config);
+    }
+
     registerRoutes(bot: Bot, botUsername: string): void {
+        this.botUsername = botUsername;
         const isPrivate = (msg: Message) => msg.chat.type === "private";
         const cmd = (
             names: string | string[],
@@ -401,7 +457,10 @@ export class BotController {
             if (await this.moderationService.handleRejectReply(ctx)) return;
 
             // 3. Handle Replies in the Approved Group (Buyer to Seller communication)
-            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message) {
+            // (in a real forum topic Telegram adds the topic's root message as reply_to_message: not a reply to a post;
+            // outside one, message_thread_id is the reply-thread root = the replied-to post, so that IS a reply)
+            if (msg.chat.id === this.config.approvedGroupId && msg.reply_to_message
+                && !(msg.is_topic_message && msg.reply_to_message.message_id === msg.message_thread_id)) {
                 await this.postService.handlePublicReply(msg);
                 return;
             }
@@ -425,12 +484,29 @@ export class BotController {
                 return;
             }
 
+            // 5. Record sale-topic messages into capture windows (silent; never stops the chain)
+            if (this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
+                await this.captureService.handleGroupMessage(msg);
+            }
+
             return next();
         });
 
-        bot.use(cmd("start", (msg) => {
+        bot.on("edited_message", async (ctx, next) => {
+            const msg = ctx.editedMessage;
+            if (msg && this.captureOn() && this.captureService.isSaleTopicMessage(msg)) {
+                await this.captureService.handleEdit(msg);
+            }
+            // Existing group listings are kept in step in every captureMode.
+            if (msg && msg.chat.id === this.config.approvedGroupId) await this.groupListings.handleEdit(msg);
+            return next();
+        });
+
+        bot.use(cmd("start", (msg, args) => {
             if (!isPrivate(msg)) return;
-            return this.HandleStart(msg);
+            // The "Fix and resend" button on a reject notice deep-links here.
+            if (args === "sell") return this.wizardService.handleNewPost(msg);
+            return this.HandleStart(msg, args);
         }));
         bot.use(cmd("newpost", (msg) => {
             if (!isPrivate(msg)) return;
@@ -488,6 +564,22 @@ export class BotController {
                 return;
             }
             return this.pendingService.handleClearPending(msg);
+        }));
+        bot.use(cmd("label", async (msg) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.shadowAdminService.handleLabel(msg);
+        }));
+        bot.use(cmd("stats", async (msg) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.MOD)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.shadowAdminService.handleStats(msg);
         }));
         bot.use(cmd("broadcast", (msg, args) => {
             if (!isPrivate(msg)) return;

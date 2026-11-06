@@ -1,6 +1,6 @@
 import { RichMessageBuilder, RichTextBuilder, richListItem } from "node-telegram-bot-api";
 import type { Api } from "node-telegram-bot-api";
-import type { Message, InputRichMessage, SendRichMessageParams } from "node-telegram-bot-api/types";
+import type { Message, InputRichMessage, InlineKeyboardButton, SendRichMessageParams } from "node-telegram-bot-api/types";
 import { BotConfig, MediaItem, SendMessageOptions } from "../types";
 import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
@@ -96,23 +96,30 @@ export class PostService {
     // group can't hold buttons, which is why the old media path sent a second
     // message — the source of the noticeable button delay.
     async sendToModeration(postId: string, data: PostData): Promise<number | null> {
-        const moderationGroupId = this.config.moderationGroupId;
+        return this.sendToModerationTopic(this.formatPostRichMessage(data), [[
+            { text: localeService.t(this.lang, 'approveButton'), callback_data: `approve_${postId}` },
+            { text: localeService.t(this.lang, 'rejectButton'), callback_data: `reject_${postId}` },
+        ]]);
+    }
+
+    // Review card for a post a trusted seller already published: only Take down
+    // (none when the listing could not be created).
+    async sendTrustedCard(listingId: string | null, data: PostData): Promise<number | null> {
+        return this.sendToModerationTopic(
+            this.formatPostRichMessage(data, { previewLabel: localeService.t(this.lang, 'trustedPublishedLabel') }),
+            listingId ? [[{ text: localeService.t(this.lang, 'takeDownButton'), callback_data: `td_${listingId}` }]] : undefined
+        );
+    }
+
+    private async sendToModerationTopic(richMessage: InputRichMessage, keyboard?: InlineKeyboardButton[][]): Promise<number | null> {
         const moderationTopicId = this.config.moderationTopicId;
-
-        const options: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: localeService.t(this.lang, 'approveButton'), callback_data: `approve_${postId}` },
-                    { text: localeService.t(this.lang, 'rejectButton'), callback_data: `reject_${postId}` },
-                ]],
-            },
-        };
-
+        const options: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {};
+        if (keyboard) options.reply_markup = { inline_keyboard: keyboard };
         if (moderationTopicId && Number(moderationTopicId) !== 1) {
             options.message_thread_id = Number(moderationTopicId);
         }
 
-        const sent = await this.api.sendRichMessage({ chat_id: moderationGroupId, rich_message: this.formatPostRichMessage(data), ...options });
+        const sent = await this.api.sendRichMessage({ chat_id: this.config.moderationGroupId, rich_message: richMessage, ...options });
 
         return sent.message_id;
     }

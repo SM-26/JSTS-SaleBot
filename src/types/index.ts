@@ -31,6 +31,11 @@ export interface BotConfig {
     donationsEnabled?: boolean;
     enableFaq?: boolean;
     mediaLayout?: "slideshow" | "collage";
+    // Market switches; a missing key means off / off / false / "".
+    captureMode?: "off" | "shadow" | "optin";
+    buyerMatches?: "off" | "shadow" | "on";
+    nudges?: boolean;
+    rulesUrl?: string;
 }
 
 export interface LocaleStrings {
@@ -68,6 +73,13 @@ export interface LocaleStrings {
     statusApproved: string;
     statusRejected: string;
     rejectReasonPrompt: string;
+    rejectPreset1: string;
+    rejectPreset2: string;
+    rejectPreset3: string;
+    rejectPreset4: string;
+    rejectFixButton: string;
+    rejectRulesButton: string;
+    authorNotNotified: string;
     skipReasonButton: string;
     postRejectedWithReason: string;
     notAdmin: string;
@@ -157,8 +169,9 @@ export interface LocaleService {
 export interface UserSession {
     awaitingDonation?: boolean;
     // Mirror of the moderator's pending reject-reason prompts in this chat; the
-    // reply-tracking table itself has no read-only peek.
-    pendingRejects?: { promptId: number; skipMsgId: number }[];
+    // reply-tracking table itself has no read-only peek. postId is absent on
+    // entries written before 3.0.
+    pendingRejects?: { promptId: number; skipMsgId: number; postId?: string }[];
 }
 
 export interface Post {
@@ -177,6 +190,7 @@ export interface Post {
     dailyBumpCount?: number | null;
     lastBumpAt?: Date | null;
     rejectionReason?: string | null;
+    rejectionNotifiedAt?: Date | null;
 }
 
 export interface User {

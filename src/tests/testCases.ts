@@ -9,6 +9,14 @@ import { BotConfig, MediaItem, LocaleService, TestCaseFn, User, AuthLevel } from
 import userRepository from "../repositories/userRepository";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import draftRepository from "../repositories/draftRepository";
+import shadowLogRepository from "../repositories/shadowLogRepository";
+import { classify } from "../services/classifier";
+import { isTestBotToken } from "./testBot";
+import { PublishService } from "../services/publishService";
+import listingRepository from "../repositories/listingRepository";
+import { GroupListingService } from "../services/groupListingService";
+import { CaptureNoteService } from "../services/captureNoteService";
+import { seedCapture } from "./fixtures";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -35,6 +43,11 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     rbac_auth: { label: "🔍 Test RBAC Auth Output", run: testCase_RBACAuth },
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
+    classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
+    shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
+    trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
+    new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
+    capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
 };
 
 /**
@@ -472,5 +485,179 @@ async function testCase_WizardDraftStatus(
     } catch (err) {
         console.error("[ERROR - testCase_WizardDraftStatus]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Wizard draft status failed: " + (err as Error).message });
+    }
+}
+
+// [text, hasMedia] pairs: one per tier, plus a bundle.
+const CLASSIFY_FIXTURES: Array<[string, boolean]> = [
+    ["גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", true],
+    ["M4 למכירה 900 ש\"ח", true],
+    ["1300 מרכז", true],
+    ["למכירה כוונת 300₪", false],
+    ["מחפש M4 עד 800₪", true],
+    ["מישהו יודע מתי המשחק?", false],
+    ["למכירה\nM4 900₪\nגלוק 600₪", true],
+];
+
+/**
+ * TEST CASE: run the classifier on a few fixed messages and DM one line each
+ * (tier · title · price). Pure: no DB, no group.
+ */
+async function testCase_ClassifyFixtures(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const lines = CLASSIFY_FIXTURES.map(([text, media]) => {
+            const { tier, parsed } = classify(text, media);
+            return `${tier} · ${parsed.title ?? "-"} · ${parsed.price ?? "-"}`;
+        });
+        await api.sendMessage({ chat_id: msg.chat.id, text: lines.join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_ClassifyFixtures]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Classify fixtures failed: " + (err as Error).message });
+    }
+}
+
+/**
+ * TEST CASE: DM the last 5 shadow_log rows (tier, wouldList, mergeWith, link). Read-only.
+ */
+async function testCase_ShadowLast5(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const rows = await shadowLogRepository.lastRows(5);
+        const text = rows.length
+            ? rows.map(r => `${r.tier} · wouldList=${r.wouldList} · merge=${r.mergeWith ?? "-"} · ${r.messageIds.length ? `https://t.me/c/${String(Math.abs(r.chatId)).replace(/^100/, "")}/${r.messageIds[0]}` : "—"}`).join("\n")
+            : "No shadow rows yet.";
+        await api.sendMessage({ chat_id: msg.chat.id, text });
+    } catch (err) {
+        console.error("[ERROR - testCase_ShadowLast5]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Shadow rows failed: " + (err as Error).message });
+    }
+}
+
+// Real-looking radio post (owner fixture) with one photo file_id of the TEST bot.
+// The seller is the tester, never the real seller.
+const RADIO_POST = {
+    title: "מכשיר קשר",
+    description: "באופנג UV-5R\nחדש באריזה",
+    price: "270",
+    location: "בית דגן",
+    media: [{ fileId: "AgACAgQAAyEGAASRyiESAAIBaWrrdLCnO5_7O2IBhJgi88eq-bjkAAJUD2sbuaNZU5XHhK251RGCAQADAgADeQADPQQ", type: "photo" }] as MediaItem[],
+};
+
+/**
+ * Shared by the two seller cases: saves the radio post for the tester and runs it
+ * through PublishService with the seller trust forced either way. Test groups only.
+ */
+async function radioPostAs(trusted: boolean, api: Api, config: BotConfig, postService: PostService, userService: UserService, msg: Message): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    // Trusted publishing is real: on any other bot it would post to the production group.
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Seller-post tests run only on the test bot." });
+        return;
+    }
+    const user: TgUser = msg.from;
+    try {
+        await userService.ensureUser(user);
+        const post = await postRepository.createPost({
+            userId: user.id.toString(),
+            ...RADIO_POST,
+            createdAt: new Date(),
+        });
+        const data = { ...RADIO_POST, userId: user.id, username: user.username, firstName: user.first_name };
+        const outcome = await new PublishService(api, config, postService).submitPost(post, data, trusted);
+        const listing = await listingRepository.findByPostId(String(post._id));
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: `✅ ${trusted ? "Trusted" : "New"} seller post: ${outcome} (test groups only)\nPost ID: ${post._id}\nListing ID: ${listing ? listing._id : "none"}`,
+        });
+    } catch (err) {
+        console.error("[ERROR - radioPostAs]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Seller post failed: " + (err as Error).message });
+    }
+}
+
+async function testCase_TrustedSellerPost(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    await radioPostAs(true, api, config, postService, userService, msg);
+}
+
+async function testCase_NewSellerPost(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    await radioPostAs(false, api, config, postService, userService, msg);
+}
+
+/**
+ * Sends the presser a real opt-in capture note for a fixture sale post. Fixture only:
+ * Add makes a listing that points at message 1 (the test bot only, like radioPostAs).
+ */
+async function testCase_CaptureNote(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    // Add creates a listing: on any other bot it would touch the production group.
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ The capture-note test runs only on the test bot." });
+        return;
+    }
+    try {
+        const username = (await api.getMe()).username ?? "";
+        const groupListings = new GroupListingService(api, config, () => username);
+        const notes = new CaptureNoteService(api, config, groupListings, () => username);
+        const capture = await seedCapture({
+            chatId: config.approvedGroupId,
+            senderId: String(msg.from.id),
+            messageIds: [1],
+            text: "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז",
+            media: [TEST_MEDIA[0]],
+        });
+        const sent = capture.parsed ? await notes.sendAskNote(capture, capture.parsed, new Date()) : false;
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: sent
+                ? `✅ Capture note sent to you in group ${config.approvedGroupId}, topic ${config.approvedTopicId ?? "none"}`
+                : `❌ The capture note was not sent (group ${config.approvedGroupId}); see the log`,
+        });
+    } catch (err) {
+        console.error("[ERROR - testCase_CaptureNote]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Capture note failed: " + (err as Error).message });
     }
 }

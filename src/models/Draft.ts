@@ -19,6 +19,10 @@ export interface IDraft extends Document {
     location?: string;
     media: IMediaItem[];
     promptMessageId: number;
+    // Set while the seller re-enters a field that held a blocked word (see WizardService.previewOrFix).
+    fixing?: boolean;
+    // Set when the draft was started from a captured group message (opt-in note).
+    captureId?: string;
     startedAt: Date;
     updatedAt: Date;
 }
@@ -40,6 +44,8 @@ const draftSchema = new Schema<IDraft>({
     location: { type: String },
     media: { type: [mediaItemSchema], default: [] },
     promptMessageId: { type: Number, required: true },
+    fixing: { type: Boolean, default: undefined },
+    captureId: { type: String },
     startedAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true },
 }, { timestamps: false });
