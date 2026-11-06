@@ -587,13 +587,13 @@ export class BotController {
             }
             return this.pendingService.handleClearPending(msg);
         }));
-        bot.use(cmd("label", async (msg) => {
+        bot.use(cmd("label", async (msg, args) => {
             if (!isPrivate(msg)) return;
             if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {
                 this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
                 return;
             }
-            return this.shadowAdminService.handleLabel(msg);
+            return this.shadowAdminService.handleLabel(msg, args);
         }));
         bot.use(cmd("stats", async (msg) => {
             if (!isPrivate(msg)) return;

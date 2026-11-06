@@ -17,6 +17,8 @@ import listingRepository from "../repositories/listingRepository";
 import { GroupListingService } from "../services/groupListingService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { seedCapture } from "./fixtures";
+import { rankMatches } from "../services/matchService";
+import { AlertService } from "../services/alertService";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -48,6 +50,8 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
     capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
+    match_for_text: { label: "🔎 Match for text", run: testCase_MatchForText },
+    alert_me_now: { label: "🔔 Alert me now", run: testCase_AlertMeNow },
 };
 
 /**
@@ -659,5 +663,49 @@ async function testCase_CaptureNote(
     } catch (err) {
         console.error("[ERROR - testCase_CaptureNote]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Capture note failed: " + (err as Error).message });
+    }
+}
+
+// A fixed wanted text ranked over the live listings; DMs the titles.
+async function testCase_MatchForText(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const live = await listingRepository.findLiveForMatching();
+        const byId = new Map(live.map(l => [String(l._id), l]));
+        const titles = rankMatches("מחפש גלוק 17 עד 800", live).map(id => byId.get(id)?.title ?? "—");
+        await api.sendMessage({ chat_id: msg.chat.id, text: titles.length ? titles.join("\n") : "No matches." });
+    } catch (err) {
+        console.error("[ERROR - testCase_MatchForText]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Match failed: " + (err as Error).message });
+    }
+}
+
+// Sends the tester's saved-search alerts right now (no alert log, no cursor).
+async function testCase_AlertMeNow(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    try {
+        const username = (await api.getMe()).username ?? "";
+        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username)).sendNow(String(msg.from.id), new Date());
+        if (sent === 0) await api.sendMessage({ chat_id: msg.chat.id, text: "No alerts to send (0)." });
+    } catch (err) {
+        console.error("[ERROR - testCase_AlertMeNow]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Alert failed: " + (err as Error).message });
     }
 }
