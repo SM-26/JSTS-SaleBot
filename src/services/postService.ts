@@ -20,6 +20,7 @@ export interface PostData {
     price: string;
     location: string;
     meetup?: boolean;
+    highlight?: string;
     media: MediaItem[];
     userId: number;
     username?: string;
@@ -196,6 +197,7 @@ export class PostService {
             price: post.price,
             location: post.location,
             meetup: post.meetup,
+            highlight: post.highlight,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,

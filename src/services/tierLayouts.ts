@@ -82,6 +82,7 @@ export function buildTierMessage(data: PostData, o: TierLayoutOpts, lang: string
         b.table(rows, { is_compact: true, is_striped: true });
     }
 
+    if (o.tier === "both" && data.highlight) b.pullQuote(data.highlight);
     if (data.description) b.details(tr("tierDescription"), x => x.paragraph(entitiesToRichText(data.description, data.descriptionEntities)));
     if (o.tier === "top") b.paragraph(sellerLink(`${mark} ${tr("tierSellerLabel")} `));
 

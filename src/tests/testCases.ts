@@ -802,9 +802,10 @@ async function setMyTier(
 }
 
 const TIER_POST = {
-    title: "מצלמת אקשן לדוגמה",
-    description: "מצלמה קטנה, עובדת מצוין\nכוללת מטען, כיסוי ושתי סוללות",
-    price: "350",
+    title: "Hello Capa",
+    description: "היי קאפה טוקיו מרוי\nצביעת cerakote הלו קיטי קסטום יחידה ומיוחדת\nPink sherbet\nStormtrooper white\nMystique FX finish",
+    price: "2500",
+    highlight: "רוצים לשכנע את החברה להצטרף למשחק? מתנה לילדה? סתם הצהרת אופנה?",
     location: "בית דגן",
     meetup: true,
 };

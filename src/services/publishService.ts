@@ -78,6 +78,7 @@ export class PublishService {
             price: post.price,
             location: post.location,
             meetup: post.meetup,
+            highlight: post.highlight,
             media: post.media,
             userId: Number(author.userId),
             username: author.userName || undefined,

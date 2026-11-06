@@ -158,6 +158,7 @@ async function run() {
             const card = api.calls.find(c => c.method === "sendRichMessage")!;
             assert.strictEqual(card.params.chat_id, config.moderationGroupId, `${tier}: the card goes to the moderation group`);
             assert.ok(JSON.stringify(card.params.rich_message).includes(marks[tier]), `${tier}: the card shows the layout`);
+            assert.strictEqual(JSON.stringify(card.params.rich_message).includes("מתנה לילדה"), tier === "both", `${tier}: only "both" shows the highlight`);
             const keys = (card.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat().map(k => k.callback_data);
             assert.ok(keys.some(k => k.startsWith("approve_")) && keys.some(k => k.startsWith("reject_")), `${tier}: approve and reject buttons`);
             assert.ok(!api.calls.some(c => c.method === "sendRichMessage" && c.params.chat_id === config.approvedGroupId), `${tier}: nothing is public before approval`);

@@ -60,6 +60,7 @@ export class PendingService {
                     price: post.price,
                     location: post.location,
                     meetup: post.meetup,
+                    highlight: post.highlight,
                     media: post.media,
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
