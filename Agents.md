@@ -54,6 +54,8 @@
 │   │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
 │   │   ├── shadowAdminService.ts # /label and /stats
 │   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
+│   │   ├── catchupScan.ts        # Pure scan of a group export into a catch-up file; parseCatchupFile()
+│   │   ├── catchupService.ts     # /catchup import and send, held offer note, k_ DM and ck_ buttons
 │   │   ├── groupListingService.ts # Group listings: Add, Sold/Refresh/Remove (ls_), edit sync, /myposts section
 │   │   ├── listingCards.ts       # Pure card builders and the mk_/ls_/start-payload helpers
 │   │   ├── ephemeralNotes.ts     # The only caller of the ephemeral Bot API methods (send/edit/delete a note)
@@ -81,6 +83,7 @@
 │   │   ├── check*.ts, *.check.ts # The `pnpm run check-*` scripts (see Linting & Testing)
 │   │   ├── harness.ts            # Offline bot harness (fake fetch) shared by the checks
 │   │   ├── fixtures.ts           # seedCapture(): a classified capture straight through the model
+│   │   ├── checkCatchup.ts       # `pnpm run check-catchup`: export scan (windows, tiers, merge, parse)
 │   │   ├── checkListingCards.ts  # `pnpm run check-cards`: card builders, mk_/ls_ formats, start payloads
 │   │   ├── syntheticCapture.ts   # Manual (not in `pnpm test`): 20 messages through the controller on the TEST bot/group
 │   │   ├── syntheticOptin.ts     # Manual (not in `pnpm test`): one real private note + one moderation card on the TEST bot/groups, cleaned up after
@@ -93,6 +96,7 @@
 │       └── ru/
 │           └── common.json       # Russian locale strings
 ├── scripts/
+│   ├── catchup.ts                # Scans a group export into catchup.json (no DB, no network)
 │   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
 ├── .env.example                  # Environment variable template (copy to .env)
@@ -171,6 +175,7 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
 - **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
 - **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
+- **Slice 6 fields** are optional and additive: `members.pendingCatchup` (a seller's offered items) and `members.catchup` (`importedAt`, `armedAt`, `sentAt`, the held note), and `listings.origin: "catchup"`. Stamps outlive the items: `sentAt` alone blocks a second offer. `catchup.json` and the export hold member text and never enter the repo (gitignored). After a rollback to 3.1.0, `ck_` falls to the stale catch-all, `k_` falls to the greeting, `members.catchup` is ignored and added listings stay.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -191,6 +196,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/help`   | All users | Shows available commands (admins see extra items)|
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
+| `/catchup`| Admin     | DM only: catch-up offers. Alone: counts. Caption `/catchup import` on a `catchup.json` file; `/catchup send` arms delivery |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
@@ -233,6 +239,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-locals` | Locale files: JSON syntax, no empty values, key parity across `en`/`he`/`ru`, FAQ structure | no |
 | `pnpm run check-config` | `/config` value parsing per key (`configSchema`) | no |
 | `pnpm run check-classifier` | Classifier fixtures: tiers, price/title parsing, blocked words | no |
+| `pnpm run check-catchup` | Export scan: windows, tiers, merge, `parseCatchupFile` | no |
 | `pnpm run check-claim` | Atomic approve/reject claim under concurrency | yes |
 | `pnpm run check-polling` | Polling-error classification and de-duplication | no |
 | `pnpm run check-callbacks` | Golden test pinning every `callback_data` format | no |
@@ -275,8 +282,8 @@ Never run the bot, or a check, against the production token or database.
 - **Don't add new config keys to `config.json`** without updating the `BotConfig` interface in `src/types/index.ts` and the `/config` handler in `adminService.ts`.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
-- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too.
+- **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. Catch-up offers (`/catchup`) reach no member before an admin runs `/catchup send`, and then only under `captureMode: optin`.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.
