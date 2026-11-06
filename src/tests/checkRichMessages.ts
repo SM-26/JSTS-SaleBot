@@ -100,7 +100,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
         blocks.push(
             { type: "divider" },
             heading("helpModSection", 3),
-            { type: "list", items: ["helpPending", "helpClearPending", "helpAuth", "helpStats"].map(cmd) },
+            { type: "list", items: ["helpPending", "helpClearPending", "helpAuth", "helpStats", "helpVerify", "helpUnverify"].map(cmd) },
         );
     }
 
@@ -335,6 +335,76 @@ function checkPostsWithTrust(): number {
     return cases;
 }
 
+// Meeting point, empty location and empty description (new behaviour; the matrix above has none of them).
+function checkMeetup(): number {
+    const service = new PostService({} as unknown as Api, { ...baseConfig, lang: "en" });
+    const place = localeService.t("en", "meetupPlace");
+    const base: PostData = { title: "T", description: "D", price: "1", location: "L", media: [], userId: 1, firstName: "A" };
+    const items = (d: PostData) => {
+        const msg = service.formatPostRichMessage(d) as unknown as { blocks: { type: string; items?: { blocks: { text: unknown }[] }[] }[] };
+        return msg.blocks.find(b => b.type === "list")!.items!.map(i => i.blocks[0].text);
+    };
+    const pins = (d: PostData) => items(d).filter(x => typeof x === "string" && x.startsWith("📍"));
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "Haifa" }), [`📍 Haifa · ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "בית דגן" }), ["📍 בית דגן"]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: "" }), [`📍 ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, meetup: true, location: place }), [`📍 ${place}`]);
+    assert.deepStrictEqual(pins({ ...base, location: "" }), []);
+    assert.deepStrictEqual(pins({ ...base, meetup: false, location: "Haifa" }), ["📍 Haifa"]);
+    const bare = service.formatPostRichMessage({ ...base, description: "" }) as unknown as { blocks: { type: string }[] };
+    assert.ok(!bare.blocks.some(b => b.type === "blockquote"), "no blockquote without a description");
+    assert.ok(bare.blocks.some(b => b.type === "heading") && bare.blocks.some(b => b.type === "list"));
+    // with a bot name the meeting point's words are the link; nothing else in the line is
+    const linked = new PostService({} as unknown as Api, { ...baseConfig, lang: "en" }, () => "bot");
+    const url = "https://t.me/bot?start=faq_1";
+    const line = (d: PostData) => (linked.formatPostRichMessage(d) as unknown as { blocks: { type: string; items?: { blocks: { text: unknown }[] }[] }[] }).blocks.find(b => b.type === "list")!.items![1].blocks[0].text;
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "Haifa" }), ["📍 Haifa · ", { type: "url", text: place, url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "בית דגן" }), ["📍 ", { type: "url", text: "בית דגן", url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "" }), ["📍 ", { type: "url", text: place, url }]);
+    assert.strictEqual(line({ ...base, location: "Haifa" }), "📍 Haifa");
+    return 11;
+}
+
+// Tier layouts (V, G4, X2): goldens live in tierLayouts.golden.json. Regenerate with UPDATE_GOLDEN=1 and review the diff.
+function checkTierLayouts(): number {
+    const goldenPath = path.join(__dirname, "tierLayouts.golden.json");
+    const service = new PostService({} as unknown as Api, { ...baseConfig, lang: "he" }, () => "bot");
+    const data: PostData = {
+        title: "Hello Kitty 1911 GBB", description: "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות.", price: "1,200 ₪",
+        location: "מרכז", meetup: true, media: [photo(1), photo(2), photo(3)], userId: 7, username: "SM_26", firstName: "SM",
+    };
+    const stats = { sold: 12, since: "נובמבר 2026" };
+    const built: Record<string, unknown> = {};
+    for (const tier of ["top", "verified", "both"] as const) {
+        for (const sold of [false, true]) built[`${tier}${sold ? "-sold" : ""}`] = service.formatPostRichMessage(data, { tier, stats, sold });
+        built[`${tier}-nouser`] = service.formatPostRichMessage({ ...data, username: undefined }, { tier, stats });
+    }
+    if (process.env.UPDATE_GOLDEN) fs.writeFileSync(goldenPath, JSON.stringify(built, null, 2) + "\n");
+    const golden = JSON.parse(fs.readFileSync(goldenPath, "utf-8")) as Record<string, unknown>;
+    assert.deepStrictEqual(Object.keys(golden).sort(), Object.keys(built).sort(), "tier golden keys");
+    for (const [name, msg] of Object.entries(built)) assert.strictEqual(JSON.stringify(msg), JSON.stringify(golden[name]), `tier layout [${name}]`);
+
+    type B = { type: string; text?: unknown; buttons?: unknown[] };
+    const blocks = (m: unknown) => (m as { blocks: B[] }).blocks;
+    for (const [name, msg] of Object.entries(built)) {
+        const s = JSON.stringify(msg);
+        assert.ok(!s.includes("נקודת מפגש"), `${name}: no meeting-point wording`);
+        assert.ok(blocks(msg).some(b => b.type === "slideshow"), `${name}: slideshow of all photos`);
+        assert.ok(blocks(msg).some(b => b.type === "details"), `${name}: foldable description`);
+        assert.ok(!blocks(msg).some(b => b.type === "blockquote"), `${name}: no quote`);
+        assert.ok(s.includes("start=faq_1"), `${name}: location words link to the FAQ`);
+        assert.strictEqual(s.includes("https://t.me/SM_26"), !name.includes("sold") && !name.includes("nouser") && !name.startsWith("top"), `${name}: contact button only when open, with a username, not on top`);
+        assert.strictEqual(s.includes("strikethrough"), name.includes("sold"), `${name}: struck through only when sold`);
+        assert.strictEqual(s.includes("🔴"), name.includes("sold"), `${name}: sold line`);
+    }
+    assert.ok(JSON.stringify(built.both).includes("⭐"), "both has the banner");
+    assert.ok(!JSON.stringify(built.verified).includes("⭐"), "verified has no banner");
+    assert.ok(JSON.stringify(built.both).includes("12") && JSON.stringify(built.both).includes("נובמבר 2026"), "both shows seller stats");
+    // a plain regular call is still the old layout
+    assert.strictEqual(JSON.stringify(service.formatPostRichMessage(data, { tier: "regular" })), JSON.stringify(service.formatPostRichMessage(data)), "tier regular = today's layout");
+    return Object.keys(built).length;
+}
+
 function run() {
     console.log("[INFO] Checking rich message wire JSON against the hand-built reference...");
     const posts = checkPosts();
@@ -342,6 +412,9 @@ function run() {
     const help = checkHelp();
     const reports = checkReport();
     const entities = checkEntities();
+    const meetup = checkMeetup();
+    console.log(`[SUCCESS] ${checkTierLayouts()} tier layout goldens.`);
+    console.log(`[SUCCESS] ${meetup} meetup / empty-field cases.`);
     console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${trusted} trust-line, ${help} help, ${reports} report cases; ${entities} entity cases).`);
 }
 

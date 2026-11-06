@@ -43,7 +43,7 @@ export class GroupListingService {
 
     constructor(private api: Api, private config: BotConfig, private getBotUsername: () => string, private lifecycle: LifecycleService) { }
 
-    async addToMarket(captureId: string, fields: { title: string; price: string; location?: string }, now = new Date()): Promise<AddResult> {
+    async addToMarket(captureId: string, fields: { title: string; price: string; location?: string; meetup?: boolean }, now = new Date()): Promise<AddResult> {
         const peek = await captureRepository.findById(captureId);
         // only a sale post can be listed (a forged button on a want-to-buy must not)
         if (!peek || (peek.tier !== "strict" && peek.tier !== "ask")) return { kind: "gone" };

@@ -35,6 +35,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Shadow Classifier (market groundwork)** — With `captureMode: "shadow"` the bot records messages in the sale topic into per-sender posting windows (90 s, closed after 30 s of quiet), classifies each (`strict`, `ask`, `wtb`, `none`) and logs what automatic capture *would* have done (`shadow_log`, 120 days). It **sends nothing** to the group or to members. Captured text lives 7 days. `buyerMatches: "shadow"` also logs which live listings a "wanted" message would match
 - **Opt-in Capture Notes** — With `captureMode: "optin"`, a member who posts a sale message in the sale topic gets a **private note** (an ephemeral message only they see, nothing public) asking whether to add it to the market: **Add**, **Not now** or **Don't ask again**. Add makes a *group listing* that points at their own message; the member can mark it **Sold**, **Refresh** or **Remove** from the note, from `/myposts` or from a bot card, and editing the message keeps the listing in step. Reposting the same item refreshes the listing and brings its text and price up to date. The bot never touches the member's message and a seller can never remove an approved bot post. At most 3 notes per seller per 24 h; a text a note was already sent for is not asked again for 30 days. A seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) gets a **Take down** card in the moderation topic (group listings are post-moderated). The card offers **Take down** (the member's message stays) or **Take down and delete original post**, which asks once more and then deletes the member's message and all its photos (moderators only; Telegram lets a bot delete only messages under 48 h old, and the card says how many were left). A seller's Remove never deletes anything
 - **Buyer Matches and Alerts**: With `buyerMatches: "on"`, a member who posts a "wanted" message in the sale topic gets a private note listing the live listings that match, with an **Alert me** link (`?start=s_<captureId>`) that saves the search. A saved search DMs the buyer when a new matching listing appears. `/alerts <text>` also saves a search, and `/alerts` lists and removes them (max 5 per buyer). Searches hold the parsed query, never the original message. Private notes are best effort (they reach only apps online when sent), and the `s_` link carries a capture id, so it stops working after 7 days. A saved search is deleted by TTL at 60 days in every mode, with a renewal offer a few days before
+- **One-message listing (`quickListing`)** — With `quickListing: true`, a photo, video or album with a caption sent to the bot in DM (no draft in progress) starts a draft from the caption: title and price are parsed, the rest is asked only if missing (title, price or `minimumPhotos` go to that wizard step). Album items are collected into one draft and the preview goes out 1.5 s after the last item. A caption-less album is dropped silently; a single photo with no caption gets a one-line hint and no draft. A "wanted" caption gets no draft: with `buyerMatches: "on"` it gets the list of matches, a hint to use `/alerts <query>` and a "Selling this? Send /newpost" line; otherwise one line saying wanted posts go in the group and `/newpost` is for selling. The description is only what the title, price and location left (nothing left means no description; a first line over 60 characters keeps what the title cut off), and a bare number under 100 ("Glock 17") stays in the title instead of becoming the price. Every preview then has field-edit buttons (title, price, location) and a Beit Dagan meeting-point toggle; the location step has the toggle too. `/start sell` offers Continue / Start over on a live draft, otherwise a hint. Off by default (`config.json.example` ships `false`); with it off the wizard is unchanged. Blocked words and moderation apply as before
+- **Beit Dagan meeting point** — A listing can carry an optional `meetup` flag (set in the wizard toggle). Posts and buyer cards show `📍 {location} · בית דגן`; a location of בית דגן counts as a meetup. On a post the words of the meeting point in the location line link to `start=faq_1`, which opens FAQ node 1 (works whatever `quickListing` says); buyer notes, alert DMs and DM match lists get a button to the same link when any listed listing is a meetup. FAQ messages carry a line of invisible padding so their buttons are wide. Listings without the flag render exactly as before
 - **Listing Lifecycle** — With `nudges: true` a listing not refreshed for 7 days gets a DM with **Refresh** and **Sold** (group listings also **Remove**); after 30 days it expires (this runs whatever `nudges` says). An approved bot post stays `approved` when its listing expires, and `/myposts` offers **Relist**. A held nudge (seller not reachable) arrives as a private note (with **Manage**) after their next sale-topic message; held nudges need capture on (`captureMode` not `off`). **Bump** lifts a legacy hold, which shrinks the `/stalecheck` count. New group cards carry a short trust line about the seller
 - **`/stalecheck`** — Admin DM command: asks the sellers of legacy (held) listings whether each is still for sale. A dry run first, nothing is sent before **Send** is pressed; unanswered listings expire 7 days later
 - **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group or bot listing
@@ -104,6 +106,7 @@ Every published post card carries **🚫 Take down** (when its listing exists). 
 | Command | Description |
 | :--- | :--- |
 | `/promote` | Increase a user's authorization level (e.g., User to Moderator, Moderator to Admin). |
+| `/verify <user>` / `/unverify <user>` | Mod: set or clear the ✅ verified mark. Verified sellers (and 🏅 top sellers, earned at 60% sold of at least 3 ended listings) publish in a richer post layout. |
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
 | `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
@@ -294,7 +297,8 @@ src/
 │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
 │   ├── shadowAdminService.ts # /label and /stats
 │   ├── buyerNoteService.ts   # Private buyer note on a "wanted" post: matching listings and an Alert me link
-│   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list and alert DMs (al_)
+│   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list and alert DMs (al_); meeting-point row
+│   ├── meetup.ts             # Beit Dagan meeting point: isMeetupLocation, location text, faq_1 link and button
 │   ├── savedSearchService.ts # /alerts, the s_ link, the one-reply fix and the al_ buttons
 │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
 │   ├── captureNoteService.ts # Private opt-in capture notes: ask, refresh, Add / Not now / Don't ask again (mk_)
@@ -319,6 +323,7 @@ src/
 │   ├── syntheticCapture.ts   # Manual: 20 messages through the controller on the TEST bot/group; sends nothing
 │   ├── syntheticLifecycle.ts # Manual: a stale-check DM and a nudge DM to the owner on the TEST bot
 │   ├── syntheticOptin.ts     # Manual: one real private note + one moderation card on the TEST bot/groups, cleaned up after
+│   ├── quickListingChecks.ts # quickListing and meeting-point checks (run from checkFlows)
 │   ├── checkBuyerMatches.ts  # `pnpm run check-buyer`: saved searches, alerts, buyer notes (needs MONGO_URI)
 │   ├── syntheticBuyer.ts     # Manual: one buyer note and one alert on the TEST bot/groups, cleaned up after
 │   ├── checkListingCards.ts  # Card builders, callback_data and start payload formats (`pnpm run check-cards`)
@@ -414,6 +419,22 @@ docker compose -f compose.prod.yaml logs -f bot
 
 Backups, restores and the read-only database census are in [BACKUP.md](BACKUP.md).
 
+#### 3. Test stack — `compose.test.yaml`
+
+For trying the bot with admins on the **test bot and test groups**. It builds the production image from your checkout and keeps its own database, so it never touches prod or dev data. It refuses to start with any token but the test bot's. The `.env` next to it must hold the test token (the database setting there is ignored). Point it at another file with `TEST_ENV_FILE`.
+
+```bash
+cp config.test.json.example config.test.json   # once; every feature is on, in Hebrew
+docker compose -f compose.test.yaml up -d --build
+```
+
+- **Watch it:** Docker Desktop → Containers → `jsts-salebot-test`, for logs and start/stop.
+- **Update to new code:** `git pull`, then run the `up -d --build` command again. Data stays.
+- **Make someone an admin:** they send `/start` to the test bot first. Then open `http://localhost:8082` (`admin` / `pass`), go to `SalesBotTestDemo` → `users`, and set their `authLevel` to `2` (`1` for a moderator).
+- **Start over with empty data:** `docker compose -f compose.test.yaml down -v`.
+
+> Only one thing can poll a bot token at a time. Stop this stack before running the bot or a synthetic script on the test token some other way.
+
 ## Dev build  
 ### Prerequisites
 
@@ -488,6 +509,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
 | `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`       | enum | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the private buyer notes and the DM alerts for saved searches. `shadow` is the kill switch (notes and alerts stop at once; saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
+| `quickListing`       | boolean | `true` lets a captioned photo, video or album in DM start a draft, adds field-edit buttons and the Beit Dagan toggle to the preview, and handles `/start sell`. Default `false` (the wizard behaves as before) |
 | `nudges`             | boolean | `true` sends the 7-day refresh nudge to sellers (default `false`; expiry runs regardless) |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |

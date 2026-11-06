@@ -30,6 +30,11 @@ const sale = (user: number, at: number, text: string, extra: Row = {}): Row => m
 const scan = (messages: Row[], opts: { topicId?: number; exclude?: string[] } = {}) => scanExport({ messages }, { now, ...opts });
 const P = "למכירה M4 900₪";
 
+check("a trade post (no shekel price) and a bare number-and-unit post are not offered", () => {
+    assert.strictEqual(scan([sale(1, 0, "גלוק 17 להחלפה ב M4 תמורת 900")]).file.sellers.length, 0);
+    assert.strictEqual(scan([sale(1, 0, "למכירה BB 5000 כדורים")]).file.sellers.length, 0);
+});
+
 check("last 30 days only", () => {
     const old = { ...sale(1, 0, P), date_unixtime: String(Math.floor(now.getTime() / 1000) - 31 * 86400) };
     assert.strictEqual(scan([old]).file.sellers.length, 0);

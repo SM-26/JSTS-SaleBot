@@ -15,7 +15,7 @@ export interface IListing extends Document {
     price?: string;
     priceValue?: number;
     location?: string;
-    meetup?: boolean; // slice 5 writes it; slice 4 only reads it
+    meetup?: boolean;
     text?: string;
     textHash?: string;
     media: IMediaItem[];

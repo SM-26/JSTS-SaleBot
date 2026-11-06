@@ -14,6 +14,7 @@ import { createHarness, BOT_USERNAME } from "./harness";
 import { seedCapture } from "./fixtures";
 import { AuthLevel, BotConfig } from "../types";
 import type { Message } from "node-telegram-bot-api/types";
+import { renderStaleDm } from "../services/staleCheckService";
 
 // Smoke test for BotController.registerRoutes on the offline harness: every
 // user command is routed, look-alikes are not, the /newPost wizard answers
@@ -80,7 +81,7 @@ async function run() {
         // Admin commands answer a plain user with "not an admin", which is still a reply.
         const commands = [
             "/start", "/myposts", "/alerts", "/help", "/lang", "/config", "/activeUsers", "/pending",
-            "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
+            "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1", "/verify 1", "/unverify 1",
             "/auth", "/test", "/donate", "/cancel", "/stats", "/label", "/catchup",
             "/start@" + BOT_USERNAME, "/START",
         ];
@@ -98,6 +99,25 @@ async function run() {
         const plainGreeting = await greetingOf("/start");
         assert.strictEqual(await greetingOf("/start garbage"), plainGreeting, "/start garbage answers the greeting");
         assert.strictEqual(await greetingOf("/start c_xyz"), plainGreeting, "/start c_xyz answers the greeting");
+
+        // start=faq_1 (the group post's meeting-point button) opens FAQ node 1; only that exact payload.
+        {
+            const node1 = localeService.getFaqs(config.lang)["1"];
+            assert.ok(node1, "the locale has FAQ node 1");
+            await expectCalls("/start faq_1", () => h.sendText("/start faq_1", { userId }));
+            const sent = h.calls.find((c) => c.method === "sendMessage")!;
+            assert.ok(String(sent.params.text).includes(node1), "FAQ node 1 title is shown");
+            const datas = (sent.params.reply_markup as { inline_keyboard: { callback_data?: string }[][] }).inline_keyboard.flat().map((b) => b.callback_data);
+            assert.ok(datas.includes("faq_1.1"), "node 1 keyboard has faq_1.1");
+            assert.strictEqual(await greetingOf("/start faq_2"), plainGreeting, "/start faq_2 answers the greeting");
+            const faqSetting = controller.config.enableFaq;
+            controller.config.enableFaq = false;
+            try {
+                assert.strictEqual(await greetingOf("/start faq_1"), plainGreeting, "faq_1 answers the greeting with the FAQ off");
+            } finally {
+                controller.config.enableFaq = faqSetting;
+            }
+        }
 
         await expectSilence("/start@someotherbot",() => h.sendText("/start@someotherbot", { userId }));
         await expectSilence("a URL", () => h.sendText("see http://x.com/test", { userId }));
@@ -507,6 +527,23 @@ async function run() {
             assert.strictEqual(textEdit.length, 1, "DM text edited");
             assert.ok(String(textEdit[0].params.text).startsWith("Still for sale?") && String(textEdit[0].params.text).endsWith(tt("listingRefreshedToast")), "outcome line appended");
             assert.deepStrictEqual(kbOf(textEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${gd._id}`, `lc_s_${gd._id}`], "the other listing's row stays");
+
+            // the real multi-item DM: each result line starts with its item's number, and the rows keep their numbers
+            const ge = await lcGroup();
+            const gf = await lcGroup();
+            const dmItem = (l: { _id: unknown }) => ({ listingId: String(l._id), title: "t", price: "100", postedAt: new Date("2026-01-01T00:00:00Z") });
+            for (const lang of ["en", "he", "ru"]) {
+                const labels = renderStaleDm({ firstName: "x", items: [dmItem(ge), dmItem(gf)], locale: lang }).keyboard.flat().map((b) => b.text);
+                assert.deepStrictEqual(labels.map((l) => /^\d+/.exec(l)?.[0]), ["1", "1", "2", "2"], `${lang}: a stale button starts with its item's number (the result line reads it)`);
+            }
+            const staleDm = renderStaleDm({ firstName: "x", items: [dmItem(ge), dmItem(gf)], locale: config.lang });
+            const second = await press(`lc_s_${gf._id}`, { ...dm, text: staleDm.text, replyMarkup: { inline_keyboard: staleDm.keyboard } });
+            const secondEdit = second.of("editMessageText");
+            assert.ok(String(secondEdit[0].params.text).endsWith(`\n\n${localeService.t(config.lang, "lcItemResult", { i: 2, result: tt("listingSoldToast") })}`), "the line says item 2");
+            assert.deepStrictEqual(kbOf(secondEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${ge._id}`, `lc_s_${ge._id}`], "item 1's row stays");
+            const first = await press(`lc_r_${ge._id}`, { ...dm, text: String(secondEdit[0].params.text), replyMarkup: { inline_keyboard: [staleDm.keyboard[0]] } });
+            const firstText = String(first.of("editMessageText")[0].params.text);
+            assert.ok(firstText.includes(localeService.t(config.lang, "lcItemResult", { i: 2, result: tt("listingSoldToast") })) && firstText.endsWith(localeService.t(config.lang, "lcItemResult", { i: 1, result: tt("listingRefreshedToast") })), "both lines keep their numbers");
 
             // from a note: never editMessageText/ReplyMarkup (message_id is 0)
             const nb = await lcBot("expired");

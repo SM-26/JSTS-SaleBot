@@ -3,6 +3,7 @@ import type { IListing } from "../models/Listing";
 import type { Parsed } from "./classifier";
 import type { CatchupItem } from "./catchupScan";
 import { deepLink } from "./deepLinks";
+import { isMeetupLocation, meetupLocationText } from "./meetup";
 
 export type Translate = (key: string, params?: Record<string, string | number | boolean>) => string;
 export type Surface = "n" | "c" | "l";
@@ -30,17 +31,18 @@ export const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replac
 
 export function buildAskNote(t: Translate, capture: { id: string; parsed: Parsed }, botUsername: string): Card {
     const { parsed, id } = capture;
-    const complete = Boolean(parsed.title && parsed.price);
-    const first: InlineKeyboardButton = complete
-        ? { text: t("captureAddButton"), callback_data: captureActionData(id, "a"), style: "success" }
-        : { text: t("captureCompleteButton"), url: deepLink(botUsername, `c_${id}`), style: "success" };
+    const trade = Boolean(parsed.trade); // a swap without a shekel price: Edit only, no Add
+    const complete = Boolean(parsed.title && parsed.price) && !trade;
+    const edit: InlineKeyboardButton = { text: t(complete || trade ? "captureEditButton" : "captureCompleteButton"), url: deepLink(botUsername, `c_${id}`), style: complete ? undefined : "success" };
+    const first: InlineKeyboardButton[] = complete ? [{ text: t("captureAddButton"), callback_data: captureActionData(id, "a"), style: "success" }, edit] : [edit];
     return {
-        text: complete
-            ? t("captureNoteComplete", { title: parsed.title ?? "", details: [parsed.price, parsed.location].filter(Boolean).join(" · ") })
-            : t("captureNoteIncomplete"),
-        // Add on its own row, so the two longer labels get half a row each (three in a row cut "לא לשאול שוב").
+        text: trade ? t("captureNoteTrade")
+            : complete
+                ? t("captureNoteComplete", { title: parsed.title ?? "", details: [parsed.price, parsed.location].filter(Boolean).join(" · ") })
+                : t("captureNoteIncomplete"),
+        // Add and Edit share the first row; the two longer labels get half a row each (three in a row cut "לא לשאול שוב").
         keyboard: [
-            [first],
+            first,
             [
                 { text: t("captureNotNowButton"), callback_data: captureActionData(id, "n") },
                 { text: t("captureNeverButton"), callback_data: captureActionData(id, "x") },
@@ -51,7 +53,7 @@ export function buildAskNote(t: Translate, capture: { id: string; parsed: Parsed
 
 type CardOptions = { surface: "n"; botUsername: string; refreshed?: boolean } | { surface: "c"; refreshed?: boolean };
 
-export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" | "title" | "price">, o: CardOptions): Card {
+export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" | "title" | "price" | "location" | "meetup">, o: CardOptions): Card {
     const id = String(listing._id);
     const params = { title: listing.title ?? "", price: listing.price ?? "" };
     // Two to a row: three in a row clip the labels on a phone.
@@ -63,7 +65,8 @@ export function buildManagementCard(t: Translate, listing: Pick<IListing, "_id" 
         [{ text: t("listingRemoveButton"), callback_data: listingActionData(id, "r", o.surface) }],
     ];
     if (o.surface === "n") keyboard[1].push({ text: t("listingManageButton"), url: deepLink(o.botUsername, `l_${id}`) });
-    return { text: t(o.refreshed ? "listingRefreshedCard" : "listingCard", params), keyboard };
+    const meetupLine = listing.meetup || isMeetupLocation(listing.location) ? `\n📍 ${meetupLocationText(listing.location, t("meetupPlace"))}` : "";
+    return { text: t(o.refreshed ? "listingRefreshedCard" : "listingCard", params) + meetupLine, keyboard };
 }
 
 export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | "title">): Card {

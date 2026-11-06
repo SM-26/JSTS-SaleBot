@@ -113,7 +113,7 @@ export function buildHelpMessage(
         message
             .divider()
             .heading(heading("helpModSection"), 3)
-            .list(items(["helpPending", "helpClearPending", "helpAuth", "helpStats"]));
+            .list(items(["helpPending", "helpClearPending", "helpAuth", "helpStats", "helpVerify", "helpUnverify"]));
     }
 
     if (authLevel >= AuthLevel.ADMIN) {

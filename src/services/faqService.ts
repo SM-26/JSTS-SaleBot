@@ -4,6 +4,9 @@ import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
 
+// A button is as wide as its bubble: one line of invisible braille blanks (not whitespace, so Telegram keeps it) widens every FAQ message.
+export const FAQ_PADDING = "\n" + "\u2800".repeat(30);
+
 export class FaqService {
     constructor(
         private api: Api,
@@ -17,6 +20,17 @@ export class FaqService {
             await this.renderNode(msg.chat.id, locale, null);
         } catch (err) {
             console.error("[ERROR - FaqService.handleFaq]", (err as Error).message);
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
+        }
+    }
+
+    // One FAQ node as a new message (the start=faq_1 deep link from a meeting-point button).
+    async showNode(msg: Message, nodeId: string): Promise<void> {
+        try {
+            const user = await userRepository.findByUserId(String(msg.from!.id));
+            await this.renderNode(msg.chat.id, localeService.resolveUserLocale(user), nodeId);
+        } catch (err) {
+            console.error("[ERROR - FaqService.showNode]", (err as Error).message);
             await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'generalError') });
         }
     }
@@ -64,7 +78,7 @@ export class FaqService {
             }
         }
 
-        const text = [baseText, ...bodyParts].join('\n\n');
+        const text = [baseText, ...bodyParts].join('\n\n') + FAQ_PADDING;
 
         // Add Back button
         if (nodeId) {

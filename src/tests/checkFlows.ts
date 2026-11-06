@@ -8,6 +8,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
+import { quickListingChecks } from "./quickListingChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 import type { CatchupItem } from "../services/catchupScan";
@@ -609,6 +610,31 @@ async function run() {
             assert.strictEqual(text(card), T("statusApproved"));
             assert.deepStrictEqual(keyboard(card), [{ text: T("takeDownButton"), callback_data: `td_${listing._id}` }]);
             console.log("  [OK] (m) approving creates the live bot listing and the card carries Take down.");
+        }
+
+        // (m2) a meetup post publishes with the meeting-point button and a flagged listing; a plain one has no buttons
+        {
+            const { h } = boot();
+            const seller = user();
+            await User.create({ userId: String(seller), firstName: "Seller", authLevel: 0 });
+            const meetupId = await seedPost(seller, "Meet me");
+            await Post.updateOne({ _id: meetupId }, { $set: { meetup: true } });
+            const plainId = await seedPost(seller, "Plain");
+            for (const [id, msgId] of [[meetupId, 320], [plainId, 321]] as const) {
+                h.calls.length = 0;
+                await h.pressButton(`approve_${id}`, { userId: mod, chatId: MOD_GROUP, chatType: "supergroup", messageId: msgId });
+                await settle();
+                const sent = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
+                const listing = (await Listing.findOne({ source: "bot", postId: id }))!;
+                assert.ok(!sent.params.reply_markup, "no button under a group post");
+                if (id === meetupId) {
+                    assert.ok(JSON.stringify(sent.params.rich_message).includes("?start=faq_1"), "the meeting point's words link to faq_1");
+                    assert.strictEqual(listing.meetup, true);
+                } else {
+                    assert.ok(!("meetup" in listing.toObject()), "meetup is never written as false");
+                }
+            }
+            console.log("  [OK] (m2) the meeting-point link and flag follow the post.");
         }
 
         // (n) a listing failure does not stop the author's DM; the card gets no Take down
@@ -1773,7 +1799,7 @@ async function run() {
                 assert.deepStrictEqual(
                     [(p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(p.chat_id), "message_thread_id" in p],
                     [u, APPROVED_GROUP, false]);
-                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
+                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data).filter(Boolean), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
                 assert.strictEqual(cap.state, "asked");
                 assert.ok(ephemeralId(sent[0]) !== undefined && ephemeralId(sent[0])! >= 5000);
                 assert.strictEqual(cap.note?.ephemeralMessageId, ephemeralId(sent[0]));
@@ -2868,7 +2894,10 @@ async function run() {
             }
         })();
 
-        // Slice 6: catch-up scan. Labels (k1)..(k9).
+        // (k1)..(k26): quickListing buttons, the meetup toggle and the one-message quick draft
+        await quickListingChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP, MOD_GROUP });
+
+        // Slice 6: catch-up scan. Labels (cu1)..(cu9).
         cfg.approvedTopicId = 1;
         cfg.captureMode = "optin";
         cfg.moderationGroupId = MOD_GROUP;
@@ -2912,7 +2941,7 @@ async function run() {
             };
 
             try {
-                // (k1) /catchup is admin-only and private-only
+                // (cu1) /catchup is admin-only and private-only
                 {
                     const { h } = boot();
                     const plain = user();
@@ -2927,10 +2956,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await settle();
                     assert.strictEqual(h.calls.length, 0, "/catchup in a group is ignored");
                     assert.strictEqual((await memberOf(target))!.catchup?.armedAt, undefined);
-                    console.log("  [OK] (k1) a plain user gets notAdmin and arms nothing; a group is ignored.");
+                    console.log("  [OK] (cu1) a plain user gets notAdmin and arms nothing; a group is ignored.");
                 }
 
-                // (k2) /catchup import: stored, not sent, the message deleted; bad, oversized and non-admin files refused
+                // (cu2) /catchup import: stored, not sent, the message deleted; bad, oversized and non-admin files refused
                 {
                     const seller = user();
                     const { h } = boot({ responses: getFileOk });
@@ -2969,10 +2998,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await importDoc(plainBoot.h, user());
                     assert.ok(plainBoot.h.calls.some((c) => c.method === "sendMessage" && text(c) === T("notAdmin")));
                     assert.ok(!plainBoot.h.calls.some((c) => c.method === "getFile"), "a plain user's file is never fetched");
-                    console.log("  [OK] (k2) import stores without sending; bad, oversized and non-admin files are refused.");
+                    console.log("  [OK] (cu2) import stores without sending; bad, oversized and non-admin files are refused.");
                 }
 
-                // (k3) send, then the next sale-topic message gets one note, once; a reply or forward does not count
+                // (cu3) send, then the next sale-topic message gets one note, once; a reply or forward does not count
                 {
                     const { h } = boot();
                     const a = user();
@@ -2998,10 +3027,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await h.sendText("now a plain one", { ...GROUP, userId: b });
                     await settle();
                     assert.strictEqual(ephemerals(h).length, 2);
-                    console.log("  [OK] (k3) one note on the next sale-topic message, never twice, replies and forwards ignored.");
+                    console.log("  [OK] (cu3) one note on the next sale-topic message, never twice, replies and forwards ignored.");
                 }
 
-                // (k4) /start k_<id>: the owner after delivery gets the list; others and early visitors the greeting
+                // (cu4) /start k_<id>: the owner after delivery gets the list; others and early visitors the greeting
                 {
                     const { h } = boot();
                     const early = user();
@@ -3020,10 +3049,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await h.sendText(`/start k_${ownerId}`, { userId: user() });
                     await settle();
                     assert.strictEqual(text(sends(h)[0]), T("greeting"), "another user: greeting");
-                    console.log("  [OK] (k4) the owner gets the list; another user or an early visit gets the greeting.");
+                    console.log("  [OK] (cu4) the owner gets the list; another user or an early visit gets the greeting.");
                 }
 
-                // (k5) ck_ add: a catchup listing, the DM edited, a td_ card only for the first listing
+                // (cu5) ck_ add: a catchup listing, the DM edited, a td_ card only for the first listing
                 {
                     const { h } = boot();
                     const u = await deliveredSeller(h, [item(21, "Glock", "Glock 17 100", 3), item(22, "Vest", "Vest tactical 250"), item(23, "Scope", "Red scope 300")]);
@@ -3052,10 +3081,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await h.pressButton(`ck_${id}_23`, { userId: user(), messageId: 55 });
                     await settle();
                     assert.deepStrictEqual(answers(h), [T("notYourButton")]);
-                    console.log("  [OK] (k5) add makes a catchup listing, edits the DM, one td_ card; double press and strangers are safe.");
+                    console.log("  [OK] (cu5) add makes a catchup listing, edits the DM, one td_ card; double press and strangers are safe.");
                 }
 
-                // (k6) a blocked word added after the scan, and a duplicate of a live listing
+                // (cu6) a blocked word added after the scan, and a duplicate of a live listing
                 {
                     const { h } = boot();
                     const word = (JSON.parse(fs.readFileSync(BLOCKED_WORDS_PATH, "utf8")) as string[]).find((w) => !w.includes("*") && findBlockedWord(w));
@@ -3075,10 +3104,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await settle();
                     assert.deepStrictEqual(answers(h), [T("captureAlreadyAdded")]);
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), origin: "catchup" }), 1, "a duplicate of a live listing is not listed");
-                    console.log("  [OK] (k6) a blocked item and a duplicate of a live listing create nothing.");
+                    console.log("  [OK] (cu6) a blocked item and a duplicate of a live listing create nothing.");
                 }
 
-                // (k7) No thanks: items gone, the note deleted, /start k_ says nothing is left
+                // (cu7) No thanks: items gone, the note deleted, /start k_ says nothing is left
                 {
                     const { h } = boot();
                     const u = await deliveredSeller(h, [item(41, "Glock", "Glock 17 100")]);
@@ -3095,10 +3124,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await h.sendText(`/start k_${id}`, { userId: u });
                     await settle();
                     assert.strictEqual(text(sends(h)[0]), T("catchupNothingLeft"));
-                    console.log("  [OK] (k7) No thanks drops the items, deletes the note; the link then says nothing is left.");
+                    console.log("  [OK] (cu7) No thanks drops the items, deletes the note; the link then says nothing is left.");
                 }
 
-                // (k8) two different items opening with the same line are both added
+                // (cu8) two different items opening with the same line are both added
                 {
                     const { h } = boot();
                     const u = await deliveredSeller(h, [item(51, "למכירה", "למכירה\nGlock 17 100"), item(52, "למכירה", "למכירה\nVest tactical 250")]);
@@ -3109,10 +3138,10 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await settle();
                     assert.deepStrictEqual(answers(h), [T("captureAddedToast"), T("captureAddedToast")]);
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), origin: "catchup" }), 2, "same first line, different text: two listings");
-                    console.log("  [OK] (k8) items sharing a first line but not their text are both listed.");
+                    console.log("  [OK] (cu8) items sharing a first line but not their text are both listed.");
                 }
 
-                // (k9) a forged ck_ button against an offer that was never delivered changes nothing
+                // (cu9) a forged ck_ button against an offer that was never delivered changes nothing
                 {
                     const { h } = boot();
                     const u = user();
@@ -3124,7 +3153,7 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     assert.deepStrictEqual(answers(h), [T("staleButton")]);
                     assert.strictEqual((await memberOf(u))!.pendingCatchup?.length, 1, "the item is still offered");
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u) }), 0, "no listing");
-                    console.log("  [OK] (k9) a forged add against an undelivered offer is refused.");
+                    console.log("  [OK] (cu9) a forged add against an undelivered offer is refused.");
                 }
             } finally {
                 globalThis.fetch = realFetch;

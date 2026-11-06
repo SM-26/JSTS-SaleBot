@@ -18,6 +18,7 @@ export type NewGroupListing = {
     title: string;
     price: string;
     location?: string;
+    meetup?: boolean;
     text: string;
     media: IMediaItem[];
     isBundle: boolean;
@@ -70,6 +71,7 @@ class ListingRepository {
                     price: post.price,
                     ...(priceValue !== undefined ? { priceValue } : {}),
                     location: post.location,
+                    ...(post.meetup === true ? { meetup: true } : {}),
                     text,
                     textHash: textHash(text),
                     media: post.media.map(m => ({ fileId: m.fileId, type: m.type })),
@@ -153,6 +155,11 @@ class ListingRepository {
         ).exec();
     }
 
+    // /test only: the tester's seeded listings with this title, whatever their status.
+    async deleteBySellerTitle(sellerId: string, title: string): Promise<void> {
+        await Listing.deleteMany({ sellerId, title }).exec();
+    }
+
     // Only to undo a listing whose capture bookkeeping failed right after it was created.
     async deleteById(id: string): Promise<void> {
         await Listing.deleteOne({ _id: id }).exec();
@@ -198,6 +205,16 @@ class ListingRepository {
 
     countSold(sellerId: string): Promise<number> {
         return Listing.countDocuments({ sellerId, status: "sold" }).exec();
+    }
+
+    // Ended = sold + expired + removed (live and taken-down listings do not count); the top-seller rule reads this.
+    async countEnded(sellerId: string): Promise<{ sold: number; ended: number }> {
+        const rows = await Listing.aggregate<{ _id: string; n: number }>([
+            { $match: { sellerId, status: { $in: ["sold", "expired", "removed"] } } },
+            { $group: { _id: "$status", n: { $sum: 1 } } },
+        ]).exec();
+        const sold = rows.find(r => r._id === "sold")?.n ?? 0;
+        return { sold, ended: rows.reduce((a, r) => a + r.n, 0) };
     }
 
     findSellerExpired(sellerId: string, limit: number): Promise<IListing[]> {

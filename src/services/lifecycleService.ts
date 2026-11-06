@@ -174,11 +174,12 @@ export class LifecycleService {
             if (msg.chat.type !== "private" || !msg.reply_markup) return;
             const mine = (b: InlineKeyboardButton) => ("callback_data" in b && b.callback_data?.endsWith(listingId)) || ("url" in b && b.url?.endsWith(listingId));
             const rows = msg.reply_markup.inline_keyboard.filter((row) => !row.some(mine));
+            // a numbered DM says which item the line is about; the number is only on the pressed button (the callback formats are frozen)
+            const item = /^\d+/.exec(msg.reply_markup.inline_keyboard.flat().find((b) => "callback_data" in b && b.callback_data === query.data)?.text ?? "")?.[0];
+            const line = item ? localeService.t(locale, "lcItemResult", { i: item, result: localeService.t(locale, key) }) : localeService.t(locale, key);
             try {
                 if (ok && msg.text) {
-                    await this.api.editMessageText({ chat_id: msg.chat.id, message_id: msg.message_id, text: `${msg.text}
-
-${localeService.t(locale, key)}`, reply_markup: { inline_keyboard: rows } });
+                    await this.api.editMessageText({ chat_id: msg.chat.id, message_id: msg.message_id, text: `${msg.text}\n\n${line}`, reply_markup: { inline_keyboard: rows } });
                 } else {
                     await this.api.editMessageReplyMarkup({ chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: rows } });
                 }

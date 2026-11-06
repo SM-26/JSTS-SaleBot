@@ -35,6 +35,7 @@ import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
+import { sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
 import { command, parseCommand, ParsedCommand } from "./commands";
@@ -84,7 +85,7 @@ export class BotController {
         this.config = config;
 
         this.inputService = new InputService(api, this.config);
-        this.postService = new PostService(api, this.config);
+        this.postService = new PostService(api, this.config, () => this.botUsername);
         this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
         this.staleCheck = new StaleCheckService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
@@ -93,9 +94,9 @@ export class BotController {
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.catchupService = new CatchupService(api, this.config, this.groupListings, () => this.botUsername);
         this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
-        this.alerts = new AlertService(api, this.config, this.groupListings);
+        this.alerts = new AlertService(api, this.config, this.groupListings, () => this.botUsername);
         this.savedSearches = new SavedSearchService(api, this.config);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings, () => this.botUsername);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings, this.lifecycle);
         this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));
@@ -114,17 +115,19 @@ export class BotController {
             let synced = 0; //
             for (const post of soldPosts) {
                 const user: User | null = await userRepository.findByUserId(post.userId);
+                const layout = await sellerLayout(post.userId, this.config.lang, "syncSoldPosts", post.layoutTier);
                 const richMessage = this.postService.formatPostRichMessage({
                     title: post.title,
                     description: post.description,
                     descriptionEntities: post.descriptionEntities,
                     price: post.price,
                     location: post.location,
+                    meetup: post.meetup,
                     media: post.media,
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "User",
-                }, { sold: true });
+                }, { sold: true, tier: layout.tier, stats: layout.stats });
                 const success = await this.postService.markSoldInGroup(post.approvedMessageId!, richMessage);
                 if (success) {
                     synced++;
@@ -154,6 +157,7 @@ export class BotController {
         // Deep links from capture notes; slice 6 adds k_ here.
         const payload = parseStartPayload(args);
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "faq" && this.config.enableFaq !== false) { await this.faqService.showNode(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         if (payload?.kind === "k" && await this.catchupService.handleStart(msg, payload.id, new Date())) return;
         if (payload?.kind === "s" && this.config.buyerMatches === "on") {
@@ -560,7 +564,7 @@ export class BotController {
         bot.use(cmd("start", (msg, args, ctx) => {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
-            if (args === "sell") return this.wizardService.handleNewPost(msg);
+            if (args === "sell") return this.wizardService.handleSell(msg);
             return this.HandleStart(msg, args, ctx);
         }));
         bot.use(cmd("newpost", (msg) => {
@@ -680,6 +684,14 @@ export class BotController {
         bot.use(cmd("demote", (msg, args) => {
             if (!isPrivate(msg)) return;
             return this.adminService.handleDemote(msg, args);
+        }));
+        bot.use(cmd("verify", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleVerify(msg, args, true);
+        }));
+        bot.use(cmd("unverify", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleVerify(msg, args, false);
         }));
         bot.use(cmd("auth", (msg, args) => {
             if (!isPrivate(msg)) return;

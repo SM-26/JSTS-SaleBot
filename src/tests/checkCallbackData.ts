@@ -2,6 +2,8 @@ import assert from "assert";
 import fs from "fs";
 import path from "path";
 import { routeCallback } from "../controllers/callbackRoutes";
+import { parseWizardCallback } from "../services/wizardService";
+import { STALE_PREFIXES } from "../controllers/middleware";
 import { deepLink, groupMessageLink, parseStartPayload } from "../services/deepLinks";
 
 /**
@@ -110,6 +112,7 @@ const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     [`l_${ID}`, { kind: "l", id: ID }],
     [`k_${ID}`, { kind: "k", id: ID }],
     ["k_", null], ["k_xyz", null],
+    ["faq_1", { kind: "faq", id: "1" }], ["faq_2", null], ["faq_", null],
     [`s_${ID}`, { kind: "s", id: ID }],
     ["s_", null], ["s_xyz", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
@@ -122,5 +125,15 @@ assert.strictEqual(deepLink("JSTS_testing_bot", `k_${ID}`), `https://t.me/JSTS_t
 assert.strictEqual(groupMessageLink({ id: -1002445943058 }, 9), "https://t.me/c/2445943058/9");
 assert.strictEqual(groupMessageLink({ id: -1001, username: "airsoft_yad2" }, 5), "https://t.me/airsoft_yad2/5");
 console.log("  [SUCCESS] start payloads and links.");
+
+// --- wizard field-edit buttons (quickListing) ---------------------------------------
+const UID = "7200000001";
+for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_description_${UID}`, "editDescription"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"]]) {
+    assert.deepStrictEqual(parseWizardCallback(data), { action, userId: UID }, data);
+    assert.ok(Buffer.byteLength(data) <= 64, data);
+    assert.strictEqual(routeCallback(data), null, data);
+    assert.ok(STALE_PREFIXES.some(p => data.startsWith(p)), `${data} must be covered by the stale catch-all`);
+}
+console.log("  [SUCCESS] wizard edit/meetup buttons parse, fit 64 bytes, are not routed and are stale-covered.");
 
 console.log("[SUCCESS] All callback_data checks passed.");

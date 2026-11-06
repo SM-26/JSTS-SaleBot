@@ -190,6 +190,11 @@ export class CatchupService {
             // the item is gone from the offer: any failure up to the listing puts it back
             try {
                 const parsedItem = classify(item.text, false).parsed;
+                // a trade post (or an offer stored before the parsing fixes) has no one-tap Add, as in capture notes
+                if (parsedItem.trade || !parsedItem.price) {
+                    await answer("staleButton");
+                    return await rerender();
+                }
                 const hash = textHash(item.text);
                 const tk = tokens(item.text);
                 const recent = await listingRepository.findSellerRecent(from, new Date(now.getTime() - FRESH_MS));

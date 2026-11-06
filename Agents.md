@@ -38,7 +38,8 @@
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
 │   │   ├── moderationService.ts  # Approve/reject callbacks; reject presets (rr_) or reply (legacy Skip still works); once-only author notice
 │   │   ├── publishService.ts     # submitPost(): trusted sellers publish at once with a review card, others go to moderation
-│   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days
+│   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days; sellerTier()/sellerLayout(): regular/top/verified/both
+│   │   ├── tierLayouts.ts        # Rich post layouts for top, verified and both sellers (regular stays in postService)
 │   │   ├── takeDownService.ts    # Moderator take-down (td_): listing taken_down, group message removed, author told; tx_ also deletes a group listing's original post (confirm step)
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
@@ -57,6 +58,7 @@
 │   │   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list, alert DMs; al_ helpers
 │   │   ├── savedSearchService.ts # /alerts, the s_ start link, the one-reply fix (pendingAlertFix), al_ buttons
 │   │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
+│   │   ├── meetup.ts             # Beit Dagan meeting point: isMeetupLocation, meetupLocationText, the faq_1 link and button
 │   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
 │   │   ├── catchupScan.ts        # Pure scan of a group export into a catch-up file; parseCatchupFile()
 │   │   ├── catchupService.ts     # /catchup import and send, held offer note, k_ DM and ck_ buttons
@@ -100,6 +102,7 @@
 │   │   ├── syntheticLifecycle.ts # Manual (not in `pnpm test`): a stale-check DM and a nudge DM to the owner on the TEST bot
 │   │   ├── syntheticOptin.ts     # Manual (not in `pnpm test`): one real private note + one moderation card on the TEST bot/groups, cleaned up after
 │   │   ├── checkBuyerMatches.ts  # `pnpm run check-buyer`: saved searches, alerts, buyer notes
+│   │   ├── quickListingChecks.ts # quickListing and meeting-point checks, run from checkFlows
 │   │   ├── syntheticBuyer.ts     # Manual (not in `pnpm test`): one buyer note and one alert on the TEST bot/groups, cleaned up after
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
@@ -113,10 +116,12 @@
 │   ├── catchup.ts                # Scans a group export into catchup.json (no DB, no network)
 │   └── census.js                 # Read-only mongosh DB census (see docs/BACKUP.md)
 ├── config.json.example           # Runtime config template (copy to config.json)
+├── config.test.json.example      # Config for compose.test.yaml (test groups, every feature on)
 ├── .env.example                  # Environment variable template (copy to .env)
 ├── dockerfile                    # Multi-stage Docker build (development + production targets)
 ├── docker-compose.yaml           # Dev stack: bot + MongoDB + mongo-express services
 ├── compose.prod.yaml             # Production stack: pulls the GHCR image, ports bound to 127.0.0.1
+├── compose.test.yaml             # Local test stack (test bot, own database), for Docker Desktop
 ├── tsconfig.json
 ├── eslint.config.mjs
 └── package.json
@@ -150,6 +155,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
 | `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
 | `buyerMatches`      | string  | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the buyer notes and saved-search alerts (`shadow` is the kill switch: saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
+| `quickListing`      | boolean | `true` lets a captioned photo, video or album in DM start a draft, adds field-edit buttons and the Beit Dagan toggle to previews, and handles `/start sell`. Default `false`: the wizard behaves as before |
 | `nudges`            | boolean | `true` sends the 7-day refresh nudge (default `false`); expiry at 30 days runs regardless |
 | `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 
@@ -159,10 +165,14 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 
 ### Post Lifecycle
 ```
-User sends /newPost
+User sends /newPost (or, with config.quickListing, a photo/video/album with a caption in DM and no draft:
+                       a quick draft is built from the caption; album items are collected, preview 1.5 s after the last;
+                       a wanted caption gets matches (buyerMatches on) or a one-line pointer instead; missing title/price/minimumPhotos go to that wizard step)
   → WizardService walks the user's draft (collection `drafts`): title, description, price, location, media
   → PostService shows preview
       (blocked words, including those in hidden link URLs, are stopped here, for everyone, trusted sellers included)
+      (with quickListing every preview has edit buttons and the Beit Dagan meetup toggle; `meetup` shows
+       as `📍 location · בית דגן`, and the words of the place in a post's location line link to start=faq_1)
   → User confirms
   → Post saved to DB (status: "pending")
   → PublishService.submitPost:
@@ -187,12 +197,14 @@ User sends /newPost
 ### Session Management and Persistent Flows
 Nothing a user or moderator is in the middle of lives in process memory: a restart must lose nothing. There is no in-memory session map and no `isIdle` flag.
 - **Wizard state** lives in the `drafts` collection (`Draft` model, `draftRepository`): one document per user with the step, the answers, the media and `promptMessageId`. `WizardService` reads the user's draft on every update. Wizard buttons (Done-media, Confirm, Cancel, Continue/Start over) are valid only against the draft itself: it exists, its step matches and the pressed message is `promptMessageId`. Anything else falls through to `staleButtonCatchAll`, which answers "expired".
+- **Quick drafts** (`quickListing`): the draft also holds `quick`, `collecting`, `mediaGroupId` and `caption`. An album's items are appended atomically; a per-user in-memory timer (user id only) sends the preview 1.5 s after the last item, and a restart loses only that send (`/newpost` then Continue resends).
 - **Expiry**: `isDraftExpired(draft, config.timeOut)` is checked on every touch against the live `timeOut` (minutes, 0 = never). There is deliberately no TTL index; startup deletes drafts already past `timeOut`.
 - **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag, the moderator's pending reject-reason prompts (`pendingRejects`), a buyer's one-reply fix for a thin `/alerts` text (`pendingAlertFix`: prompt message id and time, valid 1 hour; with a `searchId` it replaces that search) and the admin's pending `/stalecheck` send (`pendingStalecheck`, tied to its dry-run message by `promptMessageId`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
 - **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
 - **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
 - **Session data** also holds `pendingStalecheck` (the admin's pending `/stalecheck` dry run, confirmed with `sc_go` or dropped with `sc_no`).
 - **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
+- **Slice 5 fields** are optional and additive: `drafts.quick`, `drafts.collecting`, `drafts.mediaGroupId`, `drafts.caption` and `meetup` on `drafts`, `posts` and `listings`. The album preview timer is in memory and holds only the user id: a restart loses only the send, and `/newpost` then Continue resends (the draft is in Mongo, `claimCollecting` is the guard). After a rollback to 3.1.0 the fields are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
 - **Slice 4 fields** are optional and additive: new collections `saved_searches` (60-day TTL on `expiresAt`, in every mode) and `alert_log` (unique per search and listing), plus `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. A saved search holds the parsed query, never the original message; it stays and resumes when `buyerMatches` goes back to `on`, except that a 403 (the buyer blocked the bot) deletes that buyer's searches, and the 60-day TTL deletes the rest. After a rollback the `al_` buttons answer "expired" and `s_` links fall to the greeting.
 - **Slice 3 fields** are optional and additive: `listings.nudgeHeld` (a nudge was claimed but could not be delivered; it waits for the seller's next sale-topic message) and `listings.staleSentAt` (set by `/stalecheck`, starts the 7-day answer window). `posts` and `users` are unchanged. After a rollback to 3.1.0 the `lc_`/`sc_` buttons do nothing and nothing expires or nudges; the fields are ignored.
 - **Slice 6 fields** are optional and additive: `members.pendingCatchup` (a seller's offered items) and `members.catchup` (`importedAt`, `armedAt`, `sentAt`, the held note), and `listings.origin: "catchup"`. Stamps outlive the items: `sentAt` alone blocks a second offer. `catchup.json` and the export hold member text and never enter the repo (gitignored). After a rollback to an older image, `ck_` falls to the stale catch-all, `k_` falls to the greeting, `members.catchup` is ignored and added listings stay.
@@ -220,6 +232,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/catchup`| Admin     | DM only: catch-up offers. Alone: counts. Caption `/catchup import` on a `catchup.json` file; `/catchup send` arms delivery |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
+| `/verify`, `/unverify` | Mod | Set or clear the ✅ verified mark (`users.verifiedAt`); tiers pick the post layout |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
@@ -272,6 +285,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
 | `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
 | `pnpm run check-buyer` | Buyer notes, saved searches, alert sweep and send-once claim, `/label` matches | yes |
+| `pnpm run check-tiers` | Tier selection, /verify permissions, tier layouts at publish/sold, /test tier cases | yes |
 | `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
@@ -289,6 +303,7 @@ Never run the bot, or a check, against the production token or database.
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Tell the author once**: any path that notifies a post's author of a rejection must go through `postRepository.claimRejectionNotice`, so a double press or a restart never sends two notices.
+- **Post layout by tier**: `PostService.formatPostRichMessage` takes `tier`/`stats` from `sellerLayout()` (publish, bump, sold edit). Regular is the original code and its golden must not change; the other layouts are pinned in `tierLayouts.golden.json` (`UPDATE_GOLDEN=1 pnpm run check-rich`, review the diff). `posts.layoutTier` is set only by the `/test` "Post as" cases.
 - **Seller-post `/test` cases refuse outside the test bot** (`isTestBotToken`): they publish real posts, so never loosen that guard.
 - **Persist flow state**: flows are persisted (drafts, sessions), so there is no `isIdle` flag. Before acting on a wizard message or button, read the user's draft (`draftRepository.findByUserId`) and check it exists, is not expired (`isDraftExpired`) and is at the expected step. On errors, tell the user and leave the draft consistent, so they can `/cancel` or continue.
 - **Keep Mongoose queries in repositories**, not in services or controllers.
@@ -306,7 +321,7 @@ Never run the bot, or a check, against the production token or database.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
 - **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. The one deliberate exception to "a member's own message is never touched" is a moderator's **Take down and delete original post** (`tx_`) on a group listing's take-down card: it ends the listing and deletes every id in `listing.messageIds` (photos included). It is moderators only and behind a confirm step; a seller's Remove still never deletes anything, and a bot listing's card has no such button. Catch-up offers (`/catchup`) reach no member before an admin runs `/catchup send`, and then only under `captureMode: optin`.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never`, `ck_<memberId>_<x|messageId>` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 5 adds `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>` and the `faq_1` start payload (the meeting-point button; it must keep opening FAQ node 1), frozen the same way. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` / `k_<memberId>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.

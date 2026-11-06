@@ -1,0 +1,1220 @@
+{
+  "top": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 2
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "📍 מרכז · ",
+          {
+            "type": "url",
+            "text": "בית דגן",
+            "url": "https://t.me/bot?start=faq_1"
+          }
+        ]
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "🏅 מוכר: ",
+          {
+            "type": "mention",
+            "text": "@SM_26",
+            "username": "SM_26"
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "🏅 מוכר מוביל · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "top-sold": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "Hello Kitty 1911 GBB"
+          }
+        ],
+        "size": 2
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "1,200 ₪"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "🔴 נמכר"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "📍 מרכז · ",
+          {
+            "type": "url",
+            "text": "בית דגן",
+            "url": "https://t.me/bot?start=faq_1"
+          }
+        ]
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "🏅 מוכר: ",
+          {
+            "type": "mention",
+            "text": "@SM_26",
+            "username": "SM_26"
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "נמכר · המודעה נסגרה · 🏅 מוכר מוביל · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "top-nouser": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 2
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "📍 מרכז · ",
+          {
+            "type": "url",
+            "text": "בית דגן",
+            "url": "https://t.me/bot?start=faq_1"
+          }
+        ]
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          "🏅 מוכר: ",
+          {
+            "type": "text_mention",
+            "text": "SM",
+            "user": {
+              "id": 7,
+              "is_bot": false,
+              "first_name": "SM"
+            }
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "🏅 מוכר מוביל · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "verified": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: ✅ ",
+              {
+                "type": "bold",
+                "text": "@SM_26"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "✅ ",
+                {
+                  "type": "mention",
+                  "text": "@SM_26",
+                  "username": "SM_26"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "buttons",
+        "buttons": [
+          {
+            "text": "💬 צור קשר",
+            "url": "https://t.me/SM_26",
+            "style": "primary"
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "✅ מוכר מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "verified-sold": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "Hello Kitty 1911 GBB"
+          }
+        ],
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "1,200 ₪"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: ✅ ",
+              {
+                "type": "bold",
+                "text": "@SM_26"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "🔴 נמכר"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "✅ ",
+                {
+                  "type": "mention",
+                  "text": "@SM_26",
+                  "username": "SM_26"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "נמכר · המודעה נסגרה · ✅ מוכר מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "verified-nouser": {
+    "blocks": [
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: ✅ ",
+              {
+                "type": "bold",
+                "text": "SM"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "✅ ",
+                {
+                  "type": "text_mention",
+                  "text": "SM",
+                  "user": {
+                    "id": 7,
+                    "is_bot": false,
+                    "first_name": "SM"
+                  }
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "✅ מוכר מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "both": {
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "⭐ מוכר מאומת ומוביל"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: 🏅✅ ",
+              {
+                "type": "bold",
+                "text": "@SM_26"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "🏅✅ ",
+                {
+                  "type": "mention",
+                  "text": "@SM_26",
+                  "username": "SM_26"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "מכירות",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "12",
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "בשוק מאז",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "נובמבר 2026",
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "buttons",
+        "buttons": [
+          {
+            "text": "💬 צור קשר",
+            "url": "https://t.me/SM_26",
+            "style": "success"
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": [
+          {
+            "type": "bold",
+            "text": "🏅 מוכר מוביל · ✅ מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+          }
+        ]
+      }
+    ],
+    "is_rtl": true
+  },
+  "both-sold": {
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "⭐ מוכר מאומת ומוביל"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "Hello Kitty 1911 GBB"
+          }
+        ],
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "strikethrough",
+            "text": "1,200 ₪"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: 🏅✅ ",
+              {
+                "type": "bold",
+                "text": "@SM_26"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "🔴 נמכר"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "🏅✅ ",
+                {
+                  "type": "mention",
+                  "text": "@SM_26",
+                  "username": "SM_26"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "מכירות",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "12",
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "בשוק מאז",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "נובמבר 2026",
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": "נמכר · המודעה נסגרה · 🏅 מוכר מוביל · ✅ מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+      }
+    ],
+    "is_rtl": true
+  },
+  "both-nouser": {
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "⭐ מוכר מאומת ומוביל"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "text": "Hello Kitty 1911 GBB",
+        "size": 1
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              {
+                "type": "bold",
+                "text": "1,200 ₪"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": [
+          {
+            "type": "marked",
+            "text": [
+              "מוכר: 🏅✅ ",
+              {
+                "type": "bold",
+                "text": "SM"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "slideshow",
+        "blocks": [
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-1"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-2"
+            }
+          },
+          {
+            "type": "photo",
+            "photo": {
+              "type": "photo",
+              "media": "photo-3"
+            }
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "cells": [
+          [
+            {
+              "text": "📍 מיקום",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "מרכז · ",
+                {
+                  "type": "url",
+                  "text": "בית דגן",
+                  "url": "https://t.me/bot?start=faq_1"
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "👤 מוכר",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": [
+                "🏅✅ ",
+                {
+                  "type": "text_mention",
+                  "text": "SM",
+                  "user": {
+                    "id": 7,
+                    "is_bot": false,
+                    "first_name": "SM"
+                  }
+                }
+              ],
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "מכירות",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "12",
+              "align": "right",
+              "valign": "middle"
+            }
+          ],
+          [
+            {
+              "text": "בשוק מאז",
+              "is_header": true,
+              "align": "right",
+              "valign": "middle"
+            },
+            {
+              "text": "נובמבר 2026",
+              "align": "right",
+              "valign": "middle"
+            }
+          ]
+        ],
+        "is_compact": true,
+        "is_striped": true
+      },
+      {
+        "type": "details",
+        "summary": "תיאור מלא",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "text": "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות."
+          }
+        ]
+      },
+      {
+        "type": "footer",
+        "text": [
+          {
+            "type": "bold",
+            "text": "🏅 מוכר מוביל · ✅ מאומת על ידי מנהלי הקבוצה · 12 מכירות · בשוק מאז נובמבר 2026"
+          }
+        ]
+      }
+    ],
+    "is_rtl": true
+  }
+}

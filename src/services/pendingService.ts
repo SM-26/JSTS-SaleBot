@@ -59,6 +59,8 @@ export class PendingService {
                     descriptionEntities: post.descriptionEntities,
                     price: post.price,
                     location: post.location,
+                    meetup: post.meetup,
+                    highlight: post.highlight,
                     media: post.media,
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
@@ -84,7 +86,14 @@ export class PendingService {
                     richOptions.message_thread_id = Number(targetThreadId);
                 }
 
-                await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: richMessage, ...richOptions });
+                try {
+                    await this.api.sendRichMessage({ chat_id: msg.chat.id, rich_message: richMessage, ...richOptions });
+                } catch (err) {
+                    // One photo Telegram refuses must not hide the rest of the queue: this post goes as plain text.
+                    console.error(`[ERROR - PendingService.handlePending] post ${post._id}`, (err as Error).message);
+                    const text = [post.title, post.description, `💰 ${post.price}`].filter(Boolean).join("\n");
+                    await this.api.sendMessage({ chat_id: msg.chat.id, text, ...richOptions });
+                }
             }
 
             if (pendingPosts.length > 10) {

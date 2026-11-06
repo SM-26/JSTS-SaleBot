@@ -40,6 +40,43 @@ export async function safeTrustLine(sellerId: string, locale: string, ctx: strin
     }
 }
 
+// Seller tiers (spec 17.1). Verified outranks top seller; "both" is the two together.
+export type SellerTier = "regular" | "top" | "verified" | "both";
+export const TOP_SELLER_RATE = 0.6;
+export const TOP_SELLER_MIN_ENDED = 3;
+
+export async function isTopSeller(sellerId: string): Promise<boolean> {
+    const { sold, ended } = await listingRepository.countEnded(sellerId);
+    return ended >= TOP_SELLER_MIN_ENDED && sold / ended >= TOP_SELLER_RATE;
+}
+
+export async function sellerTier(sellerId: string): Promise<SellerTier> {
+    const [user, top] = await Promise.all([userRepository.findByUserId(sellerId), isTopSeller(sellerId)]);
+    const verified = Boolean(user?.verifiedAt);
+    return verified ? (top ? "both" : "verified") : top ? "top" : "regular";
+}
+
+export interface SellerLayout {
+    tier: SellerTier;
+    trustLine?: string;
+    stats?: { sold: number; since: string };
+}
+
+// What formatPostRichMessage needs to pick a layout for this seller right now. Like the trust line, a
+// failure here must never break a publish or a button: it falls back to today's layout, logged.
+// `forced` is a post's own layoutTier (test posts only); the stats stay the seller's real ones.
+export async function sellerLayout(sellerId: string, locale: string, ctx: string, forced?: SellerTier): Promise<SellerLayout> {
+    try {
+        const tier = forced ?? await sellerTier(sellerId);
+        if (tier === "regular") return { tier, trustLine: (await trustLineFor(sellerId, locale, new Date())) ?? undefined };
+        const [sold, since] = await Promise.all([listingRepository.countSold(sellerId), marketSince(sellerId)]);
+        return { tier, stats: { sold, since: since ? formatSince(since, locale) : "" } };
+    } catch (err) {
+        console.error(`[ERROR - ${ctx}] seller layout for ${sellerId}:`, (err as Error).message);
+        return { tier: "regular" };
+    }
+}
+
 // Trusted = has a published (approved or sold) bot post and no moderator
 // take-down of any of their listings in the last 90 days. Captured group
 // listings never grant trust (only `posts` are consulted) but a take-down of
