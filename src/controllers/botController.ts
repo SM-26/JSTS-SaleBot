@@ -25,6 +25,7 @@ import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { GroupListingService } from "../services/groupListingService";
 import { LifecycleService } from "../services/lifecycleService";
+import { StaleCheckService } from "../services/staleCheckService";
 import type { SweeperJob } from "../services/sweeper";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
@@ -66,6 +67,7 @@ export class BotController {
     private shadowAdminService: ShadowAdminService;
     private takeDownService: TakeDownService;
     readonly lifecycle: LifecycleService;
+    private staleCheck: StaleCheckService;
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
 
@@ -76,6 +78,7 @@ export class BotController {
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config);
         this.lifecycle = new LifecycleService(api, this.config, this.postService, () => this.botUsername);
+        this.staleCheck = new StaleCheckService(api, this.config);
         this.publishService = new PublishService(api, this.config, this.postService);
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername, this.lifecycle);
@@ -374,6 +377,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "stalecheck") {
+            await this.staleCheck.handleCallback(ctx, query, route.arg);
+            return;
+        }
+
         if (route.action === "label") {
             await this.shadowAdminService.handleLabelCallback(query, route.arg);
             return;
@@ -585,6 +593,14 @@ export class BotController {
                 return;
             }
             return this.shadowAdminService.handleLabel(msg);
+        }));
+        bot.use(cmd("stalecheck", async (msg, args, ctx) => {
+            if (!isPrivate(msg)) return;
+            if (!await this.userService.hasAuthLevel(String(msg.from!.id), AuthLevel.ADMIN)) {
+                this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(this.config.lang, 'notAdmin') });
+                return;
+            }
+            return this.staleCheck.handleCommand(ctx, msg, args);
         }));
         bot.use(cmd("stats", async (msg) => {
             if (!isPrivate(msg)) return;

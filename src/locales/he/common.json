@@ -197,5 +197,20 @@
     "capturePublished": "נוסף לשוק.",
     "nudgeAsk": "עדיין למכירה? {title} · {price}",
     "nudgeStillButton": "✅ עדיין למכירה",
-    "trustLine": "🤝 {n} מכירות · בשוק מאז {since}"
+    "trustLine": "🤝 {n} מכירות · בשוק מאז {since}",
+    "staleDmIntro": "שלום {firstName} 👋\nכאן הבוט של קבוצת המכירות. אנחנו מסדרים את השוק, ויש לך אצלנו מודעות שמסומנות כפעילות כבר יותר מחודש:",
+    "staleDmItem": "{i}. {title} · {price} (מ־{date})",
+    "staleDmOutro": "מה המצב? לחיצה אחת לכל מודעה.\nזו הודעה חד־פעמית. מודעה בלי תשובה תוסר מהשוק בעוד 7 ימים. ההודעה בקבוצה נשארת כמו שהיא.",
+    "staleStillButton": "{i} ✅ עדיין למכירה",
+    "staleSoldButton": "{i} 🤝 נמכר",
+    "staleDryRun": "הרצת ניסיון: {listings} מודעות של {sellers} מוכרים ({scope}) יקבלו הודעה חד־פעמית. שום דבר לא נשלח עד שתאשרו. ההודעה של המוכר הראשון מוצגת למטה.",
+    "staleScopeAll": "כל המוכרים",
+    "staleUnmatched": "אין מודעות מתאימות עבור: {ids}",
+    "staleConfirmButton": "שליחה",
+    "staleCancelButton": "ביטול",
+    "staleDone": "בוצע. נשלחו {listings} מודעות ל־{sellers} מוכרים. לא ניתן להגיע: {blocked}. נכשלו: {failed}.",
+    "staleBusy": "שליחת /stalecheck כבר רצה.",
+    "staleBadIds": "זה לא מזהה משתמש בטלגרם: {ids}. השתמשו בספרות בלבד.",
+    "staleNothing": "אין מודעות ישנות שממתינות לשאלה.",
+    "helpStalecheck": "/stalecheck [userId ...] - שאלת מוכרים ותיקים אם המודעות עדיין למכירה (קודם הרצת ניסיון)"
 }

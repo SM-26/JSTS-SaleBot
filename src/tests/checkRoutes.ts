@@ -504,6 +504,88 @@ async function run() {
             await Post.deleteMany({ userId: String(SELLER) });
         }
 
+
+        // slice 3: /stalecheck (ADMIN, DM) -> dry run -> confirm
+        {
+            const created = new Date("2026-03-05T22:30:00Z");
+            const seedLegacy = async (seller: string, title: string) => {
+                const post = await Post.create({ userId: seller, title, description: "d", price: "100", location: "l", media: [], status: "approved", createdAt: created });
+                return Listing.create({
+                    source: "bot", origin: "legacy", hold: true, postId: String(post._id), sellerId: seller, title, price: "100",
+                    messageIds: [], media: [], status: "live", createdAt: created, refreshedAt: created,
+                });
+            };
+            const clean = async () => { await Listing.deleteMany({}); await Post.deleteMany({ userId: /^1\d{5}$/ }); };
+            const sent = () => h.calls.filter((c) => c.method === "sendMessage");
+            const kb = (c: { params: Record<string, unknown> }) => ((c.params.reply_markup as { inline_keyboard: Array<Array<{ callback_data?: string }>> } | undefined)?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
+            const t = (key: string) => localeService.t(config.lang, key);
+            const sessions = mongoose.connection.db!.collection<{ _id: string }>("bot_sessions");
+            const adminSession = async () => JSON.stringify(await sessions.findOne({ _id: { $regex: `:${adminId}$` } } as never) ?? {});
+            await clean();
+
+            await expectCalls("/stalecheck as USER", () => h.sendText("/stalecheck", { userId }));
+            assert.strictEqual(lastText(), notAdminText, "/stalecheck denies a plain user");
+            await expectCalls("/stalecheck as MOD", () => h.sendText("/stalecheck", { userId: modId }));
+            assert.strictEqual(lastText(), notAdminText, "/stalecheck denies a moderator");
+            await expectCalls("/stalecheck, nothing eligible", () => h.sendText("/stalecheck", { userId: adminId }));
+            assert.strictEqual(sent().length, 1);
+            assert.strictEqual(lastText(), t("staleNothing"));
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "no session data when nothing is eligible");
+            await expectCalls("/stalecheck 100001 x", () => h.sendText("/stalecheck 100001 x", { userId: adminId }));
+            assert.strictEqual(sent().length, 1);
+            assert.ok(lastText().startsWith(t("staleBadIds").split("{")[0]), "bad ids answer");
+            await expectSilence("/stalecheck in a group", () => h.sendText("/stalecheck", { userId: adminId, chatId: -100123, chatType: "supergroup" }));
+
+            const l1 = await seedLegacy("100001", "Glock 17 alpha");
+            await seedLegacy("100001", "Hi-capa beta");
+            await seedLegacy("100002", "Scope gamma");
+            await expectCalls("/stalecheck dry run", () => h.sendText("/stalecheck", { userId: adminId }));
+            await sleep(QUIET_MS);
+            const msgs = sent();
+            assert.strictEqual(msgs.length, 2, "dry run is two messages");
+            assert.deepStrictEqual(kb(msgs[1]), ["sc_go", "sc_no"], "confirm keyboard on the second");
+            assert.ok(!kb(msgs[0]).length, "no keyboard on the report");
+            assert.ok(msgs.every((m) => !["100001", "100002"].includes(String(m.params.chat_id))), "no DM to any seller yet");
+            assert.strictEqual((await Listing.countDocuments({ hold: true })), 3, "no listing changed");
+            assert.ok((await adminSession()).includes("pendingStalecheck"), "pending stored in the session");
+
+            // a non-admin pressing sc_go is refused
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId, chatId: adminId, messageId: 91 });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 3, "USER press refused");
+
+            // confirm
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: 91 });
+            assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "seller DMs sent");
+            await sleep(QUIET_MS);
+            assert.strictEqual((await Listing.countDocuments({ hold: false, nudgedAt: { $exists: true } })), 3, "all three claimed");
+            assert.ok(sent().some((c) => String(c.params.chat_id) === String(adminId)), "admin told the result");
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "pending gone");
+            const l1Raw = await Listing.findById(l1._id);
+            assert.ok(l1Raw && l1Raw.hold === false);
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: 91 });
+            await sleep(QUIET_MS);
+            const toast = h.calls.find((c) => c.method === "answerCallbackQuery");
+            assert.strictEqual(toast?.params.text, t("staleButton"), "second press -> staleButton");
+            assert.ok(!sent().some((c) => ["100001", "100002"].includes(String(c.params.chat_id))), "second press sends nothing");
+
+            // cancel
+            await clean();
+            await seedLegacy("100001", "Glock 17 alpha");
+            await expectCalls("/stalecheck again", () => h.sendText("/stalecheck 100001", { userId: adminId }));
+            h.calls.length = 0;
+            await h.pressButton("sc_no", { userId: adminId, messageId: 92 });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length, "sc_no sends nothing");
+            assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "sc_no drops the keyboard");
+            assert.ok(!(await adminSession()).includes("pendingStalecheck"), "sc_no clears pending");
+            assert.strictEqual(await Listing.countDocuments({ hold: true }), 1, "nothing claimed");
+            await clean();
+        }
+
         console.log("[OK] commands, look-alikes, stale button and the persisted wizard are routed correctly.");
     } finally {
         fs.writeFileSync(configPath, originalConfigFile); // updateConfig writes config.json

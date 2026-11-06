@@ -50,6 +50,8 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`lc_s_${ID}`, { action: "lifecycle", arg: `s_${ID}` }],
     [`lc_x_${ID}`, { action: "lifecycle", arg: `x_${ID}` }],
     ["lc_", { action: "lifecycle", arg: "" }],
+    ["sc_go", { action: "stalecheck", arg: "go" }],
+    ["sc_no", { action: "stalecheck", arg: "no" }],
     ["lcx_", null],
     // Unknown or ephemeral (handled by temporary listeners): must not route.
     ["confirm_123", null],

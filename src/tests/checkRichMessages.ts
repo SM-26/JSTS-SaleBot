@@ -107,7 +107,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
         blocks.push(
             { type: "divider" },
             heading("helpAdminSection", 3),
-            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel"].map(cmd) },
+            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"].map(cmd) },
         );
     }
 

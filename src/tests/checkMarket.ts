@@ -20,6 +20,7 @@ import { rankMatches } from "../services/matchService";
 import { formatSince, isTrustedSeller, trustLineFor, TRUST_REVOKE_MS } from "../services/trustService";
 import User from "../models/User";
 import { tick } from "../services/shadowService";
+import { StaleCheckService, parseSellerIds, renderStaleDm } from "../services/staleCheckService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
 import { seedCapture } from "./fixtures";
@@ -1036,6 +1037,181 @@ async function run() {
             assert.strictEqual(earLine, `🤝 0 sales · in the market since ${formatSince(ago(200), "en")}`, "since is the earliest");
             assert.strictEqual(formatSince(new Date("2026-11-15T00:00:00Z"), "en"), "November 2026");
             console.log("[OK] trust line.");
+        }
+
+        // slice 3: /stalecheck
+        {
+            const HOUR = 3600 * 1000;
+            const DAYMS = 24 * HOUR;
+            const T = new Date("2027-02-01T10:00:00Z");
+            const at = (ms: number) => new Date(T.getTime() + ms);
+            const S1 = "100001", S2 = "100002", S3 = "100003";
+            const cfg = { nudges: false, approvedGroupId: CHAT, lang: "en" } as BotConfig;
+            type Fake = ReturnType<typeof fakeApi>;
+            const dms = (f: Fake) => f.calls.filter(c => c.method === "sendMessage");
+            const rows = (f: Fake, uid: string) => dms(f).filter(c => String(c.params.chat_id) === uid);
+            const created = new Date("2026-03-05T22:30:00Z");
+            const raw1 = async (l: { _id: unknown }) => (await Listing.collection.findOne({ _id: l._id as never }))!;
+            const seed = async (seller: string, title: string, legacy = true) => {
+                const post = await PostModel.create({ userId: seller, title, description: "d", price: "100", location: "l", media: [], status: "approved", createdAt: created });
+                const listing = await Listing.create({
+                    source: "bot", origin: legacy ? "legacy" : "dm", hold: legacy, postId: String(post._id), sellerId: seller, title, price: "100",
+                    messageIds: [], media: [], status: "live", createdAt: created, refreshedAt: created,
+                });
+                return { post, listing };
+            };
+            const mkSvc = (f: Fake, c: BotConfig = cfg) => {
+                const lifecycle = new LifecycleService(f.api, c, asPostService(stubPostService()), () => "bot");
+                return { lifecycle, svc: new StaleCheckService(f.api, c) };
+            };
+            const fresh = async () => {
+                await Listing.deleteMany({});
+                await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+                const f = fakeApi();
+                return { f, ...mkSvc(f) };
+            };
+            const seedAll = async () => {
+                const a1 = await seed(S1, "Glock 17 alpha"); const a2 = await seed(S1, "Hi-capa beta");
+                const b1 = await seed(S2, "Scope gamma"); const c1 = await seed(S3, "Normal delta", false);
+                return { a1, a2, b1, c1 };
+            };
+
+            assert.deepStrictEqual(parseSellerIds("100001 100002"), { ids: ["100001", "100002"], invalid: [] });
+            assert.deepStrictEqual(parseSellerIds("abc 12"), { ids: [], invalid: ["abc", "12"] });
+            assert.deepStrictEqual(parseSellerIds(""), { ids: [], invalid: [] });
+
+            // render
+            {
+                const items = [
+                    { listingId: "a".repeat(24), title: "Alpha", price: "100", postedAt: created },
+                    { listingId: "b".repeat(24), title: "Beta", price: "5", postedAt: new Date("2026-12-25T00:00:00Z") },
+                ];
+                const r = renderStaleDm({ firstName: "Dana", items, locale: "en" });
+                assert.ok(r.text.includes("Dana") && r.text.includes("Alpha") && r.text.includes("Beta"), "names and titles");
+                assert.ok(r.text.includes("1.") && r.text.includes("2."), "numbered");
+                assert.ok(r.text.includes("5.3.2026") && r.text.includes("25.12.2026"), "UTC D.M.YYYY");
+                assert.deepStrictEqual(r.keyboard.map(row => row.map(b => b.callback_data)), [
+                    [`lc_r_${"a".repeat(24)}`, `lc_s_${"a".repeat(24)}`], [`lc_r_${"b".repeat(24)}`, `lc_s_${"b".repeat(24)}`]]);
+                assert.ok(!JSON.stringify(r.keyboard).includes("lc_x_"), "no remove button");
+                assert.ok(!renderStaleDm({ firstName: "", items, locale: "en" }).text.includes("  "), "no double space without a name");
+            }
+
+            // plan counts
+            {
+                const { svc } = await fresh();
+                await seedAll();
+                const all = await svc.plan(null);
+                assert.deepStrictEqual([all.sellers.length, all.sellers.reduce((n, s) => n + s.listings.length, 0)], [2, 3]);
+                const one = await svc.plan([S1]);
+                assert.deepStrictEqual([one.sellers.length, one.sellers[0].listings.length], [1, 2]);
+                assert.deepStrictEqual((await svc.plan(["999999"])).unknownIds, ["999999"]);
+            }
+
+            // pilot sends only to listed; no resend
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2, b1 } = await seedAll();
+                const r = await svc.run([S1], T);
+                assert.deepStrictEqual([r.sellersSent, r.listingsSent, r.busy], [1, 2, false]);
+                assert.strictEqual(dms(f).length, 1, "exactly one DM");
+                const dm = dms(f)[0];
+                assert.strictEqual(String(dm.params.chat_id), S1);
+                assert.ok(String(dm.params.text).includes("Glock 17 alpha") && String(dm.params.text).includes("Hi-capa beta"), "both titles in one DM");
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === false && +raw.nudgedAt === +T && +raw.staleSentAt === +T && +raw.refreshedAt === +T, "claimed clocks");
+                }
+                assert.strictEqual((await raw1(b1.listing)).hold, true, "unlisted seller untouched");
+                await svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(f).length, 1, "second run does not resend");
+                await svc.run(null, at(HOUR));
+                assert.deepStrictEqual(dms(f).map(c => String(c.params.chat_id)), [S1, S2], "all-run reaches only S2");
+                await svc.run(null, at(HOUR));
+                assert.strictEqual(dms(f).length, 2, "third run sends nothing");
+            }
+
+            // 403 and 400 chat not found expire
+            for (const [code, desc] of [[403, "Forbidden: bot was blocked by the user"], [400, "Bad Request: chat not found"]] as const) {
+                const { f, svc } = await fresh();
+                const { b1 } = await seedAll();
+                f.failSend(Number(S2), code, desc);
+                const r = await svc.run([S2], T);
+                const raw = await raw1(b1.listing);
+                assert.ok(raw.status === "expired" && raw.endedBy === "system" && r.blocked === 1, `${code} expires`);
+            }
+
+            // transient failure restores the hold
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2 } = await seedAll();
+                f.failSend(Number(S1));
+                const realErr = console.error; console.error = () => {};
+                let r;
+                try { r = await svc.run([S1], T); } finally { console.error = realErr; }
+                assert.strictEqual(r.failed, 1);
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === true && !("nudgedAt" in raw) && !("staleSentAt" in raw), "hold restored");
+                }
+                const ok = fakeApi();
+                await mkSvc(ok).svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(ok).length, 1, "re-run sends");
+            }
+
+            // concurrent runs
+            {
+                const { f, svc } = await fresh();
+                await seedAll();
+                const [r1, r2] = await Promise.all([svc.run(null, T), svc.run(null, T)]);
+                assert.strictEqual([r1, r2].filter(r => r.busy).length, 1, "one run is busy");
+                assert.strictEqual(dms(f).length, 2, "one DM per seller");
+            }
+
+            // a post sold by 2.0.1 is dropped
+            {
+                const { f, svc } = await fresh();
+                const { a1, b1 } = await seedAll();
+                await PostModel.updateOne({ _id: a1.post._id }, { $set: { status: "sold" } });
+                await svc.run([S1], T);
+                const text = String(rows(f, S1)[0].params.text);
+                assert.ok(!text.includes("Glock 17 alpha") && text.includes("Hi-capa beta"), "sold post dropped from the DM");
+                const soldRaw = await raw1(a1.listing);
+                assert.ok(soldRaw.status === "sold" && soldRaw.endedBy === "system", "its listing is sold by system");
+                await PostModel.updateOne({ _id: b1.post._id }, { $set: { status: "sold" } });
+                const n = dms(f).length;
+                await svc.run([S2], T);
+                assert.strictEqual(dms(f).length, n, "all sold: no DM");
+                assert.strictEqual((await raw1(b1.listing)).status, "sold");
+            }
+
+            // 7-day answer window, relist and sell after expiry
+            {
+                const { f, lifecycle, svc } = await fresh();
+                const { a1, a2, b1 } = await seedAll();
+                await svc.run(null, T);
+                assert.strictEqual(dms(f).length, 2);
+                await lifecycle.refreshListing(String(a1.listing._id), S1, at(2 * DAYMS));
+                await lifecycle.tick(at(7 * DAYMS - 1));
+                assert.strictEqual((await raw1(a2.listing)).status, "live", "not yet");
+                await lifecycle.tick(at(7 * DAYMS));
+                const exp = await raw1(a2.listing);
+                assert.ok(exp.status === "expired" && exp.endedBy === "system", "unanswered expires at 7d");
+                assert.strictEqual((await raw1(a1.listing)).status, "live", "answered stays live");
+                const nf = fakeApi();
+                const nl = mkSvc(nf, { ...cfg, nudges: true } as BotConfig).lifecycle;
+                await nl.tick(at(7 * DAYMS));
+                assert.ok(!nf.calls.some(c => String(c.params.chat_id) === S1), "not nudged at day 7 (refreshed day 2)");
+                await nl.tick(at(9 * DAYMS));
+                assert.ok(nf.calls.some(c => String(c.params.chat_id) === S1), "nudged at day 9");
+                const rl = await lifecycle.refreshListing(String(a2.listing._id), S1, at(10 * DAYMS));
+                assert.strictEqual(rl.listing?.status, "live", "relist after expiry");
+                const sl = await lifecycle.sellListing(String(b1.listing._id), S2, at(10 * DAYMS));
+                assert.strictEqual(sl.listing?.status, "sold", "sell after expiry");
+                assert.strictEqual((await PostModel.findById(b1.post._id))?.status, "sold", "post sold");
+            }
+            await Listing.deleteMany({});
+            await PostModel.deleteMany({ userId: /^1\d{5}$/ });
+            console.log("[OK] /stalecheck service.");
         }
     } finally {
         const like = new RegExp(`^${RUN}`);
