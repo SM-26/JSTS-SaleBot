@@ -23,6 +23,7 @@ import { CaptureService, isCaptureOn } from "../services/captureService";
 import { ShadowAdminService } from "../services/shadowAdminService";
 import { TakeDownService } from "../services/takeDownService";
 import { CaptureNoteService } from "../services/captureNoteService";
+import { BuyerNoteService } from "../services/buyerNoteService";
 import { GroupListingService } from "../services/groupListingService";
 import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
@@ -65,6 +66,7 @@ export class BotController {
     private takeDownService: TakeDownService;
     readonly groupListings: GroupListingService;
     readonly captureNotes: CaptureNoteService;
+    readonly buyerNotes: BuyerNoteService;
 
     constructor(api: Api) {
         this.api = api;
@@ -76,6 +78,7 @@ export class BotController {
         this.moderationService = new ModerationService(api, this.config, this.postService, this.publishService, () => this.botUsername);
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
+        this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings);

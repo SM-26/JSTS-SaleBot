@@ -8,7 +8,16 @@ import alertLogRepository from "../repositories/alertLogRepository";
 import listingRepository from "../repositories/listingRepository";
 import savedSearchRepository, { SEARCH_LIFE_MS } from "../repositories/savedSearchRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
+import Capture from "../models/Capture";
+import Member from "../models/Member";
+import type { BotConfig } from "../types";
+import { BuyerNoteService } from "../services/buyerNoteService";
+import { classify } from "../services/classifier";
+import type { GroupListingService } from "../services/groupListingService";
 import { isSearchable, matchListings, parseQuery } from "../services/matchService";
+import { processOneClosed, type ClassifiedEvent } from "../services/shadowService";
+import { seedCapture } from "./fixtures";
+import { createHarness } from "./harness";
 
 // Buyer query parsing and matching (slice 4). The pure part always runs; the
 // Mongo part (later tasks) prints [SKIP] without MONGO_URI.
@@ -143,6 +152,115 @@ async function checkCollections() {
     console.log("[OK] saved searches, alert log, listing and shadow log additions.");
 }
 
+const CHAT = -1009990044;
+
+async function checkBuyerNote() {
+    const now = new Date();
+    const poster = String(900000000 + (Date.now() % 1000000)); // numeric: sendNote receivers are numbers
+    const seller = `${U}-s`;
+    const WANT = "מחפש glock 17";
+    const sends = (h: ReturnType<typeof createHarness>) => h.calls.filter(c => c.method === "sendMessage");
+    const groupListings = { groupLink: async (id: number) => `https://t.me/g/${id}` } as unknown as GroupListingService;
+    const mkSvc = (buyerMatches: BotConfig["buyerMatches"], h = createHarness()) =>
+        ({ h, svc: new BuyerNoteService(h.bot.api, { approvedGroupId: CHAT, lang: "en", buyerMatches } as BotConfig, groupListings, () => "testbot") });
+    const mkListing = (sellerId: string, title: string) => Listing.create({
+        source: "group", origin: "capture", chatId: CHAT, messageIds: [7], sellerId, title, text: `${title} למכירה`, priceValue: 100, price: "100",
+        media: [], isBundle: false, status: "live", hold: false, createdAt: now, refreshedAt: now,
+    });
+    const event = async (shadowId: string, extra: { chatId?: number; text?: string } = {}, matches?: string[]): Promise<ClassifiedEvent> => {
+        const text = extra.text ?? WANT;
+        return { capture: await seedCapture({ senderId: poster, chatId: extra.chatId ?? CHAT, text }), result: classify(text, false), shadowId, matches };
+    };
+    const newRow = async () => String((await shadowLogRepository.insert({ chatId: CHAT, messageIds: [1], senderId: poster, at: now, tier: "wtb", rules: [], wouldList: false }))._id);
+    const noted = async (id: string) => (await ShadowLog.findById(id))?.buyerNoteAt;
+    const reset = () => Member.deleteMany({ userId: poster });
+    // a closed, unclassified capture for the sweeper path
+    const seedClosed = async (senderId: string) => {
+        const c = await seedCapture({ senderId, chatId: CHAT, text: WANT, state: "closed" });
+        await Capture.updateOne({ _id: c._id }, { $unset: { tier: 1, rules: 1, parsed: 1 } });
+    };
+
+    try {
+        const mine = await mkListing(seller, "Glock 17");
+        await mkListing(poster, "Glock 17 own");
+        const lid = String(mine._id);
+
+        // one match
+        let { h, svc } = mkSvc("on");
+        let row = await newRow();
+        await svc.onClassified(await event(row, {}, [lid]), now);
+        assert.strictEqual(sends(h).length, 1);
+        const p = sends(h)[0].params;
+        assert.strictEqual((p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(poster));
+        assert.ok(String(p.text).includes("Glock 17"), "the title is in the note");
+        const url = (p.reply_markup as { inline_keyboard: { url: string }[][] }).inline_keyboard[0][0].url;
+        assert.ok(/start=s_[0-9a-f]{24}$/.test(url), "alert button deep link");
+        assert.ok(await noted(row), "buyerNoteAt set");
+
+        // zero matches
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await svc.onClassified(await event(await newRow(), {}, []), now);
+        assert.strictEqual(sends(h).length, 1);
+        assert.ok(String(sends(h)[0].params.text).startsWith("Nothing on the market"), "empty note text");
+
+        // real matches through processOneClosed: the poster's own listing is left out
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await Capture.deleteMany({ chatId: CHAT });
+        await seedClosed(poster);
+        while (await processOneClosed({ approvedGroupId: CHAT, lang: "en", buyerMatches: "on" } as BotConfig, now, (e, n) => svc.onClassified(e, n))) { /* drain */ }
+        assert.strictEqual(sends(h).length, 1);
+        const text = String(sends(h)[0].params.text);
+        assert.ok(text.includes("Glock 17") && !text.includes("Glock 17 own"), "own listing not in the note");
+
+        // off and shadow: nothing sent; shadow still writes matches
+        for (const mode of ["off", "shadow"] as const) {
+            await reset();
+            await Capture.deleteMany({ chatId: CHAT });
+            ({ h, svc } = mkSvc(mode));
+            await seedClosed(`${U}-q`);
+            await processOneClosed({ approvedGroupId: CHAT, lang: "en", buyerMatches: mode } as BotConfig, now, (e, n) => svc.onClassified(e, n));
+            assert.strictEqual(sends(h).length, 0, `${mode}: no send`);
+            const logged = await ShadowLog.findOne({ senderId: `${U}-q` }).sort({ _id: -1 });
+            assert.ok(mode === "shadow" ? logged?.matches?.includes(lid) : !logged?.matches?.length, `${mode}: matches`);
+        }
+
+        // never, 6 h gap
+        await reset();
+        await Member.create({ userId: poster, firstSeenAt: now, askMode: "never" });
+        ({ h, svc } = mkSvc("on"));
+        await svc.onClassified(await event(await newRow(), {}, [lid]), now);
+        assert.strictEqual(sends(h).length, 0, "askMode never");
+
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await svc.onClassified(await event(await newRow(), {}, [lid]), now);
+        await svc.onClassified(await event(await newRow(), {}, [lid]), new Date(now.getTime() + 6 * 3600_000 - 1000));
+        assert.strictEqual(sends(h).length, 1, "second wanted post within 6 h: silent");
+        await svc.onClassified(await event(await newRow(), {}, [lid]), new Date(now.getTime() + 6 * 3600_000 + 1000));
+        assert.strictEqual(sends(h).length, 2, "after 6 h: sends");
+
+        // failed send
+        await reset();
+        ({ h, svc } = mkSvc("on", createHarness({ responses: { sendMessage: { ok: false, error_code: 400, description: "x" } } })));
+        row = await newRow();
+        await svc.onClassified(await event(row, {}, [lid]), now);
+        assert.strictEqual((await Member.findOne({ userId: poster }))?.lastBuyerNoteAt, undefined, "failed send leaves no gap");
+        assert.strictEqual(await noted(row), undefined);
+
+        // strict tier, other chat
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await svc.onClassified(await event(await newRow(), { text: "Glock 17 למכירה 900 ש\"ח" }, [lid]), now);
+        await svc.onClassified(await event(await newRow(), { chatId: CHAT - 1 }, [lid]), now);
+        assert.strictEqual(sends(h).length, 0, "strict tier and another chat");
+    } finally {
+        await Promise.all([Listing.deleteMany({ sellerId: { $in: [seller, poster] } }), Capture.deleteMany({ chatId: { $in: [CHAT, CHAT - 1] } }), ShadowLog.deleteMany({ chatId: CHAT }), reset()]);
+    }
+    console.log("[OK] buyer note.");
+}
+
 async function run() {
     checkPure();
     if (!MONGO_URI) {
@@ -153,6 +271,7 @@ async function run() {
     try {
         assert.ok(/test/i.test(mongoose.connection.name), `refusing to run on database "${mongoose.connection.name}" (name must contain "test")`);
         await checkCollections();
+        await checkBuyerNote();
     } finally {
         await mongoose.disconnect();
     }
