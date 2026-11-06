@@ -18,6 +18,7 @@ import listingRepository from "../repositories/listingRepository";
 import { GroupListingService } from "../services/groupListingService";
 import { CaptureNoteService } from "../services/captureNoteService";
 import { seedCapture } from "./fixtures";
+import { StaleCheckService } from "../services/staleCheckService";
 
 /**
  * In-bot test cases, run from the admin-only /test menu. The post cases skip the
@@ -49,6 +50,9 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
     capture_note: { label: "🛒 Send me a capture note", run: testCase_CaptureNote },
+    age_listing_7: { label: "⏩ Age my test listing 7 days", run: (...a) => ageTestListing(7, ...a) },
+    age_listing_30: { label: "⏩ Age my test listing 30 days", run: (...a) => ageTestListing(30, ...a) },
+    stale_dry_run: { label: "📨 Stale-check dry run (to me only)", run: testCase_StaleDryRun },
 };
 
 /**
@@ -660,5 +664,109 @@ async function testCase_CaptureNote(
     } catch (err) {
         console.error("[ERROR - testCase_CaptureNote]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Capture note failed: " + (err as Error).message });
+    }
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+const LIFECYCLE_TITLE = "[test] lifecycle";
+const STALE_TITLE = "[test] stale";
+
+/** The tester's own [test] posts and listings with this title, removed (rows only, no group message). */
+async function wipeTestRows(userId: string, title: string): Promise<void> {
+    for (const l of await listingRepository.findSellerRecent(userId, new Date(0))) {
+        if (l.title === title) await listingRepository.deleteById(String(l._id));
+    }
+    for (const p of await postRepository.findByUserId(userId)) {
+        if (p.title === title) await postRepository.deleteById(String(p._id));
+    }
+}
+
+async function seedTestPost(userId: string, title: string, now: Date) {
+    return postRepository.createPost({
+        userId, title, description: "test", price: "100", location: "test", media: [TEST_MEDIA[0]],
+        status: "approved", approvedMessageId: null, createdAt: now,
+    });
+}
+
+/**
+ * Ages the tester's own bot listing (no group message) and runs one lifecycle tick, so the nudge
+ * (7 days) or the expiry (30 days) happens at once. Test bot only; the tick is global.
+ */
+async function ageTestListing(
+    days: number,
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Run on the test bot." });
+        return;
+    }
+    if (days < 30 && !config.nudges) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "nudges is off: /config nudges true first" });
+        return;
+    }
+    try {
+        const userId = String(msg.from.id);
+        const now = new Date();
+        await userService.ensureUser(msg.from);
+        let listing = (await listingRepository.findSellerRecent(userId, new Date(0))).find(l => l.title === LIFECYCLE_TITLE);
+        if (!listing) {
+            const post = await seedTestPost(userId, LIFECYCLE_TITLE, now);
+            listing = await listingRepository.createForPost(post, "dm", false, now);
+        }
+        if (listing.status === "live" && !listing.nudgedAt) {
+            await listingRepository.setClockForTest(String(listing._id), new Date(now.getTime() - days * DAY_MS));
+        }
+        const username = (await api.getMe()).username ?? "";
+        const result = await new LifecycleService(api, config, postService, () => username).tick(new Date());
+        const after = await listingRepository.findById(String(listing._id));
+        await api.sendMessage({
+            chat_id: msg.chat.id,
+            text: `⏩ Aged ${days} days. Listing is now ${after?.status ?? "gone"}. Tick: ${JSON.stringify(result)}.${days >= 30 ? " Expiry sends no message." : ""}`,
+        });
+    } catch (err) {
+        console.error("[ERROR - ageTestListing]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Age listing failed: " + (err as Error).message });
+    }
+}
+
+/** Two legacy held listings owned by the tester, then /stalecheck for the tester's id only. */
+async function testCase_StaleDryRun(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    if (!msg.from) throw new Error("Test requires a valid user in message context");
+    if (!isTestBotToken(process.env.BOT_TOKEN)) {
+        await api.sendMessage({ chat_id: msg.chat.id, text: "⛔ Run on the test bot." });
+        return;
+    }
+    try {
+        const userId = String(msg.from.id);
+        const now = new Date();
+        await userService.ensureUser(msg.from);
+        await wipeTestRows(userId, STALE_TITLE);
+        for (let i = 0; i < 2; i++) {
+            const post = await seedTestPost(userId, STALE_TITLE, new Date(now.getTime() - (40 + i) * DAY_MS));
+            await listingRepository.createForPost(post, "legacy", true, now);
+        }
+        // only the tester's id is ever passed
+        const report = await new StaleCheckService(api, config).run([userId], new Date());
+        await api.sendMessage({ chat_id: msg.chat.id, text: `📨 Stale-check dry run: ${JSON.stringify(report)}` });
+    } catch (err) {
+        console.error("[ERROR - testCase_StaleDryRun]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Stale dry run failed: " + (err as Error).message });
     }
 }
