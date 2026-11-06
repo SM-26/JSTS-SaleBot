@@ -35,7 +35,7 @@ import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
-import { sellerLayout } from "../services/trustService";
+import { configureTiers, sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
 import memberRepository from "../repositories/memberRepository";
 import captureRepository from "../repositories/captureRepository";
@@ -86,6 +86,7 @@ export class BotController {
     constructor(api: Api) {
         this.api = api;
         this.config = config;
+        configureTiers(this.config);
 
         this.inputService = new InputService(api, this.config);
         this.postService = new PostService(api, this.config, () => this.botUsername);

@@ -37,6 +37,10 @@ export interface BotConfig {
     nudges?: boolean;
     rulesUrl?: string;
     quickListing?: boolean;
+    // Post layouts by seller tier. Off: every post uses the regular layout.
+    tierLayouts?: boolean;
+    topSellerPercent?: number;
+    topSellerMinEnded?: number;
 }
 
 export interface LocaleStrings {
