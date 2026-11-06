@@ -18,6 +18,7 @@ export interface PostData {
     description: string;
     descriptionEntities?: StoredEntity[];
     price: string;
+    previousPrice?: string;
     location: string;
     meetup?: boolean;
     highlight?: string;

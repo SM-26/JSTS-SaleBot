@@ -22,6 +22,7 @@ const GOLDEN: Array<[string, { action: string; arg: string } | null]> = [
     [`reject_${ID}`, { action: "reject", arg: ID }],
     [`sold_${ID}`, { action: "sold", arg: ID }],
     [`bump_${ID}`, { action: "bump", arg: ID }],
+    [`lp_${ID}`, { action: "lowerPrice", arg: ID }],
     ["clear_rejected", { action: "clearRejected", arg: "" }],
     ["clear_sold", { action: "clearSold", arg: "" }],
     ["lang_en", { action: "lang", arg: "en" }],
@@ -93,7 +94,7 @@ for (const dir of localeDirs) {
         generated.push(`faq_${nodeId}`);
     }
 }
-for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `tx_${ID}_d`, `tx_${ID}_y`, `tx_${ID}_n`, `rr_${ID}_1`, `rr_${ID}_4`,
+for (const s of [`approve_${ID}`, `reject_${ID}`, `sold_${ID}`, `bump_${ID}`, `lp_${ID}`, `lb_${ID}_s`, `lb_${ID}_n`, `lb_${ID}_k`, "td_65f1c2a9e4b0c3d2a1f09876", `tx_${ID}_d`, `tx_${ID}_y`, `tx_${ID}_n`, `rr_${ID}_1`, `rr_${ID}_4`,
     `mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`, `al_${ID}_d`, `al_${ID}_r`, `lb_${ID}_u`, `lb_${ID}_d`, `lb_${ID}_m`,
     `lc_r_${ID}`, `lc_s_${ID}`, `lc_x_${ID}`,
     ...["s", "f", "r"].flatMap(a => ["n", "c", "l"].map(surface => `ls_${ID}_${a}_${surface}`)),

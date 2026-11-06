@@ -888,7 +888,7 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             await settle();
             const fallback = sent(h).find((c) => text(c).startsWith("Broken"))!;
             assert.ok(text(fallback).includes("💰 10") && text(fallback).includes("📍 l"), text(fallback));
-            assert.deepStrictEqual(buttons(fallback).map((b) => b.callback_data), [`sold_${broken._id}`, `bump_${broken._id}`]);
+            assert.deepStrictEqual(buttons(fallback).map((b) => b.callback_data), [`sold_${broken._id}`, `bump_${broken._id}`, `lp_${broken._id}`]);
             assert.ok(previews(h).some((c) => JSON.stringify(c.params.rich_message).includes("Fine")), "the next post still goes");
             const relist = sent(h).find((c) => text(c) === T("endedSectionTitle"))!;
             assert.ok(relist, "the Relist section still goes");

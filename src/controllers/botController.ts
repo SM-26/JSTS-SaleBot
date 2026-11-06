@@ -367,6 +367,11 @@ export class BotController {
             return;
         }
 
+        if (route.action === "lowerPrice") {
+            await this.myPostsService.handlePriceChangeCallback(query, ctx.getSession<UserSession>().data);
+            return;
+        }
+
         if (route.action === "rejectReason") {
             await this.moderationService.handleReasonCallback(ctx, query, route.arg);
             return;
@@ -561,7 +566,10 @@ export class BotController {
             return this.wizardService.handleNewPost(msg);
         }));
         bot.use(cmd("cancel", async (msg, _args, ctx) => {
-            if (isPrivate(msg)) return this.wizardService.cancel(msg);
+            if (isPrivate(msg)) {
+                if (await this.myPostsService.cancelPriceCut(msg, ctx.getSession<UserSession>().data)) return;
+                return this.wizardService.cancel(msg);
+            }
             const forgotten = await this.moderationService.forgetPendingRejects(ctx);
             const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
             await this.api.sendMessage({
@@ -697,6 +705,7 @@ export class BotController {
         // After the commands: the answer to a saved search's one-reply fix, else the user's wizard step.
         bot.use(async (ctx, next) => {
             const msg = ctx.message;
+            if (msg && isPrivate(msg) && await this.myPostsService.handlePriceReply(msg, this.session.find(ctx)?.data)) return;
             if (msg && isPrivate(msg) && await this.savedSearches.handleFixReply(msg, this.session.find(ctx)?.data)) return;
             return next();
         });
