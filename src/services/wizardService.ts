@@ -14,10 +14,14 @@ import type { GroupListingService } from "./groupListingService";
 import type { Parsed } from "./classifier";
 import { buildManagementCard } from "./listingCards";
 import captureRepository from "../repositories/captureRepository";
+import { isApiError } from "../config/telegramErrors";
+import { isMeetupLocation } from "./meetup";
 import { findBlockedField, withLinkUrls, BlockedFieldName } from "./blockedWords";
 
 type TextStep = "title" | "description" | "price" | "location";
-type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart";
+type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editPrice" | "editLocation" | "meetup";
+type EditAction = "editTitle" | "editPrice" | "editLocation";
+const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editPrice: "price", editLocation: "location" };
 
 const TOTAL_STEPS = 5;
 const PROMPTS: Record<TextStep | "media", { key: string; index: number }> = {
@@ -38,9 +42,13 @@ const CALLBACKS: { prefix: string; action: WizardAction }[] = [
     { prefix: "cancel_", action: "cancel" },
     { prefix: "draft_continue_", action: "continue" },
     { prefix: "draft_restart_", action: "restart" },
+    { prefix: "draft_edit_title_", action: "editTitle" },
+    { prefix: "draft_edit_price_", action: "editPrice" },
+    { prefix: "draft_edit_location_", action: "editLocation" },
+    { prefix: "draft_meetup_", action: "meetup" },
 ];
 // The step a press must find the draft in; continue/restart work on any step.
-const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm" };
+const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm", editTitle: "confirm", editPrice: "confirm", editLocation: "confirm" };
 
 export function parseWizardCallback(data: string): { action: WizardAction; userId: string } | null {
     for (const { prefix, action } of CALLBACKS) {
@@ -49,7 +57,7 @@ export function parseWizardCallback(data: string): { action: WizardAction; userI
     return null;
 }
 
-type PromptTarget = Pick<IDraft, "userId" | "chatId" | "locale" | "step">;
+type PromptTarget = Pick<IDraft, "userId" | "chatId" | "locale" | "step"> & Partial<Pick<IDraft, "meetup">>;
 
 // The /newPost wizard as a step machine over the `drafts` collection: every
 // update reads the user's draft, so a restart loses nothing.
@@ -92,33 +100,67 @@ export class WizardService {
         await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "draftExpired") });
     }
 
-    private async sendPreview(draft: IDraft, from: TelegramUser): Promise<number> {
+    // quickListing: field-edit buttons and the Beit Dagan toggle. Off, the wizard is exactly the old one.
+    private quickOn(): boolean {
+        return this.config.quickListing === true;
+    }
+
+    private meetupButton(locale: string, userId: string, on: boolean | undefined) {
+        const label = `📍 ${this.t(locale, "meetupPlace")}`;
+        return { text: on ? `✅ ${label}` : label, callback_data: `draft_meetup_${userId}` };
+    }
+
+    private previewParts(draft: IDraft, from: TelegramUser) {
         const stamp = Date.now();
-        const replyMarkup: InlineKeyboardMarkup = {
-            inline_keyboard: [[
-                { text: this.t(draft.locale, "confirmButton"), callback_data: `confirm_${draft.userId}_${stamp}` },
-                { text: this.t(draft.locale, "cancelButton"), callback_data: `cancel_${draft.userId}_${stamp}` },
-            ]],
-        };
-        // Preview & confirm as one message (buttons attached to the preview).
-        const sent = await this.api.sendRichMessage({
-            chat_id: draft.chatId,
+        const inline_keyboard: InlineKeyboardMarkup["inline_keyboard"] = [[
+            { text: this.t(draft.locale, "confirmButton"), callback_data: `confirm_${draft.userId}_${stamp}` },
+            { text: this.t(draft.locale, "cancelButton"), callback_data: `cancel_${draft.userId}_${stamp}` },
+        ]];
+        if (this.quickOn()) {
+            inline_keyboard.push(
+                [
+                    { text: this.t(draft.locale, "editTitleButton"), callback_data: `draft_edit_title_${draft.userId}` },
+                    { text: this.t(draft.locale, "editPriceButton"), callback_data: `draft_edit_price_${draft.userId}` },
+                ],
+                [
+                    { text: this.t(draft.locale, "editLocationButton"), callback_data: `draft_edit_location_${draft.userId}` },
+                    this.meetupButton(draft.locale, draft.userId, draft.meetup),
+                ]
+            );
+        }
+        return {
             rich_message: this.postService.formatPostRichMessage(this.postData(draft, from), { previewLabel: this.t(draft.locale, "preview") }),
-            reply_markup: replyMarkup,
-        });
+            reply_markup: { inline_keyboard } as InlineKeyboardMarkup,
+        };
+    }
+
+    private async sendPreview(draft: IDraft, from: TelegramUser): Promise<number> {
+        // Preview & confirm as one message (buttons attached to the preview).
+        const sent = await this.api.sendRichMessage({ chat_id: draft.chatId, ...this.previewParts(draft, from) });
         return sent.message_id;
     }
 
+    // Redraws the live preview in place (after the meetup toggle). "Not modified" is fine.
+    private async refreshPreview(draft: IDraft, from: TelegramUser): Promise<void> {
+        try {
+            await this.api.editMessageText({ chat_id: draft.chatId, message_id: draft.promptMessageId, ...this.previewParts(draft, from) });
+        } catch (err) {
+            if (!isApiError(err, 400, "message is not modified")) throw err;
+        }
+    }
+
     // Sends the prompt for `draft.step` (the preview for "confirm") and returns its message id.
-    private async sendStep(draft: PromptTarget & Partial<IDraft>, from: TelegramUser): Promise<number> {
+    private async sendStep(draft: PromptTarget & Partial<IDraft>, from: TelegramUser, opts: { indicator?: boolean } = {}): Promise<number> {
         if (draft.step === "confirm") return this.sendPreview(draft as IDraft, from);
 
         const { key, index } = PROMPTS[draft.step];
         const markup: InlineKeyboardMarkup | undefined = draft.step === "media"
             ? { inline_keyboard: [[{ text: this.t(draft.locale, "doneMediaButton"), callback_data: `done_media_${draft.userId}` }]] }
-            : undefined;
-        // A capture draft skips most steps, so a "n of 5" indicator would lie.
-        const indicator = draft.captureId ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
+            : draft.step === "location" && this.quickOn()
+                ? { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, draft.meetup)]] }
+                : undefined;
+        // A capture draft skips most steps, and a field edit is one step: a "n of 5" indicator would lie.
+        const indicator = draft.captureId || opts.indicator === false ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
         const sent = await this.inputService.sendPrompt(draft.chatId, this.t(draft.locale, key), indicator, markup);
         return sent.message_id;
     }
@@ -132,7 +174,7 @@ export class WizardService {
                 chat_id: draft.chatId,
                 text: localeService.t(draft.locale, "blockedWordNotice", { field: this.t(draft.locale, FIELD_LABEL[hit.field]), word: hit.word }),
             });
-            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field, captureId: draft.captureId }, from);
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: hit.field, captureId: draft.captureId, meetup: draft.meetup }, from);
             await draftRepository.update(draft.userId, { step: hit.field, promptMessageId: messageId, fixing: true });
             return;
         }
@@ -148,6 +190,7 @@ export class WizardService {
             price: draft.price ?? "",
             location: draft.location ?? "",
             media: draft.media.map((m): MediaItem => ({ fileId: m.fileId, type: m.type })),
+            meetup: draft.meetup || (this.quickOn() && isMeetupLocation(draft.location)) || undefined,
             userId: from.id,
             username: from.username,
             firstName: from.first_name,
@@ -300,7 +343,7 @@ export class WizardService {
             }
 
             const next = NEXT_STEP[draft.step];
-            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next }, msg.from);
+            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next, meetup: draft.meetup }, msg.from);
             const fields: DraftFields = { step: next, promptMessageId: messageId };
             fields[draft.step] = msg.text;
             if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
@@ -324,6 +367,7 @@ export class WizardService {
 
             const draft = await draftRepository.findByUserId(parsed.userId);
             if (!draft || message.chat.id !== draft.chatId || message.message_id !== draft.promptMessageId) return false;
+            if (this.isQuickAction(parsed.action) && !this.quickOn()) return false;
             const requiredStep = REQUIRED_STEP[parsed.action];
             if (requiredStep && draft.step !== requiredStep) return false;
 
@@ -362,6 +406,29 @@ export class WizardService {
                     await this.api.sendMessage({ chat_id: draft.chatId, text: this.t(draft.locale, "postCancelled") });
                     return true;
                 }
+                case "editTitle":
+                case "editPrice":
+                case "editLocation": {
+                    await this.ack(query);
+                    await this.removeKeyboard(message.chat.id, message.message_id);
+                    const step = EDIT_FIELD[parsed.action];
+                    const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step, captureId: draft.captureId, meetup: draft.meetup }, query.from, { indicator: false });
+                    await draftRepository.update(draft.userId, { step, promptMessageId: messageId, fixing: true });
+                    return true;
+                }
+                case "meetup": {
+                    if (draft.step !== "location" && draft.step !== "confirm") return false;
+                    await this.ack(query);
+                    const updated = await draftRepository.update(draft.userId, { meetup: draft.meetup ? undefined : true });
+                    if (!updated) return true;
+                    if (updated.step === "confirm") {
+                        await this.refreshPreview(updated, query.from);
+                    } else {
+                        await this.api.editMessageReplyMarkup({ chat_id: draft.chatId, message_id: message.message_id, reply_markup: { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, updated.meetup)]] } })
+                            .catch((err: unknown) => { if (!isApiError(err, 400, "message is not modified")) throw err; });
+                    }
+                    return true;
+                }
                 case "continue": {
                     await this.ack(query);
                     await this.removeKeyboard(message.chat.id, message.message_id);
@@ -380,6 +447,10 @@ export class WizardService {
         });
     }
 
+    private isQuickAction(action: WizardAction): boolean {
+        return action === "editTitle" || action === "editPrice" || action === "editLocation" || action === "meetup";
+    }
+
     // Save & send to moderation (the draft was already taken atomically).
     private async createPost(draft: IDraft, from: TelegramUser): Promise<void> {
         if (draft.captureId) return this.finishCapture(draft, draft.captureId);
@@ -392,6 +463,7 @@ export class WizardService {
             price: postData.price,
             media: postData.media,
             location: postData.location,
+            meetup: postData.meetup,
             createdAt: new Date(),
         });
 
@@ -414,7 +486,7 @@ export class WizardService {
             return;
         }
         try {
-            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined });
+            const result = await this.groupListings.addToMarket(captureId, { title: draft.title ?? "", price: draft.price, location: draft.location || undefined, meetup: draft.meetup });
             if (result.kind === "gone") await say(t("captureExpired"));
             else if (result.kind === "already") await say(t("captureAlreadyAdded"));
             else {

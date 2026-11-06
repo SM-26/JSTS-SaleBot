@@ -51,6 +51,9 @@ export interface LocaleStrings {
     expectedText: string;
     enterMedia: string;
     doneMediaButton: string;
+    editTitleButton: string;
+    editPriceButton: string;
+    editLocationButton: string;
     enterLocation: string;
     postCreated: string;
     postApproved: string;

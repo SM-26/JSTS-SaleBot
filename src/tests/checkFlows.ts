@@ -8,6 +8,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
+import { quickListingChecks } from "./quickListingChecks";
 import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 
@@ -2892,6 +2893,9 @@ async function run() {
                 console.log("  [OK] (z6) listing titles are HTML-escaped.");
             }
         })();
+
+        // (k1)..(k6): quickListing field-edit buttons and the meetup toggle
+        await quickListingChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP });
 
         console.log("[OK] persistent flows.");
     } finally {
