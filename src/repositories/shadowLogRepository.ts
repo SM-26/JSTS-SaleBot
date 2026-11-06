@@ -70,7 +70,9 @@ class ShadowLogRepository {
                 },
             },
         ]).exec();
-        return r ?? { wanted: 0, withMatches: 0, noted: 0, useful: 0, notUseful: 0 };
+        if (!r) return { wanted: 0, withMatches: 0, noted: 0, useful: 0, notUseful: 0 };
+        const { wanted, withMatches, noted, useful, notUseful } = r;
+        return { wanted, withMatches, noted, useful, notUseful };
     }
 
     async stats(since: Date): Promise<ShadowStats> {

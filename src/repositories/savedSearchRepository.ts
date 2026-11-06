@@ -36,7 +36,13 @@ class SavedSearchRepository {
     }
 
     update(id: string, q: BuyerQuery, now: Date): Promise<ISavedSearch | null> {
-        return SavedSearch.findByIdAndUpdate(id, { $set: { ...fields(q), scannedAt: now } }, { returnDocument: "after" }).exec();
+        // mongoose drops undefined from $set, so a removed ceiling must be $unset
+        const { maxPrice, meetup, ...set } = fields(q);
+        const unset = { ...(maxPrice === undefined && { maxPrice: "" }), ...(meetup === undefined && { meetup: "" }) };
+        return SavedSearch.findByIdAndUpdate(id, {
+            $set: { ...set, ...(maxPrice !== undefined && { maxPrice }), ...(meetup !== undefined && { meetup }), scannedAt: now },
+            ...(Object.keys(unset).length && { $unset: unset }),
+        }, { returnDocument: "after" }).exec();
     }
 
     async deleteOne(id: string, userId: string): Promise<boolean> {

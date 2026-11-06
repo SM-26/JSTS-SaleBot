@@ -68,7 +68,10 @@ async function checkCollections() {
         assert.strictEqual(await savedSearchRepository.countActive(U, now), 1);
 
         const later = new Date(now.getTime() + 1000);
-        assert.ok(await savedSearchRepository.update(id(a), parseQuery("מחפש glock 19"), later));
+        const upd = await savedSearchRepository.update(id(a), parseQuery("מחפש glock 19"), later);
+        assert.ok(upd);
+        assert.strictEqual(upd.maxPrice, undefined, "a removed ceiling is unset");
+        assert.strictEqual((await SavedSearch.collection.findOne({ _id: a._id }))?.maxPrice, undefined, "and gone from the stored row");
         assert.strictEqual((await savedSearchRepository.findById(id(a)))?.scannedAt.getTime(), later.getTime());
 
         // renewal offer: due, claimed once; renew clears it
@@ -122,6 +125,7 @@ async function checkCollections() {
 
     const row = (extra: object) => ({ chatId: 1, messageIds: [1], senderId: U, at: now, tier: "wtb" as const, rules: [], wouldList: false, ...extra });
     try {
+        await ShadowLog.deleteMany({}); // throwaway database only (name guard above): exact counts and a deterministic sample
         const r1 = await shadowLogRepository.insert(row({ matches: ["x"] }));
         const r2 = await shadowLogRepository.insert(row({ matches: ["x"] }));
         await shadowLogRepository.insert(row({}));
@@ -129,10 +133,10 @@ async function checkCollections() {
         assert.strictEqual(await shadowLogRepository.setMatchLabel(id(r1), "not_useful", "m2", now), null, "first label wins");
         await shadowLogRepository.setMatchLabel(id(r2), "not_useful", "m1", now);
         await shadowLogRepository.setBuyerNote(id(r1), now);
-        const sample = await shadowLogRepository.sampleUnlabeledMatches();
-        assert.ok(!sample || sample.senderId !== U, "labeled rows are not sampled");
-        const st = await shadowLogRepository.buyerStats(since);
-        assert.ok(st.wanted >= 3 && st.withMatches >= 2 && st.noted >= 1 && st.useful >= 1 && st.notUseful >= 1, "buyerStats counts the fixture");
+        const r4 = await shadowLogRepository.insert(row({ matches: ["y"] }));
+        assert.strictEqual(id(await shadowLogRepository.sampleUnlabeledMatches()), id(r4), "the one unlabeled row with matches comes back");
+        assert.strictEqual(await shadowLogRepository.sampleUnlabeledMatches(id(r4)), null, "excludeId leaves nothing");
+        assert.deepStrictEqual(await shadowLogRepository.buyerStats(new Date(now.getTime() - 1000)), { wanted: 4, withMatches: 3, noted: 1, useful: 1, notUseful: 1 });
     } finally {
         await ShadowLog.deleteMany({ senderId: U });
     }
