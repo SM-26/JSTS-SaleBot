@@ -367,6 +367,23 @@ Management card (after Add, after Refresh, and wherever a note shows a listing):
 The last button is a URL deep link `start=l_<listingId>`. It opens the DM listing card (durable), and it is how a
 group-only member becomes a bot user.
 
+**As built in 3.1.0 (owner-approved, 2026-11-06):**
+- Layout: Add alone on a green row (`style: "success"`), then Not now + Don't ask again; the card has two buttons per
+  row. Three in a row clipped labels on a phone. The owner's final text is still to come.
+- A note goes out once per text: every text a note was sent for is remembered for 30 days, answered or not (R1).
+- A repost refreshes a listing only when the text is the same, or nearly the same (overlap ≥ 0.8) with the same parsed
+  title; the listing takes the new text, photos and price. A similar but different item gets its own note (R3).
+- The first-seller take-down card counts every listing, bot listings included (R4). A take-down closes the note.
+
+**Tested live (Telegram Desktop 7.4, Android 13.2.0, 2026-11-06):**
+- Notes are best effort, and the owner accepts that. A note reaches only apps online when it is sent: shown on open
+  apps, silent in the background (no notification, no unread mark), and never delivered to a closed app. Other members
+  see nothing (second account confirmed). Showing unasked posts in `/myposts` is parked in #114.
+- Presses work and carry `message` with `message_id: 0` and `ephemeral_message_id`. Edits and deletes show at once on
+  online apps. A note deleted while an app was offline can stay there as a dead copy.
+- The bot must always name `allowed_updates`: without the list, Telegram reuses the last one set for the token, which
+  once dropped every button press on the test bot.
+
 ### 6.6 Ownership and safety
 
 Every listing callback checks `query.from.id == listing.sellerId` (moderator actions check `AuthLevel.MOD`). Notes are
