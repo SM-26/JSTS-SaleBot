@@ -11,13 +11,14 @@ import shadowLogRepository from "../repositories/shadowLogRepository";
 import Capture from "../models/Capture";
 import Member from "../models/Member";
 import type { BotConfig } from "../types";
+import { AlertService } from "../services/alertService";
 import { BuyerNoteService } from "../services/buyerNoteService";
 import { classify } from "../services/classifier";
 import type { GroupListingService } from "../services/groupListingService";
 import { isSearchable, matchListings, parseQuery } from "../services/matchService";
 import { processOneClosed, type ClassifiedEvent } from "../services/shadowService";
 import { seedCapture } from "./fixtures";
-import { BOT_USERNAME, createHarness } from "./harness";
+import { BOT_USERNAME, createHarness, type HarnessOptions } from "./harness";
 
 // Buyer query parsing and matching (slice 4). The pure part always runs; the
 // Mongo part (later tasks) prints [SKIP] without MONGO_URI.
@@ -411,6 +412,190 @@ async function checkSavedSearchDm() {
     console.log("[OK] saved searches in the DM.");
 }
 
+async function checkAlerts() {
+    const base = 7_200_000_000 + (Date.now() % 1_000_000_000);
+    const [u1, u2] = [String(base), String(base + 1)];
+    const created = new Date(Date.now() - 3600_000);
+    const fresh = new Date(Date.now() - 1800_000);
+    const groupListings = { groupLink: async (id: number) => `https://t.me/g/${id}` } as unknown as GroupListingService;
+    const mkSvc = (buyerMatches: BotConfig["buyerMatches"], responses?: HarnessOptions["responses"]) => {
+        const h = createHarness({ responses });
+        return { h, svc: new AlertService(h.bot.api, { lang: "en", buyerMatches } as BotConfig, groupListings) };
+    };
+    const to = (h: ReturnType<typeof createHarness>, u: string, method = "sendMessage") =>
+        h.calls.filter(c => c.method === method && String(c.params.chat_id) === u);
+    const mkListing = (sellerId: string, title: string, extra: Record<string, unknown> = {}) => Listing.create({
+        source: "group", origin: "capture", chatId: -1009990002, messageIds: [7], sellerId, title, text: `${title} למכירה`, priceValue: 100, price: "100",
+        media: [], isBundle: false, status: "live", hold: false, createdAt: fresh, refreshedAt: fresh, ...extra,
+    });
+    const search = (u: string, text = "מחפש glock 17") => savedSearchRepository.upsert(u, parseQuery(text), created);
+    const logs = (u: string) => AlertLog.countDocuments({ userId: u });
+    const scanned = async (s: { _id: unknown }) => (await SavedSearch.findById(s._id))?.scannedAt.getTime();
+    const sellers = new RegExp(`^al-${U}`);
+    const reset = () => Promise.all([SavedSearch.deleteMany({ userId: { $in: [u1, u2] } }), Listing.deleteMany({ $or: [{ sellerId: sellers }, { sellerId: { $in: [u1, u2] } }] }), AlertLog.deleteMany({ userId: { $in: [u1, u2] } })]);
+    const envelope = (code: number, description: string) => ({ ok: false, error_code: code, description });
+    const dead = (...u: string[]) => (p: Record<string, unknown>) => (u.includes(String(p.chat_id)) ? envelope(403, "Forbidden: bot was blocked by the user") : undefined);
+
+    await AlertLog.syncIndexes();
+    try {
+        // the basic path
+        let { h, svc } = mkSvc("on");
+        const s = await search(u1);
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        await svc.tick(new Date());
+assert.strictEqual(to(h, u1).length, 1, "one alert");
+        assert.ok(String(to(h, u1)[0].params.text).includes("Glock 17 alpha"), "the title is in the alert");
+        assert.strictEqual(to(h, u1)[0].params.parse_mode, "HTML");
+        assert.strictEqual(await logs(u1), 1);
+        assert.ok((await scanned(s))! > created.getTime(), "cursor moved");
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "second tick: nothing new");
+        await Listing.updateMany({ sellerId: sellers }, { $set: { refreshedAt: new Date() } });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "a relisted listing is not alerted twice");
+
+        // not alerted: before creation, own listing, hold, sold; two searches, one send
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await search(u1);
+        await search(u1, "מחפש glock");
+        await mkListing(`al-${U}-old`, "Glock 17 old", { refreshedAt: new Date(created.getTime() - 3600_000) });
+        await mkListing(u1, "Glock 17 mine");
+        await mkListing(`al-${U}-h`, "Glock 17 held", { hold: true });
+        await mkListing(`al-${U}-s`, "Glock 17 sold", { status: "sold" });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 0, "old, own, held and sold listings are not alerted");
+        await mkListing(`al-${U}-b`, "Glock 17 beta", { refreshedAt: new Date() });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "two overlapping searches send once");
+
+        // off and shadow
+        for (const mode of ["off", "shadow"] as const) {
+            await reset();
+            ({ h, svc } = mkSvc(mode));
+            await search(u1);
+            await mkListing(`al-${U}-m`, "Glock 17 mode");
+            await svc.tick(new Date());
+            assert.strictEqual(to(h, u1).length, 0, `${mode}: no send`);
+            assert.strictEqual(await logs(u1), 0, `${mode}: no alert_log row`);
+        }
+
+        // media
+        await reset();
+        ({ h, svc } = mkSvc("on", { sendVideo: { message_id: 1, chat: { id: 1, type: "private" }, date: 1 } }));
+        await search(u1);
+        await mkListing(`al-${U}-p`, "Glock 17 photo", { media: [{ fileId: "F1", type: "photo" }] });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1, "sendPhoto").length, 1);
+        assert.ok(String(to(h, u1, "sendPhoto")[0].params.caption).includes("Glock 17 photo"), "the text is the caption");
+        assert.strictEqual(to(h, u1).length, 0, "no extra text message");
+        await mkListing(`al-${U}-v`, "Glock 17 video", { media: [{ fileId: "F2", type: "video" }], refreshedAt: new Date() });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1, "sendVideo").length, 1, "a video goes as sendVideo");
+
+        await reset();
+        ({ h, svc } = mkSvc("on", { sendPhoto: envelope(400, "Bad Request: wrong file identifier") }));
+        await search(u1);
+        await mkListing(`al-${U}-p`, "Glock 17 photo", { media: [{ fileId: "F1", type: "photo" }] });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "a 400 on the photo falls back to a text message");
+        assert.ok(String(to(h, u1)[0].params.text).includes("Glock 17 photo"));
+        assert.strictEqual(await AlertLog.countDocuments({ userId: u1, ok: true }), 1);
+
+        // 403: that user's searches go, the other user is still alerted
+        await reset();
+        ({ h, svc } = mkSvc("on", { sendMessage: dead(u1) }));
+        await search(u1);
+        await search(u1, "מחפש glock");
+        const s2 = await search(u2);
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        await svc.tick(new Date());
+        assert.strictEqual(await SavedSearch.countDocuments({ userId: u1 }), 0, "blocked user's searches deleted");
+        assert.strictEqual(await SavedSearch.countDocuments({ userId: u2 }), 1);
+        assert.strictEqual(to(h, u2).length, 1, "the other user is alerted");
+        assert.strictEqual(await logs(u1), 0, "the blocked user's claim is released");
+        assert.ok((await scanned(s2))! > created.getTime());
+
+        // 429: nothing logged, cursor unmoved, the next tick delivers
+        await reset();
+        let limited = true;
+        ({ h, svc } = mkSvc("on", { sendMessage: () => (limited ? envelope(429, "Too Many Requests: retry after 5") : undefined) }));
+        const s3 = await search(u1);
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        await svc.tick(new Date());
+        assert.strictEqual(await logs(u1), 0, "429: no alert_log row");
+        assert.strictEqual(await scanned(s3), created.getTime(), "429: cursor unmoved");
+        limited = false;
+        await svc.tick(new Date());
+        assert.strictEqual(await logs(u1), 1, "next tick delivers");
+        assert.ok(to(h, u1).length >= 2, "the library may retry a 429 itself");
+
+        // other 4xx: marked failed, no retry
+        await reset();
+        ({ h, svc } = mkSvc("on", { sendMessage: envelope(400, "Bad Request: chat not found") }));
+        await search(u1);
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        await svc.tick(new Date());
+        await svc.tick(new Date());
+        assert.strictEqual(await AlertLog.countDocuments({ userId: u1, ok: false }), 1, "failed row kept");
+        assert.strictEqual(to(h, u1).length, 1, "no retry");
+
+        // the cap
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        const s4 = await search(u1);
+        for (let i = 0; i < 30; i++) await mkListing(`al-${U}-c${i}`, `Glock 17 item ${i}`);
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 25, "25 in the first tick");
+        assert.strictEqual(await scanned(s4), created.getTime(), "cap: cursor unmoved");
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 30, "the other 5 in the second");
+        assert.strictEqual(new Set(to(h, u1).map(c => c.params.text)).size, 30, "none repeated");
+
+        // expired
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await SavedSearch.create({ userId: u1, query: "glock 17", terms: ["glock", "17"], createdAt: created, scannedAt: created, expiresAt: new Date(Date.now() - 1000) });
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 0, "an expired search is not alerted");
+
+        // renew offer
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        const due = await SavedSearch.create({ userId: u1, query: "glock 17", terms: ["glock", "17"], createdAt: created, scannedAt: new Date(), expiresAt: new Date(Date.now() + 2 * 86400_000) });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "one offer");
+        const kb = (to(h, u1)[0].params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard;
+        assert.strictEqual(kb[0][0].callback_data, `al_${due._id}_r`);
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 1, "offered once");
+        await savedSearchRepository.renew(String(due._id), u1, new Date());
+        await mkListing(`al-${U}-a`, "Glock 17 alpha", { refreshedAt: new Date() });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 2, "a renewed search still alerts");
+
+        await reset();
+        ({ h, svc } = mkSvc("on", { sendMessage: dead(u1) }));
+        await SavedSearch.create({ userId: u1, query: "glock 17", terms: ["glock", "17"], createdAt: created, scannedAt: new Date(), expiresAt: new Date(Date.now() + 2 * 86400_000) });
+        await svc.tick(new Date());
+        assert.strictEqual(await SavedSearch.countDocuments({ userId: u1 }), 0, "403 on the offer deletes the searches");
+
+        // sendNow: ignores the mode, leaves no trace
+        await reset();
+        ({ h, svc } = mkSvc("off"));
+        const s5 = await search(u1);
+        await mkListing(`al-${U}-a`, "Glock 17 alpha");
+        assert.strictEqual(await svc.sendNow(u1, new Date()), 1);
+        assert.strictEqual(to(h, u1).length, 1);
+        assert.strictEqual(await logs(u1), 0, "sendNow writes no alert_log row");
+        assert.strictEqual(await scanned(s5), created.getTime(), "sendNow leaves the cursor");
+    } finally {
+        await reset();
+    }
+    console.log("[OK] alerts.");
+}
+
 async function run() {
     checkPure();
     if (!MONGO_URI) {
@@ -423,6 +608,7 @@ async function run() {
         await checkCollections();
         await checkBuyerNote();
         await checkSavedSearchDm();
+        await checkAlerts();
     } finally {
         await mongoose.disconnect();
     }
