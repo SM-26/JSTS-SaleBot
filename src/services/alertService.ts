@@ -36,7 +36,7 @@ const alertable = (l: IListing) => !findBlockedWord(l.title ?? "") && !unconfirm
 
 // DMs saved-search alerts and renew offers (buyerMatches "on").
 export class AlertService {
-    constructor(private api: Api, private config: BotConfig, private groupListings: GroupListingService) { }
+    constructor(private api: Api, private config: BotConfig, private groupListings: GroupListingService, private botUsername: () => string = () => "") { }
 
     private async translator(userId: string) {
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
@@ -101,7 +101,7 @@ export class AlertService {
                 const listing = byId.get(id)!;
                 let card: Card;
                 try {
-                    card = buildAlertCard(await this.translator(s.userId), s.query, await lineOf(listing));
+                    card = buildAlertCard(await this.translator(s.userId), s.query, await lineOf(listing), this.botUsername());
                 } catch (err) { // a card that cannot be built is skipped, never retried
                     console.error("[ERROR - alerts]", "card", s.userId, id, describe(err));
                     await alertLogRepository.markFailed(searchId, id);
@@ -164,7 +164,7 @@ export class AlertService {
         for (const s of searches) {
             for (const id of matchListings(query(s), live, 3)) {
                 const listing = byId.get(id)!;
-                await this.sendAlert(userId, buildAlertCard(t, s.query, (await listingLines([listing], this.groupListings))[0]), listing);
+                await this.sendAlert(userId, buildAlertCard(t, s.query, (await listingLines([listing], this.groupListings))[0], this.botUsername()), listing);
                 sent++;
             }
         }

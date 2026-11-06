@@ -75,7 +75,8 @@ export class WizardService {
         private inputService: InputService,
         private postService: PostService,
         private publishService: PublishService,
-        private groupListings: GroupListingService
+        private groupListings: GroupListingService,
+        private botUsername: () => string = () => ""
     ) { }
 
     // ponytail: in-memory timer holding only the user id (spec 8.1): a restart only loses the send,
@@ -361,8 +362,8 @@ export class WizardService {
         const listings = matchListings(q, live).flatMap(id => byId.get(id) ?? []).filter(l => !findBlockedWord(l.title ?? ""));
         const lines = await listingLines(listings, this.groupListings);
         const alertQuery = this.config.buyerMatches === "on" && isSearchable(q) ? displayQuery(q.query) : undefined;
-        const card = buildDmMatches((key, params) => this.t(draft.locale, key, params), lines, alertQuery);
-        await this.api.sendMessage({ chat_id: draft.chatId, text: card.text, parse_mode: "HTML" });
+        const card = buildDmMatches((key, params) => this.t(draft.locale, key, params), lines, alertQuery, this.botUsername());
+        await this.api.sendMessage({ chat_id: draft.chatId, text: card.text, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
     }
 
     /** /start sell: with quickListing on and no live draft, say how to post in one message. */

@@ -6,6 +6,7 @@ import postRepository from "../repositories/postRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
+import { isMeetupLocation } from "./meetup";
 import { findBlockedWord } from "./blockedWords";
 import { buildBuyerNote, type ListingLine } from "./buyerCards";
 import { isSearchable, parseQuery } from "./matchService";
@@ -24,7 +25,7 @@ export async function listingLines(listings: IListing[], groupListings: GroupLis
             const post = l.postId ? await postRepository.findById(l.postId) : null;
             if (post?.approvedMessageId) link = await groupListings.groupLink(post.approvedMessageId);
         }
-        return { title: l.title ?? "", price: l.price, location: l.location, date: l.refreshedAt.toISOString().slice(0, 10), link };
+        return { title: l.title ?? "", price: l.price, location: l.location, date: l.refreshedAt.toISOString().slice(0, 10), link, meetup: l.meetup === true || isMeetupLocation(l.location) };
     }));
 }
 

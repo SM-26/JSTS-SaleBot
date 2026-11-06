@@ -90,9 +90,9 @@ export class BotController {
         this.groupListings = new GroupListingService(api, this.config, () => this.botUsername, this.lifecycle);
         this.captureNotes = new CaptureNoteService(api, this.config, this.groupListings, () => this.botUsername);
         this.buyerNotes = new BuyerNoteService(api, this.config, this.groupListings, () => this.botUsername);
-        this.alerts = new AlertService(api, this.config, this.groupListings);
+        this.alerts = new AlertService(api, this.config, this.groupListings, () => this.botUsername);
         this.savedSearches = new SavedSearchService(api, this.config);
-        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings);
+        this.wizardService = new WizardService(api, this.config, this.inputService, this.postService, this.publishService, this.groupListings, () => this.botUsername);
         this.userService = new UserService();
         this.myPostsService = new MyPostsService(api, this.config, this.postService, this.groupListings, this.lifecycle);
         this.takeDownService = new TakeDownService(api, this.config, (listing) => this.groupListings.syncNote(listing));

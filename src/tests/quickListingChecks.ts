@@ -632,6 +632,46 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.strictEqual((await draftOf(u))!.step, "confirm");
             console.log("  [OK] (k20) Continue on a crashed quick draft gives the preview.");
         }
+
+        // (k21) the DM reply lists a meetup listing with the place and a faq_1 button; a plain one has no keyboard
+        {
+            const stamp = new Date();
+            const tag = `zr${String(user()).slice(-5)}`;
+            const mk = (title: string, extra: Record<string, unknown>) => Listing.create({
+                source: "group", origin: "capture", chatId: APPROVED_GROUP, messageIds: [980_000 + Math.floor(Math.random() * 9000)], sellerId: "someone-else", title, text: `${title} למכירה`,
+                priceValue: 100, price: "100", location: "Haifa", media: [], isBundle: false, status: "live", hold: false, createdAt: stamp, refreshedAt: stamp, ...extra,
+            });
+            const { h } = boot();
+            const u = user();
+            const meetup = await mk(`Rifle ${tag} scope`, { meetup: true });
+            await single(h, u, `מחפש ${tag}`);
+            await settle();
+            const reply = sent(h)[0];
+            assert.ok(text(reply).includes(`Haifa · ${PLACE}`), text(reply));
+            assert.ok(buttons(reply).some((b) => (b as unknown as { url: string }).url.endsWith("?start=faq_1")), "faq_1 button");
+            await Listing.deleteOne({ _id: meetup._id });
+            await mk(`Rifle ${tag} scope`, {});
+            h.calls.length = 0;
+            await single(h, u, `מחפש ${tag}`, "s2");
+            await settle();
+            assert.ok(!text(sent(h)[0]).includes(PLACE) && !sent(h)[0].params.reply_markup, "plain listing: no place, no keyboard");
+            console.log("  [OK] (k21) the DM reply shows the meeting point and its button only for a meetup listing.");
+        }
+
+        // (k22) bumping a post with meetup sends the faq_1 button
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("hi", { userId: u });
+            const post = await Post.create({ userId: String(u), title: "Bumpy", description: "d", price: "10", location: "l", media: [], status: "approved", meetup: true });
+            postIds.push(String(post._id));
+            h.calls.length = 0;
+            await h.pressButton(`bump_${post._id}`, { userId: u, messageId: 777 });
+            await settle();
+            const out = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
+            assert.ok((out.params.reply_markup as { inline_keyboard: { url?: string }[][] }).inline_keyboard[0][0].url!.endsWith("?start=faq_1"), "bump keeps the meeting-point button");
+            console.log("  [OK] (k22) a bumped meetup post is re-posted with the faq_1 button.");
+        }
     } finally {
         cfg.quickListing = wasQuick;
         cfg.minimumPhotos = wasMin;

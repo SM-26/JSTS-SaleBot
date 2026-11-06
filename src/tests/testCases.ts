@@ -732,7 +732,7 @@ async function testCase_AlertMeNow(
     if (!msg.from) throw new Error("Test requires a valid user in message context");
     try {
         const username = (await api.getMe()).username ?? "";
-        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username))).sendNow(String(msg.from.id), new Date());
+        const sent = await new AlertService(api, config, new GroupListingService(api, config, () => username, new LifecycleService(api, config, postService, () => username)), () => username).sendNow(String(msg.from.id), new Date());
         if (sent === 0) await api.sendMessage({ chat_id: msg.chat.id, text: "No alerts to send (0)." });
     } catch (err) {
         console.error("[ERROR - testCase_AlertMeNow]", (err as Error).message);

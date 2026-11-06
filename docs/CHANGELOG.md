@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased (slice 5) - One-message listing and the Beit Dagan meeting point (#104).
+  - Added:
+    - **`quickListing`** (boolean, default off; `config.json.example` ships `false`). With it on, a photo, video or album with a caption sent in DM, with no draft in progress, starts a quick draft. The caption is parsed by the classifier; missing title, price or `minimumPhotos` go to that wizard step, otherwise the preview comes straight away. Album items are collected into one draft and the preview goes out 1.5 s after the last item (an in-memory timer holding only the user id: a restart loses only the send, and `/newpost` then Continue resends). A caption-less album is dropped silently. A `wtb` caption gets a list of matches instead of a draft, plus (with `buyerMatches: "on"`) a hint to use `/alerts <query>`. Blocked words and moderation work as before.
+    - **Field-edit buttons and the Beit Dagan toggle** on every preview, and the toggle on the location step (with `quickListing` on). Buttons: `draft_edit_title_<userId>`, `draft_edit_price_<userId>`, `draft_edit_location_<userId>`, `draft_meetup_<userId>`, all frozen and pinned in `check-callbacks`.
+    - **`/start sell`** (with `quickListing` on): a live draft gets Continue / Start over, otherwise a hint on how to post in one message.
+    - **Meeting point.** Optional `meetup` flag on listings, drafts and posts. Display `📍 {location} · בית דגן`; a location of בית דגן counts as a meetup. A group post with `meetup` has a URL button to `start=faq_1`, which opens FAQ node 1 (works whatever `quickListing` says). Buyer notes, alert DMs and DM match lists show the place and carry the same button when any listed listing is a meetup; with no meetup listing their text and keyboards are unchanged. New file `src/services/meetup.ts`.
+    - Tests: new `src/tests/quickListingChecks.ts` (run from `check-flows`), plus coverage in `check-cards`, `check-buyer`, `check-callbacks` and `check-routes`.
+  - Notes:
+    - Data: additive only. New optional draft fields `quick`, `collecting`, `mediaGroupId`, `caption`, `meetup`; new optional `meetup` on posts and listings. After a rollback to 3.1.0 they are ignored and the `draft_edit_*` / `draft_meetup_*` buttons answer as stale.
+    - The version is not bumped here; the owner picks the release order.
+
 Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
   - Added:
     - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.

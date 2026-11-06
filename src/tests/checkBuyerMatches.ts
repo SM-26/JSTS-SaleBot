@@ -527,6 +527,21 @@ async function checkAlerts() {
         await svc.tick(new Date());
         assert.strictEqual(to(h, u1).length, 1, "two overlapping searches send once");
 
+        // a meetup listing: place in the text, faq_1 button; a bot-less service sends no row
+        for (const [username, rows] of [["testbot", 1], ["", 0]] as const) {
+            await reset();
+            const h2 = createHarness();
+            const svc2 = new AlertService(h2.bot.api, { lang: "en", buyerMatches: "on" } as BotConfig, groupListings, () => username);
+            await search(u1);
+            await mkListing(`al-${U}-mu`, "Glock 17 meet", { meetup: true, location: "Haifa" });
+            await svc2.tick(new Date());
+            const sentAlert = to(h2, u1)[0];
+            assert.ok(String(sentAlert.params.text).includes("Haifa · Beit Dagan"), String(sentAlert.params.text));
+            const kb = (sentAlert.params.reply_markup as { inline_keyboard: { url: string }[][] } | undefined)?.inline_keyboard ?? [];
+            assert.strictEqual(kb.length, rows);
+            if (rows) assert.ok(kb[0][0].url.endsWith("?start=faq_1"));
+        }
+
         // off and shadow
         for (const mode of ["off", "shadow"] as const) {
             await reset();

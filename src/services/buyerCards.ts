@@ -1,8 +1,9 @@
 import type { InlineKeyboardButton } from "node-telegram-bot-api/types";
 import { deepLink } from "./deepLinks";
+import { meetupButton, meetupLocationText } from "./meetup";
 import { escapeHtml, type Card, type Translate } from "./listingCards";
 
-export interface ListingLine { title: string; price?: string; location?: string; date: string; link?: string }
+export interface ListingLine { title: string; price?: string; location?: string; date: string; link?: string; meetup?: boolean }
 type AlertAction = "d" | "r";
 
 export const alertActionData = (searchId: string, action: AlertAction): string => `al_${searchId}_${action}`;
@@ -12,10 +13,14 @@ export function parseAlertArg(arg: string): { searchId: string; action: AlertAct
     return m ? { searchId: m[1], action: m[2] as AlertAction } : null;
 }
 
-function renderLine(l: ListingLine): string {
+// One "how it works" row when any line is a meetup; nothing without a bot name (the link would be dead).
+const meetupRow = (t: Translate, lines: ListingLine[], botUsername: string): InlineKeyboardButton[][] =>
+    botUsername && lines.some(l => l.meetup) ? [[meetupButton(t("meetupPlace"), botUsername)]] : [];
+
+function renderLine(l: ListingLine, place: string): string {
     const title = escapeHtml(l.title);
     const head = l.link ? `<a href="${escapeHtml(l.link).replace(/"/g, "&quot;")}">${title}</a>` : title;
-    return [head, ...[l.price, l.location, l.date].map(p => (p ? escapeHtml(p) : ""))].filter(Boolean).join(" · ");
+    return [head, ...[l.price, l.meetup ? meetupLocationText(l.location, place) : l.location, l.date].map(p => (p ? escapeHtml(p) : ""))].filter(Boolean).join(" · ");
 }
 
 // The stored query is the unique key (and has lost its final letters to the tokenizer); members see this instead.
@@ -28,18 +33,18 @@ export const describeSearch = (t: Translate, s: { query: string; maxPrice?: numb
     `${displayQuery(s.query)}${s.maxPrice ? ` ≤ ${s.maxPrice}` : ""}${s.meetup ? ` · ${t("alertMeetup")}` : ""}`;
 
 export function buildBuyerNote(t: Translate, lines: ListingLine[], captureId: string, botUsername: string): Card {
-    const text = lines.length === 0 ? t("buyerNoteEmpty") : [t("buyerNoteTitle", { n: lines.length }), ...lines.map(renderLine)].join("\n");
-    return { text, html: true, keyboard: [[{ text: t("buyerNoteAlertButton"), url: deepLink(botUsername, `s_${captureId}`) }]] };
+    const text = lines.length === 0 ? t("buyerNoteEmpty") : [t("buyerNoteTitle", { n: lines.length }), ...lines.map(l => renderLine(l, t("meetupPlace")))].join("\n");
+    return { text, html: true, keyboard: [[{ text: t("buyerNoteAlertButton"), url: deepLink(botUsername, `s_${captureId}`) }], ...meetupRow(t, lines, botUsername)] };
 }
 
 // The answer to a "wanted" caption sent with photos in DM: the matches, plus the /alerts hint when asked.
-export function buildDmMatches(t: Translate, lines: ListingLine[], alertQuery?: string): Card {
-    const list = lines.length === 0 ? t("buyerNoteEmpty") : [t("buyerNoteTitle", { n: lines.length }), ...lines.map(renderLine)].join("\n");
-    return { text: alertQuery ? `${list}\n${t("dmAlertHint", { query: escapeHtml(alertQuery) })}` : list, html: true, keyboard: [] };
+export function buildDmMatches(t: Translate, lines: ListingLine[], alertQuery?: string, botUsername = ""): Card {
+    const list = lines.length === 0 ? t("buyerNoteEmpty") : [t("buyerNoteTitle", { n: lines.length }), ...lines.map(l => renderLine(l, t("meetupPlace")))].join("\n");
+    return { text: alertQuery ? `${list}\n${t("dmAlertHint", { query: escapeHtml(alertQuery) })}` : list, html: true, keyboard: meetupRow(t, lines, botUsername) };
 }
 
-export function buildAlertCard(t: Translate, query: string, line: ListingLine): Card {
-    return { text: `${t("alertTitle", { query: escapeHtml(displayQuery(query)) })}\n${renderLine(line)}`, html: true, keyboard: [] };
+export function buildAlertCard(t: Translate, query: string, line: ListingLine, botUsername = ""): Card {
+    return { text: `${t("alertTitle", { query: escapeHtml(displayQuery(query)) })}\n${renderLine(line, t("meetupPlace"))}`, html: true, keyboard: meetupRow(t, [line], botUsername) };
 }
 
 const day = (d: Date): string => d.toISOString().slice(0, 10);
