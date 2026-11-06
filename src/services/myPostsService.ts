@@ -226,7 +226,7 @@ export class MyPostsService {
 
         if (await this.refuseIfTakenDown(query, postId)) return;
 
-        await postRepository.updateStatus(postId, "sold");
+        const { richMessage } = await this.postService.markPostSold(post);
         // Best-effort: Sold also ends the listing, so a moderator's take-down finds nothing to remove.
         try {
             const listing = await listingRepository.findByPostId(postId);
@@ -237,24 +237,6 @@ export class MyPostsService {
         const user: User | null = await userRepository.findByUserId(String(query.from.id));
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'postMarkedSold') });
-
-        const postUser = await userRepository.findByUserId(post.userId);
-        const richMessage = this.postService.formatPostRichMessage({
-            title: post.title,
-            description: post.description,
-            descriptionEntities: post.descriptionEntities,
-            price: post.price,
-            location: post.location,
-            media: post.media,
-            userId: Number(post.userId),
-            username: postUser?.userName || undefined,
-            firstName: postUser?.firstName || "User",
-        }, { sold: true });
-
-        // Edit the message in the approved group
-        if (post.approvedMessageId) {
-            await this.postService.markSoldInGroup(post.approvedMessageId, richMessage);
-        }
 
         // The pressed card stays: re-render it as sold (photos kept), no buttons.
         // The /myposts summary is never touched by a card press.

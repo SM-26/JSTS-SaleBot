@@ -13,6 +13,8 @@ import listingRepository,{ priceValueOf } from "../repositories/listingRepositor
 import memberRepository from "../repositories/memberRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import { textHash } from "../services/classifier";
+import { LifecycleService } from "../services/lifecycleService";
+import { asPostService, plusDays, fakeApi, seedPost, stubPostService, T0 as LT0 } from "./lifecycleFakes";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
 import { isTrustedSeller, TRUST_REVOKE_MS } from "../services/trustService";
@@ -713,6 +715,83 @@ async function run() {
             await Capture.deleteMany({ senderId: cs, state: "classified" });
             assert.strictEqual(await captureRepository.hasSettledSince(CHAT, cs, T0, new Date(T0.getTime() + 2 * HR)), false, "an open capture does not count");
             console.log("[OK] hasSettledSince.");
+        }
+
+        // slice 3: LifecycleService refresh, sold, remove
+        {
+            const P = `${RUN}-lc`;
+            const ps = stubPostService();
+            const svc = new LifecycleService(fakeApi().api, {} as BotConfig, asPostService(ps), () => "bot");
+            const gl = (seller: string, extra: Record<string, unknown> = {}) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: LT0, refreshedAt: LT0, ...extra,
+            });
+            const bl = async (seller: string) => {
+                const post = await seedPost(`${P}-${seller}`);
+                return { post, listing: await listingRepository.createForPost(post, "dm", false, LT0) };
+            };
+            const sid = (n: string) => `${P}-${n}`;
+            const lid = (l: { _id: unknown }) => String(l._id);
+
+            const b1 = await bl("b1");
+            const r1 = await svc.sellListing(lid(b1.listing), sid("b1"), LT0);
+            assert.strictEqual(r1.outcome, "ok");
+            assert.strictEqual((await postRepository.findById(String(b1.post._id)))?.status, "sold", "post sold");
+            const l1 = await listingRepository.findById(lid(b1.listing));
+            assert.ok(l1?.status === "sold" && l1.endedBy === "seller", "listing sold by seller");
+            assert.strictEqual(ps.sold.length, 1, "markPostSold once");
+            const r1b = await svc.sellListing(lid(b1.listing), sid("b1"), LT0);
+            assert.ok(r1b.outcome === "ended" && r1b.listing?.status === "sold", "sold twice is ended");
+            assert.strictEqual(ps.sold.length, 1, "markPostSold still once");
+
+            const g1 = await gl("g1");
+            assert.strictEqual((await svc.sellListing(lid(g1), sid("g1"), LT0)).outcome, "ok");
+            assert.strictEqual(ps.sold.length, 1, "group sold leaves posts alone");
+
+            const g2 = await gl("g2");
+            const rf = await svc.sellListing(lid(g2), sid("other"), LT0);
+            assert.ok(rf.outcome === "forbidden" && rf.listing, "sold by another user");
+            assert.strictEqual((await listingRepository.findById(lid(g2)))?.status, "live");
+            assert.strictEqual((await svc.sellListing("000000000000000000000000", sid("g2"), LT0)).outcome, "not_found");
+
+            const b2 = await bl("b2");
+            ps.groupEdited = false;
+            const r2 = await svc.sellListing(lid(b2.listing), sid("b2"), LT0);
+            ps.groupEdited = true;
+            assert.ok(r2.outcome === "ok" && r2.groupEdited === false, "deleted group message");
+            assert.strictEqual((await listingRepository.findById(lid(b2.listing)))?.status, "sold");
+            assert.strictEqual((await postRepository.findById(String(b2.post._id)))?.status, "sold");
+
+            const b3 = await bl("b3");
+            const rn = await svc.removeListing(lid(b3.listing), sid("b3"), LT0);
+            const b3l = await listingRepository.findById(lid(b3.listing));
+            assert.ok(rn.outcome === "not_allowed" && b3l?.status === "live" && b3l.text, "remove bot listing refused");
+            const g3 = await gl("g3");
+            assert.strictEqual((await svc.removeListing(lid(g3), sid("g3"), LT0)).outcome, "ok");
+            const g3l = (await Listing.collection.findOne({ _id: g3._id }))!;
+            assert.ok(g3l.status === "removed" && g3l.endedBy === "seller" && !("text" in g3l) && !("title" in g3l) && !("media" in g3l), "remove group scrubs");
+
+            const g4 = await gl("g4", { nudgedAt: LT0 });
+            const rr = await svc.refreshListing(lid(g4), sid("g4"), plusDays(8));
+            const g4l = (await Listing.collection.findOne({ _id: g4._id }))!;
+            assert.ok(rr.outcome === "ok" && g4l.refreshedAt.getTime() === plusDays(8).getTime() && !("nudgedAt" in g4l), "refresh restarts the clock");
+            const g5 = await gl("g5", { status: "expired" });
+            assert.strictEqual((await svc.refreshListing(lid(g5), sid("g5"), plusDays(1))).outcome, "ok");
+            assert.strictEqual((await listingRepository.findById(lid(g5)))?.status, "live", "expired relisted");
+            assert.strictEqual((await svc.refreshListing(lid(g1), sid("g1"), plusDays(1))).outcome, "ended", "sold is final");
+
+            const ep = await seedPost(sid("e1"));
+            const [e1, e2] = await Promise.all([svc.ensureBotListing(String(ep._id), LT0), svc.ensureBotListing(String(ep._id), LT0)]);
+            assert.ok(e1 && e2 && lid(e1) === lid(e2), "ensureBotListing race returns one row");
+            assert.strictEqual(await Listing.countDocuments({ source: "bot", postId: String(ep._id) }), 1);
+            assert.strictEqual(await svc.ensureBotListing(String((await seedPost(sid("e2"), "pending"))._id), LT0), null, "pending post has no listing");
+
+            const sp = await bl("s1");
+            await PostModel.updateOne({ _id: sp.post._id }, { $set: { status: "sold" } });
+            const rec = await reconcileBotListings(LT0);
+            assert.ok(rec.sold >= 1, "reconcile marks the 2.0.1-sold listing");
+            assert.strictEqual((await listingRepository.findById(lid(sp.listing)))?.status, "sold");
+            console.log("[OK] lifecycle refresh, sold, remove.");
         }
     } finally {
         const like = new RegExp(`^${RUN}`);

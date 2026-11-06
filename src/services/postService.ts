@@ -1,7 +1,7 @@
 import { RichMessageBuilder, RichTextBuilder, richListItem } from "node-telegram-bot-api";
 import type { Api } from "node-telegram-bot-api";
 import type { Message, InputRichMessage, InlineKeyboardButton, SendRichMessageParams } from "node-telegram-bot-api/types";
-import { BotConfig, MediaItem, SendMessageOptions } from "../types";
+import { BotConfig, MediaItem, Post, SendMessageOptions } from "../types";
 import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
@@ -150,6 +150,27 @@ export class PostService {
         const sent = await this.api.sendMessage({ chat_id: approvedGroupId, text, ...options });
 
         return sent.message_id;
+    }
+
+    // Sets the post sold, builds the sold card and edits the group message. A failed group
+    // edit is reported, never thrown; a failed status update throws (nothing was changed yet).
+    async markPostSold(post: Post): Promise<{ richMessage: InputRichMessage; groupEdited: boolean }> {
+        const postId = String(post._id);
+        await postRepository.updateStatus(postId, "sold");
+        const postUser = await userRepository.findByUserId(post.userId);
+        const richMessage = this.formatPostRichMessage({
+            title: post.title,
+            description: post.description,
+            descriptionEntities: post.descriptionEntities,
+            price: post.price,
+            location: post.location,
+            media: post.media,
+            userId: Number(post.userId),
+            username: postUser?.userName || undefined,
+            firstName: postUser?.firstName || "User",
+        }, { sold: true });
+        const groupEdited = post.approvedMessageId ? await this.markSoldInGroup(post.approvedMessageId, richMessage) : false;
+        return { richMessage, groupEdited };
     }
 
     async markSoldInGroup(approvedMessageId: number, richMessage: InputRichMessage): Promise<boolean> {
