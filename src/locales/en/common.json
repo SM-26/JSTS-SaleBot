@@ -168,7 +168,7 @@
     "trustedPublishedLabel": "Published (trusted seller)",
     "captureNoteComplete": "Add to the market? {title} · {details}",
     "captureNoteIncomplete": "Add this to the market? Some details are missing, finish it in the bot.",
-    "captureAddButton": "➕ Add",
+    "captureAddButton": "✅ Add",
     "captureCompleteButton": "➕ Finish in bot",
     "captureNotNowButton": "Not now",
     "captureNeverButton": "Don't ask again",

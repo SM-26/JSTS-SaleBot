@@ -30,17 +30,20 @@ export function buildAskNote(t: Translate, capture: { id: string; parsed: Parsed
     const { parsed, id } = capture;
     const complete = Boolean(parsed.title && parsed.price);
     const first: InlineKeyboardButton = complete
-        ? { text: t("captureAddButton"), callback_data: captureActionData(id, "a") }
-        : { text: t("captureCompleteButton"), url: deepLink(botUsername, `c_${id}`) };
+        ? { text: t("captureAddButton"), callback_data: captureActionData(id, "a"), style: "success" }
+        : { text: t("captureCompleteButton"), url: deepLink(botUsername, `c_${id}`), style: "success" };
     return {
         text: complete
             ? t("captureNoteComplete", { title: parsed.title ?? "", details: [parsed.price, parsed.location].filter(Boolean).join(" · ") })
             : t("captureNoteIncomplete"),
-        keyboard: [[
-            first,
-            { text: t("captureNotNowButton"), callback_data: captureActionData(id, "n") },
-            { text: t("captureNeverButton"), callback_data: captureActionData(id, "x") },
-        ]],
+        // Add on its own row, so the two longer labels get half a row each (three in a row cut "לא לשאול שוב").
+        keyboard: [
+            [first],
+            [
+                { text: t("captureNotNowButton"), callback_data: captureActionData(id, "n") },
+                { text: t("captureNeverButton"), callback_data: captureActionData(id, "x") },
+            ],
+        ],
     };
 }
 

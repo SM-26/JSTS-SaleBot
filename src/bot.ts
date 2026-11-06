@@ -26,6 +26,8 @@ process.on("unhandledRejection", (err) => {
     console.error("[unhandledRejection]", err);
 });
 
+const ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "pre_checkout_query"];
+
 async function main() {
     await connectDB();
 
@@ -83,7 +85,10 @@ async function main() {
 
     // run() installs the SIGINT/SIGTERM handlers (`docker stop` sends SIGTERM,
     // and Node running as a container's PID 1 ignores it without a handler).
-    await run(bot, { exitOnError: true, onError: createPollErrorLogger() });
+    // Always name the update types: without the list Telegram reuses the last one any
+    // poller set for this token, which once silently dropped every button press on
+    // the test bot. Add a type here when a handler for it is added.
+    await run(bot, { exitOnError: true, onError: createPollErrorLogger(), allowedUpdates: ALLOWED_UPDATES });
 }
 
 main().catch((err) => {

@@ -22,8 +22,9 @@ const urls = (c: Card): Array<string | undefined> => c.keyboard.flat().map((b) =
     all.push(c);
     assert(c.text.startsWith("captureNoteComplete"));
     assert(c.text.includes('"title":"גלוק 17"') && c.text.includes('"details":"1,300₪ · מרכז"'));
-    assert.strictEqual(c.keyboard.length, 1);
+    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [1, 2]); // Add alone, then Not now + Don't ask again
     assert.deepStrictEqual(datas(c), [`mk_${ID}_a`, `mk_${ID}_n`, `mk_${ID}_x`]);
+    assert.strictEqual(c.keyboard[0][0].style, "success"); // green Add (a ➕ alone was hard to see)
 }
 
 // ask note incomplete (no title, or no price)
@@ -31,7 +32,7 @@ for (const parsed of [{ price: "100", isBundle: false }, { title: "x", isBundle:
     const c = buildAskNote(t, { id: ID, parsed }, BOT);
     all.push(c);
     assert(c.text.startsWith("captureNoteIncomplete"));
-    assert.strictEqual(c.keyboard.length, 1);
+    assert.deepStrictEqual(c.keyboard.map((r) => r.length), [1, 2]);
     assert.strictEqual(urls(c)[0], `https://t.me/${BOT}?start=c_${ID}`);
     assert.strictEqual(datas(c)[0], undefined);
     assert.deepStrictEqual(datas(c).slice(1), [`mk_${ID}_n`, `mk_${ID}_x`]);

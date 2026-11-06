@@ -168,7 +168,7 @@
     "trustedPublishedLabel": "Опубликовано (проверенный продавец)",
     "captureNoteComplete": "Добавить на рынок? {title} · {details}",
     "captureNoteIncomplete": "Добавить это на рынок? Не хватает некоторых данных, дополните в боте.",
-    "captureAddButton": "➕ Добавить",
+    "captureAddButton": "✅ Добавить",
     "captureCompleteButton": "➕ Дополнить в боте",
     "captureNotNowButton": "Не сейчас",
     "captureNeverButton": "Больше не спрашивать",
