@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased
+  - Docs:
+    - The wiki is now where the docs are read. Pages live in `docs/` and `.github/workflows/wiki.yml` copies them on every merge to master. The long README became a front page plus one page per topic, and `Agents.md` keeps the rules and links to the rest.
+    - `check-docs` in `pnpm test` fails on an undocumented command or config key, a broken page link or a missing source path.
+
 3.3.0 - Seller tiers, price changes and slices 4 to 6 (entries below). 3.2.0 was never deployed; slice 3 reaches prod here too.
   - Added:
     - `tierLayouts` (default off), `topSellerPercent` (60) and `topSellerMinEnded` (3) in `config.json`. With `tierLayouts` off, every post uses the regular layout.

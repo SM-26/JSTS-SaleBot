@@ -16,7 +16,7 @@ body:
       options:
         - label: I have searched the [existing issues](https://github.com/SM-26/JSTS-SaleBot/issues) and confirmed that this bug has not already been reported.
           required: true
-        - label: I have checked the [JSTS-SaleBot README](https://github.com/SM-26/JSTS-SaleBot/blob/master/docs/README.md) for potential solutions or common issues.
+        - label: I have checked the [JSTS-SaleBot wiki](https://github.com/SM-26/JSTS-SaleBot/wiki) for potential solutions or common issues.
           required: true
 
   - type: textarea

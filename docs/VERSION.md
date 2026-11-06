@@ -17,7 +17,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 
 ## Changelog
 
-See [CHANGELOG.md](../docs/CHANGELOG.md) for the full version history and release notes.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history and release notes.
 
 ## How to update
 
