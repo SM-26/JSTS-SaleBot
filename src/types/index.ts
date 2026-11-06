@@ -45,6 +45,8 @@ export interface LocaleStrings {
     wizardStep: string;
     contactSellerCta: string;
     meetupPlace: string;
+    quickSellHint: string;
+    dmAlertHint: string;
     trustLine: string;
     enterDescription: string;
     enterPrice: string;

@@ -32,6 +32,12 @@ export function buildBuyerNote(t: Translate, lines: ListingLine[], captureId: st
     return { text, html: true, keyboard: [[{ text: t("buyerNoteAlertButton"), url: deepLink(botUsername, `s_${captureId}`) }]] };
 }
 
+// The answer to a "wanted" caption sent with photos in DM: the matches, plus the /alerts hint when asked.
+export function buildDmMatches(t: Translate, lines: ListingLine[], alertQuery?: string): Card {
+    const list = lines.length === 0 ? t("buyerNoteEmpty") : [t("buyerNoteTitle", { n: lines.length }), ...lines.map(renderLine)].join("\n");
+    return { text: alertQuery ? `${list}\n${t("dmAlertHint", { query: escapeHtml(alertQuery) })}` : list, html: true, keyboard: [] };
+}
+
 export function buildAlertCard(t: Translate, query: string, line: ListingLine): Card {
     return { text: `${t("alertTitle", { query: escapeHtml(displayQuery(query)) })}\n${renderLine(line)}`, html: true, keyboard: [] };
 }

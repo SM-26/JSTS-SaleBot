@@ -245,5 +245,7 @@
     "staleBusy": "שליחת /stalecheck כבר רצה.",
     "staleBadIds": "זה לא מזהה משתמש בטלגרם: {ids}. השתמשו בספרות בלבד.",
     "staleNothing": "אין מודעות ישנות שממתינות לשאלה.",
-    "helpStalecheck": "/stalecheck [userId ...] - שאלת מוכרים ותיקים אם המודעות עדיין למכירה (קודם הרצת ניסיון)"
+    "helpStalecheck": "/stalecheck [userId ...] - שאלת מוכרים ותיקים אם המודעות עדיין למכירה (קודם הרצת ניסיון)",
+    "quickSellHint": "שלחו תמונות עם כיתוב: מה, מחיר, איפה.",
+    "dmAlertHint": "כדי לקבל התראה על חדשים, שלחו /alerts {query}"
 }

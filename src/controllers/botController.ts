@@ -551,7 +551,7 @@ export class BotController {
         bot.use(cmd("start", (msg, args, ctx) => {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
-            if (args === "sell") return this.wizardService.handleNewPost(msg);
+            if (args === "sell") return this.wizardService.handleSell(msg);
             return this.HandleStart(msg, args, ctx);
         }));
         bot.use(cmd("newpost", (msg) => {

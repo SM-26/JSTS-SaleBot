@@ -48,6 +48,7 @@ export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
     broadcast_users: { label: "📢 Broadcast Users (DM active/pending/approved)", run: testCase_BroadcastUsers },
     wizard_draft: { label: "📝 Wizard draft status", run: testCase_WizardDraftStatus },
     classify_fixtures: { label: "🧪 Classify fixtures", run: testCase_ClassifyFixtures },
+    quick_caption: { label: "📸 Quick draft from caption text", run: testCase_QuickCaption },
     shadow_last5: { label: "🕵️ Shadow: last 5 rows", run: testCase_ShadowLast5 },
     trusted_seller_post: { label: "⭐ Post as trusted seller", run: testCase_TrustedSellerPost },
     new_seller_post: { label: "🆕 Post as new seller", run: testCase_NewSellerPost },
@@ -531,6 +532,30 @@ async function testCase_ClassifyFixtures(
     } catch (err) {
         console.error("[ERROR - testCase_ClassifyFixtures]", (err as Error).message);
         await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Classify fixtures failed: " + (err as Error).message });
+    }
+}
+
+/**
+ * TEST CASE: what the one-message quick draft reads from a fixed caption. Touches no draft, sends no post.
+ */
+async function testCase_QuickCaption(
+    api: Api,
+    config: BotConfig,
+    localeService: LocaleService,
+    postService: PostService,
+    userService: UserService,
+    paymentService: PaymentService,
+    inputService: InputService,
+    msg: Message
+): Promise<void> {
+    try {
+        const caption = ["Glock 17 Gen3", "like new, two magazines", "1,800 ₪ Tel Aviv"].join("\n");
+        const { tier, parsed } = classify(caption, true);
+        const fields = [`tier: ${tier}`, `title: ${parsed.title ?? "-"}`, `price: ${parsed.priceValue ?? "-"}`, `location: ${parsed.location ?? "-"}`, `description: ${parsed.description ?? "-"}`].join("\n");
+        await api.sendMessage({ chat_id: msg.chat.id, text: ["Caption:", caption, "", "Quick draft would read:", fields].join("\n") });
+    } catch (err) {
+        console.error("[ERROR - testCase_QuickCaption]", (err as Error).message);
+        await api.sendMessage({ chat_id: msg.chat.id, text: "❌ Quick caption failed: " + (err as Error).message });
     }
 }
 

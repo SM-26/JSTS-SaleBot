@@ -245,5 +245,7 @@
     "staleBusy": "A /stalecheck send is already running.",
     "staleBadIds": "Not a Telegram user id: {ids}. Use digits only.",
     "staleNothing": "No legacy posts are waiting for a question.",
-    "helpStalecheck": "/stalecheck [userId ...] - Ask legacy sellers if their posts are still for sale (dry run first)"
+    "helpStalecheck": "/stalecheck [userId ...] - Ask legacy sellers if their posts are still for sale (dry run first)",
+    "quickSellHint": "Send photos with a caption: what, price, where.",
+    "dmAlertHint": "To get alerts for new ones, send /alerts {query}"
 }

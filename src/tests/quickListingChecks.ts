@@ -2,6 +2,9 @@ import assert from "assert";
 import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Listing from "../models/Listing";
+import { QUICK_ALBUM_DELAY_MS } from "../services/wizardService";
+import { displayQuery } from "../services/buyerCards";
+import { parseQuery } from "../services/matchService";
 import { seedCapture } from "./fixtures";
 import { createHarness, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
@@ -26,15 +29,27 @@ export interface QuickListingContext {
     T: (key: string) => string;
     postIds: string[];
     APPROVED_GROUP: number;
+    MOD_GROUP: number;
 }
 
 export async function quickListingChecks(ctx: QuickListingContext): Promise<void> {
-    const { boot, cfg, user, settle, T, postIds, APPROVED_GROUP } = ctx;
+    const { boot, cfg, user, settle, T, postIds, APPROVED_GROUP, MOD_GROUP } = ctx;
     const { default: draftRepository } = await import("../repositories/draftRepository");
     const draftOf = (u: number) => draftRepository.findByUserId(String(u));
     const rawDraft = (u: number) => Draft.collection.findOne({ userId: String(u) });
     const PLACE = T("meetupPlace");
     const wasQuick = cfg.quickListing;
+    const wasMin = cfg.minimumPhotos;
+    const wasMatches = cfg.buyerMatches;
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const waitTimer = () => sleep(QUICK_ALBUM_DELAY_MS + 200);
+    const photo = (id: string) => ({ photo: [{ file_id: id, file_unique_id: id, width: 10, height: 10 }] });
+    const outbound = (h: H) => h.calls.filter((c) => c.method !== "getMe");
+    const previews = (h: H) => h.calls.filter((c) => c.method === "sendRichMessage");
+    const sent = (h: H) => h.calls.filter((c) => c.method === "sendMessage");
+    const album = (h: H, u: number, gid: string, captionOn: number, caption: string, n = 3) =>
+        Promise.all(Array.from({ length: n }, (_, i) => h.message(photo(`${gid}${i}`), { userId: u, mediaGroupId: gid, ...(i === captionOn ? { caption } : {}) })));
+    const single = (h: H, u: number, caption: string, id = "s1") => h.message(photo(id), { userId: u, caption });
     const calls = (h: H, method: string) => h.calls.filter((c) => c.method === method);
     const toasts = (h: H) => calls(h, "answerCallbackQuery").map((c) => c.params.text);
 
@@ -259,7 +274,330 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.strictEqual(await Post.countDocuments({ userId: String(u) }), 0);
             console.log("  [OK] (k6) a capture draft's meetup lands on the group listing, no posts row.");
         }
+
+        // ---- one-message quick draft (key on, minimumPhotos 0 unless a case says otherwise)
+        cfg.minimumPhotos = 0;
+
+        // (k7) an album with a caption: one draft, one preview after the delay, nothing before it
+        {
+            cfg.minimumPhotos = 2;
+            const { h } = boot();
+            const u = user();
+            await album(h, u, `g${u}`, 1, "Glock 17\nnice shape\n900₪ Tel Aviv");
+            await settle();
+            assert.strictEqual(outbound(h).length, 0, "no reply while the album is collected");
+            const collecting = (await rawDraft(u))!;
+            assert.deepStrictEqual([collecting.collecting, collecting.media.length], [true, 3]);
+            assert.strictEqual(await Draft.countDocuments({ userId: String(u) }), 1);
+            await waitTimer();
+            assert.strictEqual(previews(h).length, 1, "exactly one preview");
+            assert.strictEqual(sent(h).length, 0);
+            const d = (await rawDraft(u))!;
+            assert.deepStrictEqual([d.step, d.quick, d.collecting, d.media.length, d.title, d.price, d.caption], ["confirm", true, undefined, 3, "Glock 17", "900", undefined]);
+            assert.strictEqual(d.promptMessageId, messageId(previews(h)[0]));
+            cfg.minimumPhotos = 0;
+            console.log("  [OK] (k7) an album with a caption: one draft, 3 media, one preview after the delay, no reply before.");
+        }
+
+        // (k8) a single photo with a full caption previews at once; a one-line caption has no blockquote and no bare pin
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "Glock 17 900 ₪");
+            await settle();
+            assert.strictEqual(previews(h).length, 1, "no delay for a single photo");
+            const rich = JSON.stringify(previews(h)[0].params.rich_message);
+            assert.ok(!rich.includes("blockquote") && !rich.includes("📍"), rich);
+            const d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.quick, d.media.length], ["confirm", true, 1]);
+            console.log("  [OK] (k8) a single photo with a full caption previews at once, no empty description or place.");
+        }
+
+        // (k9) a missing price or title is asked for once; minimumPhotos sends a media prompt
+        {
+            const { h } = boot();
+            const u = user();
+            // the classifier reads a bare "17" as a price, so the model number stays out of this caption
+            await single(h, u, "Glock\nnice");
+            await settle();
+            const prompt = sent(h)[0];
+            assert.strictEqual(text(prompt), T("enterPrice"), "no n of 5");
+            assert.strictEqual(previews(h).length, 0);
+            let d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.title, d.description, d.promptMessageId], ["price", "Glock", "nice", messageId(prompt)]);
+            h.calls.length = 0;
+            await h.sendText("750", { userId: u });
+            await settle();
+            assert.strictEqual(previews(h).length, 1);
+            assert.strictEqual((await draftOf(u))!.price, "750");
+
+            const { h: h2 } = boot();
+            const u2 = user();
+            await single(h2, u2, "900 ₪");
+            await settle();
+            assert.strictEqual(text(sent(h2)[0]), T("welcome"), "title prompt, no indicator");
+            await h2.sendText("Glock", { userId: u2 });
+            await settle();
+            d = (await draftOf(u2))!;
+            assert.deepStrictEqual([d.step, d.price], ["confirm", "900"]);
+            assert.strictEqual(previews(h2).length, 1);
+
+            cfg.minimumPhotos = 2;
+            const { h: h3 } = boot();
+            const u3 = user();
+            await single(h3, u3, "Glock 17 900₪");
+            await settle();
+            assert.strictEqual(text(sent(h3)[0]), T("enterMedia"));
+            assert.strictEqual(previews(h3).length, 0);
+            d = (await draftOf(u3))!;
+            assert.strictEqual(d.step, "media");
+            h3.calls.length = 0;
+            await h3.pressButton(`done_media_${u3}`, { userId: u3, messageId: d.promptMessageId });
+            await settle();
+            assert.deepStrictEqual(sent(h3).map(text), [T("notEnoughMedia")]);
+            assert.strictEqual(await draftOf(u3), null);
+
+            const { h: h4 } = boot();
+            const u4 = user();
+            await single(h4, u4, "Glock 17 900₪");
+            await settle();
+            await h4.sendPhoto("more", { userId: u4 });
+            h4.calls.length = 0;
+            await h4.pressButton(`done_media_${u4}`, { userId: u4, messageId: (await draftOf(u4))!.promptMessageId });
+            await settle();
+            assert.strictEqual(previews(h4).length, 1, "enough photos: Done goes to the preview");
+            assert.strictEqual((await draftOf(u4))!.step, "confirm");
+            cfg.minimumPhotos = 0;
+            console.log("  [OK] (k9) a missing price/title is asked for without an indicator; minimumPhotos asks for media.");
+        }
+
+        // (k10) validatePrice stays on: the parsed price is a plain number
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "Glock 17\nמכירה ב-800");
+            await settle();
+            assert.strictEqual((await draftOf(u))!.price, "800");
+            const u2 = user();
+            await single(h, u2, "Glock 900₪", "s2");
+            await settle();
+            assert.strictEqual((await draftOf(u2))!.price, "900");
+            console.log("  [OK] (k10) validatePrice on: parsed prices are numeric.");
+        }
+
+        // (k11) a WTB caption: matches in the DM, no draft, no preview
+        {
+            const stamp = new Date();
+            const tag = `zq${String(user()).slice(-5)}`;
+            const mk = (sellerId: string, title: string) => Listing.create({
+                source: "group", origin: "capture", chatId: APPROVED_GROUP, messageIds: [990_000 + Math.floor(Math.random() * 9000)], sellerId, title, text: `${title} למכירה`,
+                priceValue: 100, price: "100", media: [], isBundle: false, status: "live", hold: false, createdAt: stamp, refreshedAt: stamp,
+            });
+            await mk("someone-else", `Rifle ${tag} scope`);
+            const { h } = boot();
+            const mine = user();
+            await mk(String(mine), `Mine ${tag} own`);
+            cfg.buyerMatches = "off";
+            await single(h, mine, `מחפש ${tag}`);
+            await settle();
+            assert.strictEqual(await draftOf(mine), null, "no draft");
+            assert.strictEqual(previews(h).length, 0);
+            const reply = sent(h)[0];
+            assert.ok(text(reply).includes(`Rifle ${tag} scope`), text(reply));
+            assert.ok(!text(reply).includes("own"), "the user's own listing is not listed");
+            assert.strictEqual(reply.params.parse_mode, "HTML");
+            assert.ok(!text(reply).includes("/alerts"), "no alert hint with buyerMatches off");
+
+            const q = displayQuery(parseQuery(`מחפש ${tag}`).query);
+            cfg.buyerMatches = "on";
+            h.calls.length = 0;
+            await single(h, user(), `מחפש ${tag}`, "s3");
+            await settle();
+            assert.ok(text(sent(h)[0]).includes(T("dmAlertHint").replace("{query}", q)), text(sent(h)[0]));
+
+            h.calls.length = 0;
+            await single(h, user(), "מחפש nomatchzz77", "s4");
+            await settle();
+            assert.ok(text(sent(h)[0]).startsWith(T("buyerNoteEmpty")), text(sent(h)[0]));
+            cfg.buyerMatches = undefined;
+            console.log("  [OK] (k11) a WTB caption lists live matches (not the user's own), hints /alerts only with buyerMatches on, leaves no draft.");
+        }
+
+        // (k12) restart: a second controller finishes the album through /newpost then Continue; the old timer then finds nothing
+        {
+            const { h } = boot();
+            const u = user();
+            await album(h, u, `r${u}`, 0, "Glock 17 900₪ Haifa");
+            await settle();
+            const { h: h2 } = boot();
+            await h2.sendText("/newpost", { userId: u });
+            await settle();
+            assert.strictEqual(text(sent(h2)[0]), T("draftInProgress"));
+            const question = (await draftOf(u))!.promptMessageId;
+            h2.calls.length = 0;
+            await h2.pressButton(`draft_continue_${u}`, { userId: u, messageId: question });
+            await settle();
+            assert.strictEqual(previews(h2).length, 1, "Continue gives the preview");
+            await waitTimer();
+            assert.strictEqual(previews(h).length, 0, "the first controller's timer found nothing to do");
+            assert.strictEqual(previews(h2).length, 1, "still one preview");
+            assert.strictEqual((await draftOf(u))!.step, "confirm");
+            console.log("  [OK] (k12) restart mid-album: /newpost then Continue gives one preview; the old timer adds none.");
+        }
+
+        // (k13) a blocked word stops the preview, trusted sellers too
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "Glock 17 900₪ https://t.me/vipemployment_bot");
+            await settle();
+            assert.ok(sent(h).some((c) => text(c).includes("vipemployment_bot")), "the notice names the word");
+            assert.strictEqual(previews(h).length, 0);
+            assert.strictEqual((await draftOf(u))!.fixing, true);
+            assert.strictEqual(await Post.countDocuments({ userId: String(u) }), 0);
+
+            const trusted = user();
+            const earlier = await Post.create({ userId: String(trusted), title: "t", description: "d", price: "10", location: "l", media: [], status: "approved" });
+            postIds.push(String(earlier._id));
+            const { h: h2 } = boot();
+            await single(h2, trusted, "Glock 17 900₪ https://t.me/vipemployment_bot");
+            await settle();
+            assert.strictEqual((await draftOf(trusted))!.fixing, true, "trusted sellers are stopped too");
+            assert.strictEqual(previews(h2).length, 0);
+            assert.strictEqual(await Post.countDocuments({ userId: String(trusted), status: "pending" }), 0);
+            console.log("  [OK] (k13) a blocked word in the caption asks for the field again, trusted sellers included.");
+        }
+
+        // (k14) Confirm on a quick preview: a new seller goes to moderation, a trusted seller publishes at once
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "Glock 17 900₪");
+            await settle();
+            const post = await confirm(h, u, previews(h)[0]);
+            assert.strictEqual(post!.status, "pending");
+            assert.strictEqual(previews(h).filter((c) => Number(c.params.chat_id) === MOD_GROUP).length, 1, "moderation card");
+            assert.strictEqual(await draftOf(u), null);
+
+            const trusted = user();
+            const earlier = await Post.create({ userId: String(trusted), title: "t", description: "d", price: "10", location: "l", media: [], status: "approved" });
+            postIds.push(String(earlier._id));
+            const { h: h2 } = boot();
+            await single(h2, trusted, "Glock 17 900₪");
+            await settle();
+            const post2 = await Post.findOne({ userId: String(trusted), _id: { $ne: earlier._id } });
+            assert.strictEqual(post2, null, "nothing yet");
+            await confirm(h2, trusted, previews(h2)[0]);
+            const made = await Post.findOne({ userId: String(trusted), _id: { $ne: earlier._id } });
+            postIds.push(String(made!._id));
+            assert.strictEqual(made!.status, "approved");
+            assert.ok(previews(h2).some((c) => Number(c.params.chat_id) === APPROVED_GROUP), "published at once");
+            console.log("  [OK] (k14) Confirm: a new seller reaches moderation (pending), a trusted seller publishes at once.");
+        }
+
+        // (k15) /cancel inside the album window; a live draft; an expired draft
+        {
+            const { h } = boot();
+            const u = user();
+            await album(h, u, `c${u}`, 0, "Glock 17 900₪");
+            await settle();
+            await h.sendText("/cancel", { userId: u });
+            await settle();
+            h.calls.length = 0;
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "nothing after the delay");
+            assert.strictEqual(await draftOf(u), null);
+
+            // a live draft at the title step: a captioned photo is today's expectedText, no quick draft
+            const u2 = user();
+            await h.sendText("/newpost", { userId: u2 });
+            h.calls.length = 0;
+            await single(h, u2, "Glock 17 900₪", "s5");
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("expectedText")]);
+            const d2 = (await rawDraft(u2))!;
+            assert.deepStrictEqual([d2.quick, d2.step, d2.media.length], [undefined, "title", 0]);
+
+            // an expired draft + an album: one quick draft, no draftExpired
+            const u3 = user();
+            await h.sendText("/newpost", { userId: u3 });
+            await Draft.updateOne({ userId: String(u3) }, { $set: { updatedAt: new Date(Date.now() - 3 * 3600_000) } });
+            h.calls.length = 0;
+            await album(h, u3, `e${u3}`, 2, "Glock 17 900₪");
+            await waitTimer();
+            assert.ok(!sent(h).some((c) => text(c) === T("draftExpired")), "no draftExpired");
+            assert.strictEqual(previews(h).length, 1);
+            const d3 = (await rawDraft(u3))!;
+            assert.deepStrictEqual([d3.quick, d3.step, d3.media.length], [true, "confirm", 3]);
+            assert.strictEqual(await Draft.countDocuments({ userId: String(u3) }), 1);
+            console.log("  [OK] (k15) /cancel in the window leaves nothing; a live draft keeps expectedText; an expired draft is replaced.");
+        }
+
+        // (k16) a late album item after the preview; ignored messages
+        {
+            const { h } = boot();
+            const u = user();
+            const gid = `l${u}`;
+            await h.message(photo("a0"), { userId: u, mediaGroupId: gid, caption: "Glock 17 900₪" });
+            await h.message(photo("a1"), { userId: u, mediaGroupId: gid });
+            await settle();
+            await waitTimer();
+            assert.strictEqual(previews(h).length, 1);
+            const d = (await draftOf(u))!;
+            h.calls.length = 0;
+            await h.message(photo("a2"), { userId: u, mediaGroupId: gid });
+            await settle();
+            assert.strictEqual(calls(h, "editMessageText").length, 1, "the preview is edited");
+            assert.strictEqual(Number(calls(h, "editMessageText")[0].params.message_id), d.promptMessageId);
+            assert.strictEqual(sent(h).length, 0, "no expectedText");
+            assert.strictEqual((await draftOf(u))!.media.length, 3);
+
+            // text only, and a bare photo: not ours
+            const u2 = user();
+            h.calls.length = 0;
+            await h.sendText("hello there", { userId: u2 });
+            await h.sendPhoto("lonely", { userId: u2 });
+            await settle();
+            assert.strictEqual(outbound(h).length, 0);
+            assert.strictEqual(await draftOf(u2), null);
+            console.log("  [OK] (k16) a late album item grows the media and redraws the preview; text and a bare photo create nothing.");
+        }
+
+        // (k17) /start sell: key on, no draft -> the hint; live draft -> Continue / Start over; key off -> the title prompt
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("/start sell", { userId: u });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("quickSellHint")]);
+            assert.strictEqual(await draftOf(u), null);
+            await h.sendText("/newpost", { userId: u });
+            h.calls.length = 0;
+            await h.sendText("/start sell", { userId: u });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("draftInProgress")]);
+            console.log("  [OK] (k17) /start sell: the hint, or the Continue / Start over question.");
+        }
+
+        // (k18) key off: an album with a caption is nothing, /start sell is the title prompt
+        {
+            cfg.quickListing = false;
+            const { h } = boot();
+            const u = user();
+            await album(h, u, `o${u}`, 0, "Glock 17 900₪");
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "no reply");
+            assert.strictEqual(await draftOf(u), null, "no draft");
+            await h.sendText("/start sell", { userId: u });
+            await settle();
+            assert.ok(text(sent(h)[0]).includes(T("welcome")), "the title prompt");
+            assert.strictEqual((await draftOf(u))!.step, "title");
+            cfg.quickListing = true;
+            console.log("  [OK] (k18) key off: an album with a caption is ignored; /start sell asks for the title.");
+        }
     } finally {
         cfg.quickListing = wasQuick;
+        cfg.minimumPhotos = wasMin;
+        cfg.buyerMatches = wasMatches;
     }
 }
