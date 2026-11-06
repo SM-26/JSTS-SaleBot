@@ -5,7 +5,7 @@ import draftRepository from "../repositories/draftRepository";
 import savedSearchRepository from "../repositories/savedSearchRepository";
 import userRepository from "../repositories/userRepository";
 import type { BotConfig, UserSession } from "../types";
-import { buildAlertsList, parseAlertArg } from "./buyerCards";
+import { buildAlertsList, describeSearch, parseAlertArg } from "./buyerCards";
 import type { Translate } from "./listingCards";
 import { localeService } from "./localeService";
 import { isSearchable, parseQuery } from "./matchService";
@@ -13,8 +13,8 @@ import { isSearchable, parseQuery } from "./matchService";
 const MAX_SEARCHES = 5;
 const FIX_WINDOW_MS = 3600_000;
 
-const listCard = (t: Translate, rows: { _id: unknown; query: string; maxPrice?: number; expiresAt: Date }[]) =>
-    buildAlertsList(t, rows.map((s) => ({ id: String(s._id), query: s.query, maxPrice: s.maxPrice, expiresAt: s.expiresAt })));
+const listCard = (t: Translate, rows: { _id: unknown; query: string; maxPrice?: number; meetup?: boolean; expiresAt: Date }[]) =>
+    buildAlertsList(t, rows.map((s) => ({ id: String(s._id), query: s.query, maxPrice: s.maxPrice, meetup: s.meetup, expiresAt: s.expiresAt })));
 
 // A buyer's saved searches in the DM: the s_ link, /alerts, the one-reply fix and the al_ buttons.
 // `session` is the UserSession data of the chat; it is mutated inside the middleware chain only.
@@ -64,7 +64,7 @@ export class SavedSearchService {
         const from = String(msg.from!.id);
         const q = parseQuery(text);
         const send = async (key: string): Promise<number> =>
-            (await this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: q.query }) })).message_id;
+            (await this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: describeSearch(t, q) }) })).message_id;
         if (!isSearchable(q)) {
             const promptId = await send("alertNotSearchable");
             if (session) session.pendingAlertFix = { promptId, at: Date.now() };
@@ -73,10 +73,14 @@ export class SavedSearchService {
         const now = new Date();
         const mine = await savedSearchRepository.findByUser(from, now);
         if (mine.length >= MAX_SEARCHES && !mine.some((s) => s.query === q.query)) {
+            if (session) delete session.pendingAlertFix;
             await send("alertLimit");
             return;
         }
-        const row = await savedSearchRepository.upsert(from, q, now);
+        const existing = mine.find((s) => s.query === q.query);
+        // the same query again carries a possibly new ceiling or meeting point; an identical press must not move the scan cursor
+        const changed = existing && (existing.maxPrice !== q.maxPrice || existing.meetup !== q.meetup);
+        const row = (changed && await savedSearchRepository.update(String(existing._id), q, now)) || existing || await savedSearchRepository.upsert(from, q, now);
         const promptId = await send("alertSaved");
         if (session) session.pendingAlertFix = { searchId: String(row._id), promptId, at: Date.now() };
     }
@@ -95,8 +99,12 @@ export class SavedSearchService {
 
         const t = await this.translatorFor(from);
         const q = parseQuery(msg.text);
-        const reply = (key: string) => this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: q.query }) });
+        const reply = (key: string) => this.api.sendMessage({ chat_id: msg.chat.id, text: t(key, { query: describeSearch(t, q) }) });
         if (!isSearchable(q)) {
+            if (pending.searchId) { // a thanks after saving, not a failed attempt
+                delete session.pendingAlertFix;
+                return false;
+            }
             await reply("alertNotSearchable");
             return true;
         }

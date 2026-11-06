@@ -12,6 +12,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import type { BotConfig } from "../types";
 import { AlertService } from "../services/alertService";
+import { sendNote } from "../services/ephemeralNotes";
 import { BuyerNoteService } from "../services/buyerNoteService";
 import { classify } from "../services/classifier";
 import type { GroupListingService } from "../services/groupListingService";
@@ -52,6 +53,13 @@ function checkPure() {
     assert.deepStrictEqual(matchListings(parseQuery("מחפש glock בבית דגן"), [far, bd, mu]).sort(), ["bd", "mu"], "meetup query keeps only meeting-point listings");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש glock"), [far, bd]).sort(), ["bd", "far"], "no meetup filter without the phrase");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש כוונת 0501234567"), [L("p", "כוונת 050 במצב טוב")]), [], "a phone number is not matched on");
+
+    // a budget number is not a model name: a named term (glock, m4) decides, numbers only rank
+    const budget = parseQuery("מחפש גלוק 17, תקציב 800 שח");
+    assert.deepStrictEqual(matchListings(budget, [L("v", "וסט טקטי 800"), L("s", "כוונת 17")]), [], "800 and 17 alone do not match when a model is named");
+    assert.deepStrictEqual(matchListings(budget, [L("g", "glock 19")]), ["g"]);
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש M4 בתקציב 1500"), [L("ak", "ak 1500")]), [], "a budget is not a model");
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש 1911"), [L("c", "1911 מצוין")]), ["c"], "a number alone is still strong");
     console.log("[OK] buyer query parsing and matching.");
 }
 
@@ -197,6 +205,12 @@ async function checkBuyerNote() {
         const url = (p.reply_markup as { inline_keyboard: { url: string }[][] }).inline_keyboard[0][0].url;
         assert.ok(/start=s_[0-9a-f]{24}$/.test(url), "alert button deep link");
         assert.ok(await noted(row), "buyerNoteAt set");
+        assert.strictEqual(p.parse_mode, "HTML");
+        assert.deepStrictEqual(p.link_preview_options, { is_disabled: true });
+        const plain = createHarness();
+        await sendNote(plain.bot.api, { approvedGroupId: CHAT } as BotConfig, Number(poster), { text: "x", keyboard: [] });
+        assert.strictEqual(sends(plain)[0].params.parse_mode, undefined, "a plain card has no parse_mode");
+        assert.strictEqual(sends(plain)[0].params.link_preview_options, undefined, "and no preview option");
 
         // zero matches
         await reset();
@@ -204,6 +218,13 @@ async function checkBuyerNote() {
         await svc.onClassified(await event(await newRow(), {}, []), now);
         assert.strictEqual(sends(h).length, 1);
         assert.ok(String(sends(h)[0].params.text).startsWith("Nothing on the market"), "empty note text");
+
+        // a wanted post the bot cannot search: no note, no gap started
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await svc.onClassified(await event(await newRow(), { text: "מחפש וסט" }, []), now);
+        assert.strictEqual(sends(h).length, 0, "unsearchable: no note");
+        assert.strictEqual((await Member.findOne({ userId: poster }))?.lastBuyerNoteAt, undefined, "and no lastBuyerNoteAt");
 
         // real matches through processOneClosed: the poster's own listing is left out
         await reset();
@@ -327,7 +348,7 @@ async function checkSavedSearchDm() {
         const after = await rows(u1);
         assert.strictEqual(after.length, 1);
         assert.strictEqual(after[0].query, "glock 19", "same row, query changed");
-        assert.strictEqual(lastText(), t("alertUpdated"));
+        assert.strictEqual(lastText(), "Alert updated: glock 19.");
         await say("glock 26", { userId: u1 });
         assert.strictEqual((await rows(u1))[0].query, "glock 19", "pending was cleared");
 
@@ -344,7 +365,6 @@ async function checkSavedSearchDm() {
 
         // pending older than an hour is ignored
         await Draft.deleteMany({ userId: String(u1) });
-        await say("glock 43", { userId: u3 }); // u3 has no pending: warm-up no-op
         await say(`/start s_${await cap(u2, WANT)}`, { userId: u2 });
         const realNow = Date.now;
         Date.now = () => realNow() + 2 * 3600_000;
@@ -355,6 +375,35 @@ async function checkSavedSearchDm() {
         }
         assert.deepStrictEqual((await rows(u2)).map((r) => r.query), ["glock 17"], "an hour-old fix is ignored");
 
+        // a new ceiling on an existing search is written
+        await SavedSearch.deleteMany({ userId: String(u2) });
+        await say("/alerts m4 עד 2000", { userId: u2 });
+        await say("/alerts m4 עד 800", { userId: u2 });
+        let m4 = await rows(u2);
+        assert.strictEqual(m4.length, 1, "one row");
+        assert.strictEqual(m4[0].maxPrice, 800, "the new ceiling replaced the old");
+        await say("/alerts m4", { userId: u2 });
+        m4 = await rows(u2);
+        assert.strictEqual(m4.length, 1);
+        assert.strictEqual(m4[0].maxPrice, undefined, "no ceiling: it is gone");
+
+        // a stray text after saving clears the pending fix and says nothing
+        await say("תודה", { userId: u2 });
+        assert.ok(!sent().some((c) => String(c.params.text) === t("alertNotSearchable")), "no alertNotSearchable reply");
+        await say("glock 77", { userId: u2 });
+        assert.deepStrictEqual((await rows(u2)).map((r) => r.query), ["m4"], "the next searchable text changes nothing");
+
+        // fix reply: a text that duplicates another row, and shadow mode clears the pending fix
+        await say("/alerts cz 75", { userId: u2 });
+        await say("/alerts mp5", { userId: u2 });
+        await say("cz 75", { userId: u2 });
+        assert.strictEqual(lastText(), t("alertDuplicate"));
+        controller.config.buyerMatches = "shadow";
+        await say("glock 98", { userId: u2 });
+        controller.config.buyerMatches = "on";
+        await say("glock 97", { userId: u2 });
+        assert.deepStrictEqual((await rows(u2)).map((r) => r.query).sort(), ["cz 75", "m4", "mp5"], "shadow cleared the pending fix; nothing changed");
+
         // limit
         await SavedSearch.deleteMany({ userId: String(u2) });
         for (const m of ["glock 17", "cz 75", "sig 226", "beretta 92", "glock 34"]) await say(`/alerts ${m}`, { userId: u2 });
@@ -364,6 +413,11 @@ async function checkSavedSearchDm() {
         assert.strictEqual((await rows(u2)).length, 5, "still five");
         await say("/alerts glock 17", { userId: u2 });
         assert.notStrictEqual(lastText(), t("alertLimit"), "an existing query is a duplicate, not a sixth");
+        const before = (await rows(u2)).map((r) => r.query);
+        await say("/alerts ak", { userId: u2 });
+        assert.strictEqual(lastText(), t("alertLimit"));
+        await say("ak 47", { userId: u2 });
+        assert.deepStrictEqual((await rows(u2)).map((r) => r.query), before, "the limit message cleared the older pending fix");
 
         // /alerts list: own rows only, a bin per row
         await say("/alerts", { userId: u2 });

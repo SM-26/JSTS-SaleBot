@@ -32,13 +32,16 @@ export const isSearchable = (q: Pick<BuyerQuery, "terms">): boolean => q.terms.s
 export function matchListings(q: Pick<BuyerQuery, "terms" | "maxPrice" | "meetup">, listings: MatchListing[], max = 5): string[] {
     const strong = q.terms.filter(isStrong);
     if (!strong.length) return [];
+    // a budget ("תקציב 800") is a bare number: when the query names a model (glock, m4), only the names decide; numbers still rank
+    const named = strong.filter(s => /\p{L}/u.test(s));
+    const decisive = named.length ? named : strong;
 
     return listings
         .filter(l => q.maxPrice === undefined || (l.priceValue !== undefined && l.priceValue <= q.maxPrice))
         .filter(l => !q.meetup || l.meetup === true || (l.location !== undefined && normalize(l.location) === MEETUP))
         .map(l => {
             const t = tokens([l.title, l.text].filter(Boolean).join("\n"));
-            return { id: String(l._id), refreshedAt: l.refreshedAt.getTime(), shared: strong.some(s => t.includes(s)), overlap: tokenOverlap(q.terms, t) };
+            return { id: String(l._id), refreshedAt: l.refreshedAt.getTime(), shared: decisive.some(s => t.includes(s)), overlap: tokenOverlap(q.terms, t) };
         })
         .filter(l => l.shared)
         .sort((a, b) => b.overlap - a.overlap || b.refreshedAt - a.refreshedAt)

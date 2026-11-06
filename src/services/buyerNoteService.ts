@@ -8,6 +8,7 @@ import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord } from "./blockedWords";
 import { buildBuyerNote, type ListingLine } from "./buyerCards";
+import { isSearchable, parseQuery } from "./matchService";
 import { sendNote } from "./ephemeralNotes";
 import type { GroupListingService } from "./groupListingService";
 import { localeService } from "./localeService";
@@ -40,6 +41,7 @@ export class BuyerNoteService {
     async onClassified({ capture, result, shadowId, matches }: ClassifiedEvent, now: Date): Promise<void> {
         try {
             if (this.config.buyerMatches !== "on" || result.tier !== "wtb" || capture.chatId !== this.config.approvedGroupId) return;
+            if (!isSearchable(parseQuery(capture.text))) return; // nothing to search for, so nothing to say
             const member = await memberRepository.findByUserId(capture.senderId);
             if (member?.askMode === "never") return;
             if (member?.lastBuyerNoteAt && now.getTime() - member.lastBuyerNoteAt.getTime() < NOTE_GAP_MS) return;

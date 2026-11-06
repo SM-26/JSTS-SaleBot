@@ -4,7 +4,7 @@ import {
     buildAskNote, buildEndedCard, buildManagementCard, buildNeverNote, escapeHtml,
     parseCaptureArg, parseListingArg, type Card,
 } from "../services/listingCards";
-import { alertActionData, buildAlertCard, buildAlertsList, buildBuyerNote, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
+import { alertActionData, displayQuery, buildAlertCard, buildAlertsList, buildBuyerNote, buildRenewOffer, parseAlertArg } from "../services/buyerCards";
 
 /** Pure card builders and callback_data codecs; no Mongo, no config. Run: pnpm run check-cards */
 
@@ -108,6 +108,11 @@ assert.strictEqual(parseCaptureArg("set_ask"), null);
     assert.deepStrictEqual(parseAlertArg(`${ID}_d`), { searchId: ID, action: "d" });
     assert.strictEqual(parseAlertArg(`${ID}_x`), null);
     assert.strictEqual(alertActionData(ID, "r"), `al_${ID}_r`);
+    assert.strictEqual(displayQuery("בירושלימ ומשלוח לחיפה"), "בירושלים ומשלוח לחיפה");
+    assert.strictEqual(displayQuery("glock 17"), "glock 17");
+    assert.strictEqual(displayQuery("a b c d e f g h i j"), "a b c d e f");
+    const raw = buildBuyerNote(t, [{ title: "", price: "<500", date: "2026-11-01" }], ID, BOT).text;
+    assert(!raw.includes("<500") && raw.includes("&lt;500"), "an empty title leaves the price escaped");
 }
 
 // callback_data size
