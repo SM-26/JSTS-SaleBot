@@ -179,6 +179,14 @@ class ListingRepository {
         return Listing.find({ status: "live", hold: false }).exec();
     }
 
+    findLiveRefreshedSince(since: Date): Promise<IListing[]> {
+        return Listing.find({ status: "live", hold: false, refreshedAt: { $gte: since } }).exec();
+    }
+
+    findByIds(ids: string[]): Promise<IListing[]> {
+        return Listing.find({ _id: { $in: ids } }).exec();
+    }
+
     findSellerRecent(sellerId: string, since: Date): Promise<IListing[]> {
         return Listing.find({ sellerId, status: { $in: ["live", "expired"] }, refreshedAt: { $gte: since } }).exec();
     }
