@@ -20,7 +20,6 @@ export const EXPIRE_AFTER_DAYS = 30;
 export const STALE_ANSWER_DAYS = 7;
 export const NUDGE_BATCH = 25;
 export const HELD_RELEASE_DELAY_MS = 120_000;
-export const NEW_SELLER_DAYS = 30;
 
 export type LifecycleOutcome = "ok" | "ended" | "forbidden" | "not_found" | "not_allowed";
 export interface LifecycleResult {

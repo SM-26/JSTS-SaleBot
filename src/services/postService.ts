@@ -51,7 +51,7 @@ export class PostService {
     // plain objects because RichTextBuilder.build() always wraps in an array.
     formatPostRichMessage(
         data: PostData,
-        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string } } = {}
+        opts: { sold?: boolean; showCta?: boolean; previewLabel?: string; link?: { label: string; url: string }; trustLine?: string } = {}
     ): InputRichMessage {
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
@@ -64,6 +64,7 @@ export class PostService {
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
                 richListItem(b => b.paragraph(`📍 ${data.location}`)),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
+                ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
 
         const addMedia = (b: RichMessageBuilder, m: MediaItem) =>

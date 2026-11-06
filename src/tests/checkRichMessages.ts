@@ -309,13 +309,37 @@ function checkEntities(): number {
     return cases.length + 1;
 }
 
+function goldenPostWithTrust(config: BotConfig, data: PostData, opts: Opts, trustLine: string): unknown {
+    const golden = goldenPost(config, data, opts) as { blocks: { type: string; items?: unknown[] }[] };
+    const list = golden.blocks.find(b => b.type === "list")!;
+    list.items!.splice(3, 0, { blocks: [{ type: "paragraph", text: trustLine }] });
+    return golden;
+}
+
+function checkPostsWithTrust(): number {
+    const trustLine = "🤝 3 sales · in the market since November 2026";
+    const service = new PostService({} as unknown as Api, baseConfig);
+    let cases = 0;
+    for (const media of [[], [photo(1)], [photo(1), photo(2), photo(3)]]) {
+        for (const user of [{ username: "seller_name", firstName: "Sam" }, { firstName: "Sam" }]) {
+            const data: PostData = { title: "T", description: "D", price: "1", location: "L", media, userId: 42, ...user };
+            const opts: Opts = { sold: false, showCta: true };
+            assertSame(service.formatPostRichMessage(data, { ...opts, trustLine }), goldenPostWithTrust(baseConfig, data, opts, trustLine), `post+trust [${media.length}, ${JSON.stringify(user)}]`);
+            assertSame(service.formatPostRichMessage(data, { ...opts, trustLine: undefined }), goldenPost(baseConfig, data, opts), "post [trustLine undefined]");
+            cases += 2;
+        }
+    }
+    return cases;
+}
+
 function run() {
     console.log("[INFO] Checking rich message wire JSON against the hand-built reference...");
     const posts = checkPosts();
+    const trusted = checkPostsWithTrust();
     const help = checkHelp();
     const reports = checkReport();
     const entities = checkEntities();
-    console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${help} help, ${reports} report cases; ${entities} entity cases).`);
+    console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${trusted} trust-line, ${help} help, ${reports} report cases; ${entities} entity cases).`);
 }
 
 run();

@@ -9,6 +9,7 @@ import { GroupListingService } from "./groupListingService";
 import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
 import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
+import { safeTrustLine } from "./trustService";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
 
@@ -140,7 +141,14 @@ export class MyPostsService {
         }
         const active = listing.status === "live" || listing.status === "expired";
         if (listing.source === "group") {
-            await sendCard(active ? buildManagementCard(t, listing, { surface: "c" }) : buildEndedCard(t, listing));
+            if (!active) {
+                await sendCard(buildEndedCard(t, listing));
+                return;
+            }
+            const card = buildManagementCard(t, listing, { surface: "c" });
+            const trustLine = await safeTrustLine(userId, locale, "showListingCard");
+            await sendCard(trustLine ? { ...card, text: `${card.text}
+${trustLine}` } : card);
             return;
         }
         const post = listing.status === "live" && listing.postId ? await postRepository.findById(listing.postId) : null;
@@ -161,7 +169,7 @@ export class MyPostsService {
             userId: Number(post.userId),
             username: user?.userName || undefined,
             firstName: user?.firstName || "User",
-        });
+        }, { trustLine: await safeTrustLine(post.userId, locale, "sendApprovedPostDetail") });
 
         const buttons = [[
             { text: localeService.t(locale, 'markSoldButton'), callback_data: `sold_${post._id}` },
@@ -305,6 +313,7 @@ export class MyPostsService {
 
         // Fetch user for formatting
         const postUser: User | null = await userRepository.findByUserId(post.userId);
+        const trustLine = await safeTrustLine(post.userId, this.config.lang, "handleBumpCallback");
         const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
@@ -315,7 +324,7 @@ export class MyPostsService {
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
-        }, { showCta: true });
+        }, { showCta: true, trustLine });
 
         const newMessageId = await this.postService.sendToApproved(richMessage);
 

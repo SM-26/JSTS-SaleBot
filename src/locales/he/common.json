@@ -194,5 +194,6 @@
     "captureDraftBusy": "יש לכם פוסט בתהליך. סיימו אותו או שלחו /cancel, ואז פתחו את הקישור שוב.",
     "capturePublished": "נוסף לשוק.",
     "nudgeAsk": "עדיין למכירה? {title} · {price}",
-    "nudgeStillButton": "✅ עדיין למכירה"
+    "nudgeStillButton": "✅ עדיין למכירה",
+    "trustLine": "🤝 {n} מכירות · בשוק מאז {since}"
 }

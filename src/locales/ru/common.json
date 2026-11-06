@@ -194,5 +194,6 @@
     "captureDraftBusy": "У вас есть неоконченный пост. Завершите его или отправьте /cancel, затем откройте ссылку снова.",
     "capturePublished": "Добавлено на рынок.",
     "nudgeAsk": "Ещё продаётся? {title} · {price}",
-    "nudgeStillButton": "✅ Ещё продаётся"
+    "nudgeStillButton": "✅ Ещё продаётся",
+    "trustLine": "🤝 {n} продаж · на рынке с {since}"
 }

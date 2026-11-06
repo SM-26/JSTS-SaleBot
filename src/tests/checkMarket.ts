@@ -17,7 +17,8 @@ import { LifecycleService } from "../services/lifecycleService";
 import { asPostService, plusDays, fakeApi, seedPost, stubPostService, T0 as LT0 } from "./lifecycleFakes";
 import { LEGACY_CUTOFF, reconcileBotListings } from "../services/marketService";
 import { rankMatches } from "../services/matchService";
-import { isTrustedSeller, TRUST_REVOKE_MS } from "../services/trustService";
+import { formatSince, isTrustedSeller, trustLineFor, TRUST_REVOKE_MS } from "../services/trustService";
+import User from "../models/User";
 import { tick } from "../services/shadowService";
 import { startSweeper } from "../services/sweeper";
 import type { BotConfig, Post } from "../types";
@@ -1008,6 +1009,34 @@ async function run() {
             await PostModel.deleteMany({ userId: /^1\d{5}$/ });
             console.log("[OK] nudge, expiry and held nudges.");
         }
+
+        // slice 3: trust line
+        {
+            const DAYS = 24 * 3600 * 1000;
+            const NOW = new Date("2027-01-15T12:00:00Z");
+            const ago = (d: number) => new Date(NOW.getTime() - d * DAYS);
+            const P = `${RUN}-tl`;
+            const lst = (seller: string, extra: Record<string, unknown>) => Listing.create({
+                source: "group", origin: "capture", sellerId: `${P}-${seller}`, chatId: CHAT, messageIds: [1],
+                title: "t", text: "x", media: [{ fileId: "f", type: "photo" }], status: "live", createdAt: NOW, refreshedAt: NOW, ...extra,
+            });
+            await Member.create({ userId: `${P}-new`, firstSeenAt: ago(10), askMode: "ask" });
+            assert.strictEqual(await trustLineFor(`${P}-new`, "en", NOW), null, "trust line hidden for a new seller");
+            await Member.create({ userId: `${P}-vet`, firstSeenAt: ago(90), askMode: "ask" });
+            assert.strictEqual(await trustLineFor(`${P}-vet`, "en", NOW), `🤝 0 sales · in the market since ${formatSince(ago(90), "en")}`, "trust line shown for a veteran with no sales");
+            await lst("sold", { status: "sold" });
+            await lst("sold", { status: "sold", source: "bot", origin: "legacy", chatId: undefined, messageIds: [], postId: `${P}-p` });
+            await lst("sold", { status: "live" });
+            const line = await trustLineFor(`${P}-sold`, "en", NOW);
+            assert.ok(line !== null && line.startsWith("🤝 2 sales"), "trust line counts sold across sources");
+            await Member.create({ userId: `${P}-ear`, firstSeenAt: ago(20), askMode: "ask" });
+            await User.create({ userId: `${P}-ear`, authLevel: 0, createdAt: ago(200) });
+            await PostModel.create({ userId: `${P}-ear`, title: "t", description: "d", price: "1", location: "l", media: [], status: "pending", createdAt: ago(100) });
+            const earLine = await trustLineFor(`${P}-ear`, "en", NOW);
+            assert.strictEqual(earLine, `🤝 0 sales · in the market since ${formatSince(ago(200), "en")}`, "since is the earliest");
+            assert.strictEqual(formatSince(new Date("2026-11-15T00:00:00Z"), "en"), "November 2026");
+            console.log("[OK] trust line.");
+        }
     } finally {
         const like = new RegExp(`^${RUN}`);
         await Promise.all([
@@ -1015,6 +1044,7 @@ async function run() {
             Listing.deleteMany({ sellerId: like }),
             PostModel.deleteMany({ userId: like }),
             Member.deleteMany({ userId: like }),
+            User.deleteMany({ userId: like }),
             Draft.deleteMany({ userId: like }),
             ShadowLog.deleteMany({ chatId: CHAT }),
         ]);

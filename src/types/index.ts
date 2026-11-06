@@ -43,6 +43,7 @@ export interface LocaleStrings {
     welcome: string;
     wizardStep: string;
     contactSellerCta: string;
+    trustLine: string;
     enterDescription: string;
     enterPrice: string;
     expectedText: string;

@@ -194,5 +194,6 @@
     "captureDraftBusy": "You have a post in progress. Finish it or send /cancel, then open the link again.",
     "capturePublished": "Added to the market.",
     "nudgeAsk": "Still for sale? {title} · {price}",
-    "nudgeStillButton": "✅ Still for sale"
+    "nudgeStillButton": "✅ Still for sale",
+    "trustLine": "🤝 {n} sales · in the market since {since}"
 }
