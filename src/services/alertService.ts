@@ -57,7 +57,7 @@ export class AlertService {
         const media = listing.media[0];
         if (media) {
             try {
-                const base = { chat_id: Number(userId), caption: card.text, parse_mode: "HTML" as const };
+                const base = { chat_id: Number(userId), caption: card.text, parse_mode: "HTML" as const, ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) };
                 if (media.type === "video") await this.api.sendVideo({ ...base, video: media.fileId });
                 else await this.api.sendPhoto({ ...base, photo: media.fileId });
                 return;

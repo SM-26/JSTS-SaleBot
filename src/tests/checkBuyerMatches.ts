@@ -542,6 +542,21 @@ async function checkAlerts() {
             if (rows) assert.ok(kb[0][0].url.endsWith("?start=faq_1"));
         }
 
+        // media alerts: the photo call carries the meetup button; a plain one has no reply_markup
+        for (const meetup of [true, false]) {
+            await reset();
+            ({ h, svc } = mkSvc("on", undefined));
+            const svc3 = new AlertService(h.bot.api, { lang: "en", buyerMatches: "on" } as BotConfig, groupListings, () => "testbot");
+            await search(u1);
+            await mkListing(`al-${U}-ph`, "Glock 17 pic", { media: [{ type: "photo", fileId: "f1" }], ...(meetup ? { meetup: true } : {}) });
+            await svc3.tick(new Date());
+            const photo = to(h, u1, "sendPhoto")[0];
+            assert.ok(photo, "sendPhoto call");
+            const kb = (photo.params.reply_markup as { inline_keyboard: { url: string }[][] } | undefined)?.inline_keyboard;
+            if (meetup) assert.ok(kb![0][0].url.endsWith("?start=faq_1"), "photo alert keeps the faq_1 button");
+            else assert.strictEqual(photo.params.reply_markup, undefined);
+        }
+
         // off and shadow
         for (const mode of ["off", "shadow"] as const) {
             await reset();
