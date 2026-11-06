@@ -62,6 +62,12 @@ class UserRepository {
         ).exec();
     }
 
+    // /verify and /unverify: the verified mark. Unverify removes the fields again.
+    async setVerified(userId: string, by: string | null): Promise<IUser | null> {
+        const update = by ? { $set: { verifiedAt: new Date(), verifiedBy: by } } : { $unset: { verifiedAt: 1, verifiedBy: 1 } };
+        return User.findOneAndUpdate({ userId }, update, { returnDocument: "after", strict: false }).exec();
+    }
+
     async getAll(): Promise<IUser[]> {
         return User.find().exec();
     }

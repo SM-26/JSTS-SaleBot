@@ -105,6 +105,7 @@ Every published post card carries **🚫 Take down** (when its listing exists). 
 | Command | Description |
 | :--- | :--- |
 | `/promote` | Increase a user's authorization level (e.g., User to Moderator, Moderator to Admin). |
+| `/verify <user>` / `/unverify <user>` | Admin: set or clear the ✅ verified mark. Verified sellers (and 🏅 top sellers, earned at 60% sold of at least 3 ended listings) publish in a richer post layout. |
 | `/demote` | Decrease a user's authorization level (e.g., Admin to Moderator, Moderator to User). |
 | `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |

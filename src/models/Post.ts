@@ -33,6 +33,8 @@ export interface IPost extends Document {
     rejectionReason?: string;
     rejectionNotifiedAt?: Date | null;
     meetup?: boolean;
+    // Only the /test "Post as <tier>" cases set it: this post uses that tier's layout whatever the seller's own tier is.
+    layoutTier?: "regular" | "top" | "verified" | "both";
 }
 
 const mediaItemSchema = new Schema<IMediaItem>({
@@ -61,6 +63,7 @@ const postSchema = new Schema<IPost>({
     descriptionEntities: { type: [entitySchema], default: undefined },
     location: { type: String, default: "" },
     meetup: { type: Boolean },
+    layoutTier: { type: String, enum: ["regular", "top", "verified", "both"] },
     media: [mediaItemSchema],
     createdAt: { type: Date, default: Date.now },
     isExpired: { type: Boolean, default: false },

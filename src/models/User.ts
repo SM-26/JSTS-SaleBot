@@ -10,6 +10,8 @@ export interface IUser extends Document {
     languageCode: string | null;
     preferredLocale: string | null;
     createdAt?: Date;
+    verifiedAt?: Date;
+    verifiedBy?: string;
 }
 
 const userSchema = new Schema<IUser>(
@@ -26,6 +28,9 @@ const userSchema = new Schema<IUser>(
         },
         languageCode: { type: String, default: null },
         preferredLocale: { type: String, default: null },
+        // Hand-picked by an admin (/verify). Optional and additive: older images ignore it.
+        verifiedAt: { type: Date },
+        verifiedBy: { type: String },
     },
     { timestamps: true, versionKey: false }
 );

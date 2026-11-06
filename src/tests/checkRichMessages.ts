@@ -108,7 +108,7 @@ function goldenHelp(t: (key: string) => string, authLevel: AuthLevel, config: { 
         blocks.push(
             { type: "divider" },
             heading("helpAdminSection", 3),
-            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"].map(cmd) },
+            { type: "list", items: ["helpConfig", "helpActiveUsers", "helpPromote", "helpDemote", "helpVerify", "helpUnverify", "helpBroadcastTopic", "helpBroadcastUsers", "helpTest", "helpLabel", "helpStalecheck"].map(cmd) },
         );
     }
 
@@ -365,6 +365,46 @@ function checkMeetup(): number {
     return 11;
 }
 
+// Tier layouts (V, G4, X2): goldens live in tierLayouts.golden.json. Regenerate with UPDATE_GOLDEN=1 and review the diff.
+function checkTierLayouts(): number {
+    const goldenPath = path.join(__dirname, "tierLayouts.golden.json");
+    const service = new PostService({} as unknown as Api, { ...baseConfig, lang: "he" }, () => "bot");
+    const data: PostData = {
+        title: "Hello Kitty 1911 GBB", description: "מצב מצוין, ירה כמה מחסניות בלבד.\nכולל 2 מחסניות.", price: "1,200 ₪",
+        location: "מרכז", meetup: true, media: [photo(1), photo(2), photo(3)], userId: 7, username: "SM_26", firstName: "SM",
+    };
+    const stats = { sold: 12, since: "נובמבר 2026" };
+    const built: Record<string, unknown> = {};
+    for (const tier of ["top", "verified", "both"] as const) {
+        for (const sold of [false, true]) built[`${tier}${sold ? "-sold" : ""}`] = service.formatPostRichMessage(data, { tier, stats, sold });
+        built[`${tier}-nouser`] = service.formatPostRichMessage({ ...data, username: undefined }, { tier, stats });
+    }
+    if (process.env.UPDATE_GOLDEN) fs.writeFileSync(goldenPath, JSON.stringify(built, null, 2) + "\n");
+    const golden = JSON.parse(fs.readFileSync(goldenPath, "utf-8")) as Record<string, unknown>;
+    assert.deepStrictEqual(Object.keys(golden).sort(), Object.keys(built).sort(), "tier golden keys");
+    for (const [name, msg] of Object.entries(built)) assert.strictEqual(JSON.stringify(msg), JSON.stringify(golden[name]), `tier layout [${name}]`);
+
+    type B = { type: string; text?: unknown; buttons?: unknown[] };
+    const blocks = (m: unknown) => (m as { blocks: B[] }).blocks;
+    for (const [name, msg] of Object.entries(built)) {
+        const s = JSON.stringify(msg);
+        assert.ok(!s.includes("נקודת מפגש"), `${name}: no meeting-point wording`);
+        assert.ok(blocks(msg).some(b => b.type === "slideshow"), `${name}: slideshow of all photos`);
+        assert.ok(blocks(msg).some(b => b.type === "details"), `${name}: foldable description`);
+        assert.ok(!blocks(msg).some(b => b.type === "blockquote"), `${name}: no quote`);
+        assert.ok(s.includes("start=faq_1"), `${name}: location words link to the FAQ`);
+        assert.strictEqual(s.includes("https://t.me/SM_26"), !name.includes("sold") && !name.includes("nouser") && !name.startsWith("top"), `${name}: contact button only when open, with a username, not on top`);
+        assert.strictEqual(s.includes("strikethrough"), name.includes("sold"), `${name}: struck through only when sold`);
+        assert.strictEqual(s.includes("🔴"), name.includes("sold"), `${name}: sold line`);
+    }
+    assert.ok(JSON.stringify(built.both).includes("⭐"), "both has the banner");
+    assert.ok(!JSON.stringify(built.verified).includes("⭐"), "verified has no banner");
+    assert.ok(JSON.stringify(built.both).includes("12") && JSON.stringify(built.both).includes("נובמבר 2026"), "both shows seller stats");
+    // a plain regular call is still the old layout
+    assert.strictEqual(JSON.stringify(service.formatPostRichMessage(data, { tier: "regular" })), JSON.stringify(service.formatPostRichMessage(data)), "tier regular = today's layout");
+    return Object.keys(built).length;
+}
+
 function run() {
     console.log("[INFO] Checking rich message wire JSON against the hand-built reference...");
     const posts = checkPosts();
@@ -373,6 +413,7 @@ function run() {
     const reports = checkReport();
     const entities = checkEntities();
     const meetup = checkMeetup();
+    console.log(`[SUCCESS] ${checkTierLayouts()} tier layout goldens.`);
     console.log(`[SUCCESS] ${meetup} meetup / empty-field cases.`);
     console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${trusted} trust-line, ${help} help, ${reports} report cases; ${entities} entity cases).`);
 }

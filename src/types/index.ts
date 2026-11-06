@@ -207,6 +207,7 @@ export interface Post {
     rejectionReason?: string | null;
     rejectionNotifiedAt?: Date | null;
     meetup?: boolean;
+    layoutTier?: "regular" | "top" | "verified" | "both";
 }
 
 export interface User {
