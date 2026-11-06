@@ -48,6 +48,7 @@ check("text and photo 20 s apart are one window with media", () => {
     assert.strictEqual(r.summary.windows, 1);
     assert.strictEqual(r.summary.byTier.strict, 1); // media seen: strict, not ask
     assert.strictEqual(r.file.sellers[0].items[0].messageId, 1);
+    assert.deepStrictEqual(r.file.sellers[0].items[0].messageIds, [1, 2], "every message of the window, for tx_ and edit sync");
 });
 
 check("40 s apart are two windows", () => {

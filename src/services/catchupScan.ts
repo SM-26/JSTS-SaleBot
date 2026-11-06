@@ -1,7 +1,8 @@
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { classify, normalize, textHash, tokenOverlap, tokens } from "./classifier";
 
-export type CatchupItem = { messageId: number; date: string; title: string; price: string; location?: string; text: string; tier: "strict" | "ask" };
+// messageId is the first message of the window; messageIds holds all of them, so a moderator's delete (tx_) and edit sync reach every photo.
+export type CatchupItem = { messageId: number; messageIds?: number[]; date: string; title: string; price: string; location?: string; text: string; tier: "strict" | "ask" };
 export type CatchupFile = { version: 1; generatedAt: string; sellers: { userId: string; name: string; items: CatchupItem[] }[] };
 export type ScanSummary = {
     messages: number;
@@ -92,7 +93,7 @@ export function scanExport(raw: unknown, opts: { now: Date; topicId?: number; ex
             continue;
         }
         if (!price) continue; // ponytail: a priced post is the contract; a tier without a price is dropped uncounted
-        const item: CatchupItem = { messageId: w.first.id, date: new Date(w.first.at).toISOString(), title, price, text, tier };
+        const item: CatchupItem = { messageId: w.first.id, messageIds: w.parts.map(p => p.id), date: new Date(w.first.at).toISOString(), title, price, text, tier };
         if (location) item.location = location;
         let s = sellers.get(w.first.userId);
         if (!s) sellers.set(w.first.userId, (s = { userId: w.first.userId, name: w.first.name, items: [] }));
@@ -129,6 +130,7 @@ export function parseCatchupFile(raw: unknown): CatchupFile | null {
         if (!isObj(s) || typeof s.userId !== "string" || !/^\d+$/.test(s.userId) || typeof s.name !== "string" || !Array.isArray(s.items)) return null;
         for (const i of s.items) {
             if (!isObj(i) || typeof i.messageId !== "number" || !Number.isInteger(i.messageId) || i.messageId <= 0) return null;
+            if (i.messageIds !== undefined && !(Array.isArray(i.messageIds) && i.messageIds.every(n => Number.isInteger(n) && n > 0) && i.messageIds.includes(i.messageId))) return null;
             if (!nonEmpty(i.date) || !Number.isFinite(Date.parse(i.date))) return null;
             if (!nonEmpty(i.title) || !nonEmpty(i.price) || !nonEmpty(i.text)) return null;
             if (i.tier !== "strict" && i.tier !== "ask") return null;

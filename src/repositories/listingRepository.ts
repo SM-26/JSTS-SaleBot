@@ -101,7 +101,7 @@ class ListingRepository {
         const priceValue = priceValueOf(item.price);
         return Listing.create({
             chatId: input.chatId,
-            messageIds: [input.messageId],
+            messageIds: item.messageIds ?? [input.messageId],
             sellerId: input.sellerId,
             sellerName: input.sellerName,
             title: item.title,

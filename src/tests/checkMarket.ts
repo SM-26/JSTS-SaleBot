@@ -681,6 +681,8 @@ async function run() {
 
         const raw = (await Member.collection.findOne({ userId: m1 }))!;
         assert.ok(raw.firstSeenAt && raw.askMode === "ask" && raw.catchup, "3.1.0 fields intact, catchup added");
+        const album = await listingRepository.createFromCatchup({ chatId: CHAT, messageId: 4250, sellerId: cu("l"), sellerName: "L", item: { ...cuItem(4250), messageIds: [4250, 4251] }, isBundle: false }, CU);
+        assert.deepStrictEqual([...album.messageIds], [4250, 4251], "a listing keeps every message of the window");
         console.log("[OK] catch-up offers.");
         }
 
