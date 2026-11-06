@@ -58,6 +58,14 @@ class PostRepository {
         return (await Post.exists({ userId, status: { $in: ["approved", "sold"] } })) !== null;
     }
 
+    // A cut keeps the price it replaced and uses no bump. A raise is a counted bump and clears previousPrice.
+    applyPriceChange(postId: string, price: string, change: { previousPrice: string } | { bumpCount: number }) {
+        const update = "previousPrice" in change
+            ? { $set: { price, previousPrice: change.previousPrice } }
+            : { $set: { price, lastBumpAt: new Date(), dailyBumpCount: change.bumpCount }, $unset: { previousPrice: "" } };
+        return Post.findByIdAndUpdate(postId, update, { returnDocument: 'after' });
+    }
+
     setApprovedMessageId(postId: string, approvedMessageId: number | null) {
         return Post.findByIdAndUpdate(postId, { approvedMessageId }, { returnDocument: 'after' });
     }

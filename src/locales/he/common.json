@@ -272,5 +272,15 @@
     "quickPhotoHint": "שלחו את התמונה שוב עם כיתוב: מה, מחיר, איפה. או השתמשו ב-/newPost.",
     "dmAlertHint": "כדי לקבל התראה על חדשים, שלחו /alerts {query}",
     "dmSellHint": "רוצים למכור? שלחו /newpost",
-    "dmWantedOff": "בקשות קנייה מפרסמים בנושא המכירות בקבוצה. כדי למכור משהו, שלחו /newpost."
+    "dmWantedOff": "בקשות קנייה מפרסמים בנושא המכירות בקבוצה. כדי למכור משהו, שלחו /newpost.",
+    "priceChangeButton": "💸 שינוי מחיר",
+    "bumpLimitButton": "⬆️ הקפצה (הגעת למגבלה היומית)",
+    "priceChangePrompt": "המחיר הנוכחי: {price}\nהשיבו להודעה הזו עם המחיר החדש, או שלחו /cancel כדי לעצור.",
+    "priceChangeInvalid": "המחיר לא חוקי. השיבו עם מספר, או שלחו /cancel כדי לעצור.",
+    "priceChangeSame": "זה המחיר הנוכחי ({price}). השיבו עם מחיר אחר, או שלחו /cancel כדי לעצור.",
+    "priceChangeNotNumeric": "המחיר של הפוסט הזה אינו מספר, ולכן אי אפשר לשנות אותו כאן.",
+    "priceChangeGone": "הבקשה כבר לא תקפה. פתחו את /myposts ונסו שוב.",
+    "priceChangeCancelled": "שינוי המחיר בוטל.",
+    "priceChangeCut": "המחיר עכשיו {price} והפוסט פורסם שוב.",
+    "priceChangeRaised": "המחיר עכשיו {price} והפוסט הוקפץ."
 }

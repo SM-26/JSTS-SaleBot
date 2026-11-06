@@ -5,6 +5,7 @@ import userRepository from "../repositories/userRepository";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import { PostService } from "./postService";
+import { priceNumber } from "./inputService";
 import { GroupListingService } from "./groupListingService";
 import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
@@ -12,7 +13,10 @@ import { buildEndedCard, buildManagementCard, Card, lifecycleActionData } from "
 import { safeTrustLine, sellerLayout } from "./trustService";
 import { meetupLocationText } from "./meetup";
 import { isApiError } from "../config/telegramErrors";
-import { BotConfig, Post, User } from "../types";
+import { BotConfig, Post, User, UserSession } from "../types";
+
+// A Change price prompt stops waiting after this long.
+const PRICE_CUT_WINDOW_MS = 30 * 60_000;
 
 export class MyPostsService {
     constructor(
@@ -194,6 +198,7 @@ export class MyPostsService {
             description: post.description,
             descriptionEntities: post.descriptionEntities,
             price: post.price,
+            previousPrice: post.previousPrice,
             location: post.location,
             meetup: post.meetup,
             highlight: post.highlight,
@@ -203,10 +208,9 @@ export class MyPostsService {
             firstName: user?.firstName || "User",
         }, await sellerLayout(post.userId, locale, "sendApprovedPostDetail", post.layoutTier));
 
-        const buttons = [[
-            { text: localeService.t(locale, 'markSoldButton'), callback_data: `sold_${post._id}` },
-            { text: localeService.t(locale, 'bumpButton'), callback_data: `bump_${post._id}` },
-        ]];
+        // No Change price on an expired or taken-down listing.
+        const listingStatus = (await listingRepository.findByPostId(String(post._id)))?.status;
+        const buttons = this.approvedKeyboard(post, locale, listingStatus !== "expired" && listingStatus !== "taken_down");
 
         try {
             await this.api.sendRichMessage({ chat_id: chatId, rich_message: richMessage, reply_markup: { inline_keyboard: buttons } });
@@ -252,6 +256,34 @@ export class MyPostsService {
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, successKey) });
 
         await this.refreshMessage(query);
+    }
+
+    // Sold + Bump (+ Change price). At dailyBumpLimit the Bump button is Telegram's disabled type: a press never reaches the bot.
+    private approvedKeyboard(post: Post, locale: string, canChangePrice: boolean, now = new Date()): InlineKeyboardButton[][] {
+        const t = (key: string) => localeService.t(locale, key);
+        const full = this.atBumpLimit(post, now);
+        return [
+            [
+                { text: t('markSoldButton'), callback_data: `sold_${post._id}` },
+                full ? { text: t('bumpLimitButton'), disabled: {} } : { text: t('bumpButton'), callback_data: `bump_${post._id}` },
+            ],
+            // Changing the price stays live at the limit: a cut is not a counted bump.
+            ...(canChangePrice ? [[{ text: t('priceChangeButton'), callback_data: `lp_${post._id}` }]] : []),
+        ];
+    }
+
+    // After a bump that used the last one of the day, the pressed card swaps its live buttons for disabled ones (best effort).
+    private async disableAtLimit(chatId: number | undefined, messageId: number | undefined, post: Post, bumpCount: number, locale: string, now: Date): Promise<void> {
+        if (chatId === undefined || messageId === undefined || bumpCount < this.config.dailyBumpLimit) return;
+        try {
+            await this.api.editMessageReplyMarkup({
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: { inline_keyboard: this.approvedKeyboard({ _id: post._id, lastBumpAt: now, dailyBumpCount: bumpCount } as Post, locale, true, now) },
+            });
+        } catch (err) {
+            if (!isApiError(err, 400, "message is not modified")) console.error("[ERROR - disableAtLimit]", (err as Error).message);
+        }
     }
 
     // A moderator take-down leaves the post "approved" but off the market: no Bump, no Sold.
@@ -312,6 +344,36 @@ export class MyPostsService {
             && d1.getDate() === d2.getDate();
     }
 
+    // Bumps used today: the counter resets when the last bump was on another day.
+    private bumpsToday(post: Post, now: Date): number {
+        return post.lastBumpAt && this.isSameDay(new Date(post.lastBumpAt), now) ? (post.dailyBumpCount || 0) : 0;
+    }
+
+    private atBumpLimit(post: Post, now: Date): boolean {
+        return Boolean(post.lastBumpAt && this.isSameDay(new Date(post.lastBumpAt), now)) && (post.dailyBumpCount || 0) >= this.config.dailyBumpLimit;
+    }
+
+    // Posts the card to the approved group again (a bump); `over` carries a price cut that is not stored yet.
+    private async rePost(post: Post, over: { price?: string; previousPrice?: string | null } = {}): Promise<number | null> {
+        const postUser: User | null = await userRepository.findByUserId(post.userId);
+        const layout = await sellerLayout(post.userId, this.config.lang, "rePost", post.layoutTier);
+        const richMessage = this.postService.formatPostRichMessage({
+            title: post.title,
+            description: post.description,
+            descriptionEntities: post.descriptionEntities,
+            price: over.price ?? post.price,
+            previousPrice: ("previousPrice" in over ? over.previousPrice : post.previousPrice) ?? undefined,
+            location: post.location,
+            meetup: post.meetup,
+            highlight: post.highlight,
+            media: post.media,
+            userId: Number(post.userId),
+            username: postUser?.userName || undefined,
+            firstName: postUser?.firstName || "User",
+        }, { showCta: true, ...layout });
+        return this.postService.sendToApproved(richMessage);
+    }
+
     async handleBumpCallback(query: CallbackQuery): Promise<void> {
         const postId = query.data!.replace("bump_", "");
         const post: Post | null = await postRepository.findById(postId);
@@ -332,18 +394,14 @@ export class MyPostsService {
             return;
         }
 
-        // Reset counter if last bump was on a different day
+        // An old message can still carry the live button: the refusal stays.
         const now: Date = new Date();
-        let bumpCount = post.dailyBumpCount || 0;
-        if (post.lastBumpAt && this.isSameDay(new Date(post.lastBumpAt), now)) { //
-            if (bumpCount >= this.config.dailyBumpLimit) {
-                const user: User | null = await userRepository.findByUserId(String(query.from.id));
-                const locale = localeService.resolveUserLocale(user); //
-                await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpLimitReached'), show_alert: true });
-                return;
-            }
-        } else {
-            bumpCount = 0;
+        const bumpCount = this.bumpsToday(post, now);
+        if (this.atBumpLimit(post, now)) {
+            const user: User | null = await userRepository.findByUserId(String(query.from.id));
+            const locale = localeService.resolveUserLocale(user); //
+            await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpLimitReached'), show_alert: true });
+            return;
         }
 
         // Answer callback immediately to avoid timeout
@@ -351,24 +409,7 @@ export class MyPostsService {
         const locale = localeService.resolveUserLocale(user); //
         await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, 'bumpSuccess') });
 
-        // Fetch user for formatting
-        const postUser: User | null = await userRepository.findByUserId(post.userId);
-        const layout = await sellerLayout(post.userId, this.config.lang, "handleBumpCallback", post.layoutTier);
-        const richMessage = this.postService.formatPostRichMessage({
-            title: post.title,
-            description: post.description,
-            descriptionEntities: post.descriptionEntities,
-            price: post.price,
-            location: post.location,
-            meetup: post.meetup,
-            highlight: post.highlight,
-            media: post.media,
-            userId: Number(post.userId),
-            username: postUser?.userName || undefined,
-            firstName: postUser?.firstName || "User",
-        }, { showCta: true, ...layout });
-
-        const newMessageId = await this.postService.sendToApproved(richMessage);
+        const newMessageId = await this.rePost(post);
 
         // Update bump tracking and store new message ID
         await postRepository.updateBump(postId, bumpCount + 1);
@@ -380,5 +421,95 @@ export class MyPostsService {
         } catch (err) {
             console.error(`[ERROR - handleBumpCallback] post ${postId}`, (err as Error).message);
         }
+        await this.disableAtLimit(query.message?.chat.id, query.message?.message_id, post, bumpCount + 1, locale, now);
+    }
+
+    // True when this seller's approved post is live on the market (not expired, not taken down) and so may take a price cut.
+    private async canCutPrice(post: Post | null, userId: string): Promise<boolean> {
+        if (!post || String(post.userId) !== userId || post.status !== "approved") return false;
+        const status = (await listingRepository.findByPostId(String(post._id)))?.status;
+        return status !== "expired" && status !== "taken_down";
+    }
+
+    // lp_<postId>: asks for the new price (a force-reply prompt); the state lives in the persisted session.
+    async handlePriceChangeCallback(query: CallbackQuery, session: UserSession, now = new Date()): Promise<void> {
+        const from = String(query.from.id);
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+        const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
+        const toast = async (key: string, alert = false) => { await this.api.answerCallbackQuery({ callback_query_id: query.id, text: t(key), show_alert: alert }); };
+
+        const postId = query.data!.replace("lp_", "");
+        const post: Post | null = /^[0-9a-f]{24}$/.test(postId) ? await postRepository.findById(postId) : null;
+        if (!post || String(post.userId) !== from) return toast('postNotFound');
+        if (await this.refuseIfTakenDown(query, postId)) return;
+        if (!await this.canCutPrice(post, from)) return toast('staleButton');
+        // No limit check here: a cut never uses a bump. A raise at the limit is refused after the price is entered.
+        if (isNaN(priceNumber(post.price))) return toast('priceChangeNotNumeric', true);
+
+        await this.api.answerCallbackQuery({ callback_query_id: query.id });
+        const prompt = await this.api.sendMessage({
+            chat_id: query.message?.chat.id ?? query.from.id,
+            text: t('priceChangePrompt', { price: post.price }),
+            reply_markup: { force_reply: true },
+        });
+        session.pendingPriceCut = { postId, promptId: prompt.message_id, cardId: query.message?.message_id, at: now.getTime() };
+    }
+
+    /** /cancel in private: drops a pending Change price prompt. True when there was one. */
+    async cancelPriceCut(msg: Message, session: UserSession): Promise<boolean> {
+        if (!session.pendingPriceCut) return false;
+        delete session.pendingPriceCut;
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'priceChangeCancelled') });
+        return true;
+    }
+
+    /** The seller's reply to the Change price prompt. True when the message was an answer to it (valid or not). */
+    async handlePriceReply(msg: Message, session: UserSession | undefined, now = new Date()): Promise<boolean> {
+        const pending = session?.pendingPriceCut;
+        if (!session || !pending || !msg.from || !msg.text || msg.text.startsWith("/")) return false;
+        if (msg.reply_to_message?.message_id !== pending.promptId) return false;
+
+        const from = String(msg.from.id);
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+        const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
+        const say = (key: string, params?: Record<string, string | number | boolean>, force = false) => this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text: t(key, params),
+            ...(force ? { reply_markup: { force_reply: true as const } } : {}),
+        });
+        const end = async (key: string) => { delete session.pendingPriceCut; await say(key); return true; };
+
+        if (now.getTime() - pending.at >= PRICE_CUT_WINDOW_MS) return end('priceChangeGone');
+        const post = await postRepository.findById(pending.postId);
+        if (!post || !await this.canCutPrice(post, from)) return end('priceChangeGone');
+        const current = priceNumber(post.price);
+        if (isNaN(current)) return end('priceChangeNotNumeric');
+
+        const newPrice = msg.text.trim();
+        const value = priceNumber(newPrice);
+        // A wrong answer keeps the prompt open: the next reply goes to the new message.
+        const retry = async (key: string) => { pending.promptId = (await say(key, { price: post.price }, true)).message_id; return true; };
+        if (isNaN(value) || value <= 0) return retry('priceChangeInvalid');
+        if (value === current) return retry('priceChangeSame');
+        const cut = value < current;
+        // A raise is a normal bump: refused at the daily limit. A cut is not counted.
+        if (!cut && this.atBumpLimit(post, now)) return end('bumpLimitReached');
+
+        const postId = String(post._id);
+        const bumpCount = this.bumpsToday(post, now);
+        const newMessageId = await this.rePost(post, { price: newPrice, previousPrice: cut ? post.price : null });
+        await postRepository.applyPriceChange(postId, newPrice, cut ? { previousPrice: post.price } : { bumpCount: bumpCount + 1 });
+        if (newMessageId) await postRepository.setApprovedMessageId(postId, newMessageId);
+        try {
+            await this.lifecycle.refreshForPost(postId, now);
+            await listingRepository.setPriceByPostId(postId, newPrice);
+        } catch (err) {
+            console.error(`[ERROR - handlePriceReply] post ${postId}`, (err as Error).message);
+        }
+        delete session.pendingPriceCut;
+        await say(cut ? 'priceChangeCut' : 'priceChangeRaised', { price: newPrice });
+        if (!cut) await this.disableAtLimit(msg.chat.id, pending.cardId, post, bumpCount + 1, locale, now);
+        return true;
     }
 }

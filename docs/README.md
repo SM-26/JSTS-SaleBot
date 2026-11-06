@@ -26,7 +26,8 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Trusted-Seller Publishing** — A seller with an approved or sold post and no moderator take-down in the last 90 days publishes at once. The moderation group gets a "Published (trusted seller)" card to review after the fact
 - **Take Down** — Moderators can take down any published post from its card. The group message is removed, the author is told, the post can no longer be bumped or marked sold, and the seller loses trusted status for 90 days
 - **Blocked-Word Check** — A blocked word in the title, description, price or location is caught at the preview (for everyone, trusted sellers too): the bot names the word and asks for that field again
-- **Post Bumping** — Users can bump their approved posts to the top (subject to daily limits)
+- **Post Bumping** — Users can bump their approved posts to the top (subject to daily limits; at the limit the Bump button is disabled)
+- **Change Price** — From `/myposts` a seller can change an approved post's price. A cut re-posts it, with the old price struck through on the top/verified/both layouts, and does not use a bump; a raise is a normal bump
 - **Donations** — Users can support the bot via Telegram Stars (`/donate`)
 - **Auto-Publish** — Approved posts (and trusted sellers' posts) are forwarded to a public sales group
 - **Broadcasts** — Announce to the channel (`/broadcast`) or DM active/pending/approved users directly (`/broadcastUsers`)
@@ -79,7 +80,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/start` | Show a welcome greeting. |
 | `/newPost` | Start the flow to create a new sale post (Title → Desc → Price → Location → Media). With a draft in progress it offers Continue or Start over. |
 | `/cancel` | Cancel your post in progress. |
-| `/myposts` | View your active posts, bump them to the top, or mark them as sold. Also lists your group listings (Sold / Refresh / Remove) and the capture-note setting (stop or resume asking). |
+| `/myposts` | View your active posts, bump them to the top, change their price, or mark them as sold. Also lists your group listings (Sold / Refresh / Remove) and the capture-note setting (stop or resume asking). |
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
 | `/donate` | Support the bot by donating Telegram Stars. |

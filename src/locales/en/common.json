@@ -272,5 +272,15 @@
     "quickPhotoHint": "Send the photo again with a caption: what, price, where. Or use /newPost.",
     "dmAlertHint": "To get alerts for new ones, send /alerts {query}",
     "dmSellHint": "Selling this? Send /newpost",
-    "dmWantedOff": "Wanted posts go in the group's sale topic. To sell something, send /newpost."
+    "dmWantedOff": "Wanted posts go in the group's sale topic. To sell something, send /newpost.",
+    "priceChangeButton": "💸 Change price",
+    "bumpLimitButton": "⬆️ Bump (daily limit reached)",
+    "priceChangePrompt": "Current price: {price}\nReply to this message with the new price, or send /cancel to stop.",
+    "priceChangeInvalid": "That is not a valid price. Reply with a number, or send /cancel to stop.",
+    "priceChangeSame": "That is the current price ({price}). Reply with a different price, or send /cancel to stop.",
+    "priceChangeNotNumeric": "This post's price is not a number, so it can't be changed here.",
+    "priceChangeGone": "This request is no longer valid. Open /myposts and try again.",
+    "priceChangeCancelled": "Price change cancelled.",
+    "priceChangeCut": "The price is now {price} and the post was posted again.",
+    "priceChangeRaised": "The price is now {price} and the post was bumped."
 }
