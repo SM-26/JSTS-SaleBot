@@ -73,6 +73,10 @@ const realConnect = mongoose.connect.bind(mongoose) as (uri: string, options?: m
     client.on("commandStarted", begin);
     client.on("commandSucceeded", end);
     client.on("commandFailed", end);
+    // A command waiting for a pool connection (maybe a new one, a real handshake) has not started yet: count that wait too.
+    client.on("connectionCheckOutStarted", begin);
+    client.on("connectionCheckedOut", end);
+    client.on("connectionCheckOutFailed", end);
     return result;
 };
 
