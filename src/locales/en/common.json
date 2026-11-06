@@ -248,6 +248,7 @@
     "staleNothing": "No legacy posts are waiting for a question.",
     "helpStalecheck": "/stalecheck [userId ...] - Ask legacy sellers if their posts are still for sale (dry run first)",
     "quickSellHint": "Send photos with a caption: what, price, where.",
+    "quickPhotoHint": "Add a caption: what, price, where. Or use /newPost.",
     "dmAlertHint": "To get alerts for new ones, send /alerts {query}",
     "dmSellHint": "Selling this? Send /newpost",
     "dmWantedOff": "Wanted posts go in the group's sale topic. To sell something, send /newpost."

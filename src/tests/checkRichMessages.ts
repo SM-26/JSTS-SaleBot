@@ -354,7 +354,15 @@ function checkMeetup(): number {
     const bare = service.formatPostRichMessage({ ...base, description: "" }) as unknown as { blocks: { type: string }[] };
     assert.ok(!bare.blocks.some(b => b.type === "blockquote"), "no blockquote without a description");
     assert.ok(bare.blocks.some(b => b.type === "heading") && bare.blocks.some(b => b.type === "list"));
-    return 7;
+    // with a bot name the meeting point's words are the link; nothing else in the line is
+    const linked = new PostService({} as unknown as Api, { ...baseConfig, lang: "en" }, () => "bot");
+    const url = "https://t.me/bot?start=faq_1";
+    const line = (d: PostData) => (linked.formatPostRichMessage(d) as unknown as { blocks: { type: string; items?: { blocks: { text: unknown }[] }[] }[] }).blocks.find(b => b.type === "list")!.items![1].blocks[0].text;
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "Haifa" }), ["📍 Haifa · ", { type: "url", text: place, url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "בית דגן" }), ["📍 ", { type: "url", text: "בית דגן", url }]);
+    assert.deepStrictEqual(line({ ...base, meetup: true, location: "" }), ["📍 ", { type: "url", text: place, url }]);
+    assert.strictEqual(line({ ...base, location: "Haifa" }), "📍 Haifa");
+    return 11;
 }
 
 function run() {

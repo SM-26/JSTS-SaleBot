@@ -87,7 +87,7 @@ export class PublishService {
         // Only this send may throw. Once the message exists the post is public:
         // nothing below rejects, or a caller would release the claim / fall back
         // to moderation and publish it twice.
-        const messageId = await this.postService.sendToApproved(richMessage, post.meetup);
+        const messageId = await this.postService.sendToApproved(richMessage);
         if (messageId) {
             try {
                 await postRepository.setApprovedMessageId(postId, messageId);

@@ -57,7 +57,7 @@
 │   │   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list, alert DMs; al_ helpers
 │   │   ├── savedSearchService.ts # /alerts, the s_ start link, the one-reply fix (pendingAlertFix), al_ buttons
 │   │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
-│   │   ├── meetup.ts             # Beit Dagan meeting point: isMeetupLocation, meetupLocationText, the faq_1 button
+│   │   ├── meetup.ts             # Beit Dagan meeting point: isMeetupLocation, meetupLocationText, the faq_1 link and button
 │   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
 │   │   ├── lifecycleService.ts   # Refresh / sold / remove for any listing (lc_), 7-day nudge, 30-day expiry, held nudges
 │   │   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
@@ -165,7 +165,7 @@ User sends /newPost (or, with config.quickListing, a photo/video/album with a ca
   → PostService shows preview
       (blocked words, including those in hidden link URLs, are stopped here, for everyone, trusted sellers included)
       (with quickListing every preview has edit buttons and the Beit Dagan meetup toggle; `meetup` shows
-       as `📍 location · בית דגן`, and the group post gets a button to start=faq_1)
+       as `📍 location · בית דגן`, and the words of the place in a post's location line link to start=faq_1)
   → User confirms
   → Post saved to DB (status: "pending")
   → PublishService.submitPost:

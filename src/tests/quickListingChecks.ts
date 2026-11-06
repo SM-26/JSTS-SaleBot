@@ -3,6 +3,7 @@ import Post from "../models/Post";
 import Draft from "../models/Draft";
 import Listing from "../models/Listing";
 import { QUICK_ALBUM_DELAY_MS } from "../services/wizardService";
+import { FAQ_PADDING } from "../services/faqService";
 import { displayQuery } from "../services/buyerCards";
 import { parseQuery } from "../services/matchService";
 import { seedCapture } from "./fixtures";
@@ -210,7 +211,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             await press(h, u, `draft_meetup_${u}`, messageId(preview));
             const edit = calls(h, "editMessageText")[0];
             assert.strictEqual(Number(edit.params.message_id), messageId(preview));
-            assert.ok(JSON.stringify(edit.params.rich_message).includes(`Tel Aviv · ${PLACE}`), "the preview shows the place");
+            assert.ok(JSON.stringify(edit.params.rich_message).includes("Tel Aviv · ") && JSON.stringify(edit.params.rich_message).includes(PLACE), "the preview shows the place");
             assert.deepStrictEqual(labels(edit).slice(-1), [`✅ 📍 ${PLACE}`]);
             assert.deepStrictEqual(keyboard(edit).map((r) => r.length), [2, 2, 2]);
             d = (await draftOf(u))!;
@@ -567,13 +568,15 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.strictEqual(sent(h).length, 0, "no expectedText");
             assert.strictEqual((await draftOf(u))!.media.length, 3);
 
-            // text only, and a bare photo: not ours
+            // text only: not ours; a bare photo: only the hint (k27)
             const u2 = user();
             h.calls.length = 0;
             await h.sendText("hello there", { userId: u2 });
-            await h.sendPhoto("lonely", { userId: u2 });
             await settle();
             assert.strictEqual(outbound(h).length, 0);
+            await h.sendPhoto("lonely", { userId: u2 });
+            await settle();
+            assert.deepStrictEqual(outbound(h).map(text), [T("quickPhotoHint")]);
             assert.strictEqual(await draftOf(u2), null);
             console.log("  [OK] (k16) a late album item grows the media and redraws the preview; text and a bare photo create nothing.");
         }
@@ -675,7 +678,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
 console.log("  [OK] (k21) the DM reply shows the meeting point and its button only for a meetup listing.");
         }
 
-        // (k22) bumping a post with meetup sends the faq_1 button
+        // (k22) bumping a post with meetup keeps the faq_1 link
         {
             const { h } = boot();
             const u = user();
@@ -686,11 +689,12 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             await h.pressButton(`bump_${post._id}`, { userId: u, messageId: 777 });
             await settle();
             const out = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
-            assert.ok((out.params.reply_markup as { inline_keyboard: { url?: string }[][] }).inline_keyboard[0][0].url!.endsWith("?start=faq_1"), "bump keeps the meeting-point button");
-            console.log("  [OK] (k22) a bumped meetup post is re-posted with the faq_1 button.");
+            assert.ok(JSON.stringify(out.params.rich_message).includes("?start=faq_1"), "bump keeps the meeting-point link");
+            assert.ok(!out.params.reply_markup, "no button under the group post");
+            console.log("  [OK] (k22) a bumped meetup post is re-posted with the faq_1 link in its location line.");
         }
 
-        // (k23) a long one-liner keeps all its text; a model number is a title, not a price
+        // (k23) a long one-liner keeps what the title cut left; a model number is a title, not a price
         {
             const { h } = boot();
             const u = user();
@@ -700,7 +704,7 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             let d = (await draftOf(u))!;
             assert.ok(long.length > 60);
             assert.ok(`${d.title} ${d.description ?? ""}`.includes("holster, light and a case"), "no text lost");
-            assert.strictEqual(d.description?.split("\n")[0], long, "the full first line is the description");
+            assert.strictEqual(d.description, "case", "only what the title cut left, never the title or the price");
 
             const u2 = user();
             await single(h, u2, "Glock 17\nnice", "s7");
@@ -712,7 +716,7 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             await settle();
             d = (await draftOf(u3))!;
             assert.deepStrictEqual([d.step, d.title, d.price], ["confirm", "Glock 17", "900"]);
-            console.log("  [OK] (k23) a long first line keeps all its text; a bare number under 100 is part of the title.");
+            console.log("  [OK] (k23) a long first line keeps what the title cut left; a bare number under 100 is part of the title.");
         }
 
         // (k24) a new captioned photo at a pending preview asks Continue / Start over; key off stays silent
@@ -761,6 +765,98 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             assert.strictEqual(await draftOf(u), null);
             assert.strictEqual(outbound(h).length, 0);
             console.log("  [OK] (k26) a photo captioned /cancel creates nothing.");
+        }
+
+        // (k27) a single caption-less photo gets a hint and no draft; an album item is silent; key off is silent
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendPhoto("bare1", { userId: u });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("quickPhotoHint")]);
+            assert.strictEqual(await draftOf(u), null);
+            h.calls.length = 0;
+            await h.sendPhoto("late1", { userId: u, mediaGroupId: "k27" });
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "an album item stays silent");
+            assert.strictEqual(await draftOf(u), null);
+            cfg.quickListing = false;
+            await h.sendPhoto("bare2", { userId: u });
+            await settle();
+            cfg.quickListing = true;
+            assert.strictEqual(outbound(h).length, 0, "key off: no hint");
+            console.log("  [OK] (k27) a single caption-less photo gets one hint, an album item and key off stay silent.");
+        }
+
+        // (k28) the description is only what the title, price and location left
+        {
+            const cases: [string, string | undefined][] = [
+                ["Glock 900₪", undefined],
+                ["Glock\n900₪", undefined],
+                ["Glock\nמחיר: 900\nחיפה", undefined],
+                ["Glock\nprice: 900\nlocation: חיפה", undefined],
+                ["Glock 17 מצוין\n1,300₪ מרכז", undefined],
+                ["Glock\nבמצב מעולה\n1,300₪ מרכז\nטלפון 0509001234", "במצב מעולה\nטלפון 0509001234"],
+                ["Glock 900₪\nשתי מחסניות, בחיפה", "שתי מחסניות"],
+            ];
+            const { h } = boot();
+            for (const [caption, want] of cases) {
+                const u = user();
+                await single(h, u, caption);
+                await settle();
+                assert.strictEqual((await draftOf(u))!.description, want, caption);
+            }
+            console.log("  [OK] (k28) a quick description never repeats the title, price or location; nothing left means none.");
+        }
+
+        // (k29) every FAQ message carries the padding: /faq, a press (edit) and start=faq_1
+        {
+            const { h } = boot();
+            const u = user();
+            await h.sendText("/faq", { userId: u });
+            await settle();
+            await h.pressButton("faq_1", { userId: u, messageId: 900 });
+            await settle();
+            await h.sendText("/start faq_1", { userId: u });
+            await settle();
+            const msgs = h.calls.filter((c) => ["sendMessage", "editMessageText"].includes(c.method) && String(c.params.text ?? "").includes("<b>"));
+            assert.deepStrictEqual(msgs.map((c) => c.method), ["sendMessage", "editMessageText", "sendMessage"]);
+            for (const m of msgs) assert.ok(text(m).endsWith(FAQ_PADDING), text(m));
+            assert.strictEqual(FAQ_PADDING, "\n" + "\u2800".repeat(30));
+            console.log("  [OK] (k29) every FAQ message carries the width padding.");
+        }
+
+        // (k30) /myposts: a refused photo falls back to text with the buttons, the next post and the Relist row still go
+        {
+            const { default: listingRepository } = await import("../repositories/listingRepository");
+            const { h } = boot({ responses: { sendRichMessage: (p: Record<string, unknown>) => JSON.stringify(p.rich_message).includes("Broken") ? { ok: false, error_code: 400, description: "Bad Request: RICH_MESSAGE_PHOTO_INVALID" } : undefined } });
+            const u = user();
+            await h.sendText("hi", { userId: u });
+            const mk = async (title: string, extra: Record<string, unknown> = {}) => {
+                const p = await Post.create({ userId: String(u), title, description: "d", price: "10", location: "l", media: [], status: "approved", createdAt: new Date(), ...extra });
+                postIds.push(String(p._id));
+                return p;
+            };
+            const broken = await mk("Broken");
+            await mk("Fine");
+            const ended = await listingRepository.createForPost(await mk("Ended", { status: "sold" }), "dm", false, new Date());
+            await listingRepository.markExpired(String(ended._id), new Date());
+            h.calls.length = 0;
+            await h.sendText("/myposts", { userId: u });
+            await settle();
+            const fallback = sent(h).find((c) => text(c).startsWith("Broken"))!;
+            assert.ok(text(fallback).includes("💰 10") && text(fallback).includes("📍 l"), text(fallback));
+            assert.deepStrictEqual(buttons(fallback).map((b) => b.callback_data), [`sold_${broken._id}`, `bump_${broken._id}`]);
+            assert.ok(previews(h).some((c) => JSON.stringify(c.params.rich_message).includes("Fine")), "the next post still goes");
+            const relist = sent(h).find((c) => text(c) === T("endedSectionTitle"))!;
+            assert.ok(relist, "the Relist section still goes");
+            // Relist itself sends nothing rich, so a bad photo cannot break it
+            h.calls.length = 0;
+            await h.pressButton(buttons(relist)[0].callback_data, { userId: u, messageId: 901 });
+            await settle();
+            assert.deepStrictEqual(toasts(h), [T("listingRefreshedToast")]);
+            assert.strictEqual(previews(h).length, 0);
+            console.log("  [OK] (k30) a refused photo costs that post its picture only: text with buttons, next post, Relist.");
         }
     } finally {
         cfg.quickListing = wasQuick;

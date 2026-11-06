@@ -6,7 +6,8 @@ import { isApiError } from "../config/telegramErrors";
 import { localeService } from "./localeService";
 import { entitiesToRichText } from "./richMessages";
 import type { StoredEntity } from "../models/Post";
-import { meetupButton, meetupLocationText } from "./meetup";
+import { MEETUP_FAQ_PAYLOAD, meetupLocationParts } from "./meetup";
+import { deepLink } from "./deepLinks";
 import postRepository from "../repositories/postRepository";
 import userRepository from "../repositories/userRepository";
 
@@ -59,8 +60,7 @@ export class PostService {
         const message = new RichMessageBuilder();
         if (opts.previewLabel) message.paragraph(opts.previewLabel);
 
-        const place = localeService.t(this.lang, "meetupPlace");
-        const locationText = data.meetup ? meetupLocationText(data.location, place) : data.location;
+        const locationLine = this.locationLine(data);
 
         message.heading(opts.sold ? { type: "strikethrough", text: data.title } : data.title, 2);
         if (data.description) message.blockquote(b => b.paragraph(entitiesToRichText(data.description, data.descriptionEntities)));
@@ -68,7 +68,7 @@ export class PostService {
             .divider()
             .list([
                 richListItem(b => b.paragraph(new RichTextBuilder().plain("💰 ").bold(data.price))),
-                ...(locationText ? [richListItem(b => b.paragraph(`📍 ${locationText}`))] : []),
+                ...(locationLine ? [richListItem(b => b.paragraph(locationLine))] : []),
                 richListItem(b => b.paragraph(this.appendUserMentionRich(new RichTextBuilder().plain("👤 "), data.userId, data.username, data.firstName))),
                 ...(opts.trustLine ? [richListItem(b => b.paragraph(opts.trustLine!))] : []),
             ]);
@@ -97,6 +97,16 @@ export class PostService {
         if (footer) message.footer(footer);
 
         return message.build();
+    }
+
+    // The meeting point's words link to its FAQ node; the link stays through Sold edits, a button would not.
+    private locationLine(data: PostData): string | RichTextBuilder | null {
+        if (!data.meetup) return data.location ? `📍 ${data.location}` : null;
+        const { before, place } = meetupLocationParts(data.location, localeService.t(this.lang, "meetupPlace"));
+        const username = this.botUsername();
+        return username
+            ? new RichTextBuilder().plain(`📍 ${before}`).url(place, deepLink(username, MEETUP_FAQ_PAYLOAD))
+            : `📍 ${before}${place}`;
     }
 
     // One Rich Message carrying the post AND the approve/reject buttons. A media
@@ -131,17 +141,13 @@ export class PostService {
         return sent.message_id;
     }
 
-    async sendToApproved(richMessage: InputRichMessage, meetup?: boolean): Promise<number | null> {
+    async sendToApproved(richMessage: InputRichMessage): Promise<number | null> {
         const approvedGroupId = this.config.approvedGroupId;
         const approvedTopicId = this.config.approvedTopicId;
 
-        const options: Pick<SendRichMessageParams, "message_thread_id" | "reply_markup"> = {};
+        const options: Pick<SendRichMessageParams, "message_thread_id"> = {};
         if (approvedTopicId && Number(approvedTopicId) !== 1) {
             options.message_thread_id = Number(approvedTopicId);
-        }
-        const username = this.botUsername();
-        if (meetup === true && username) {
-            options.reply_markup = { inline_keyboard: [[meetupButton(localeService.t(this.lang, "meetupPlace"), username)]] };
         }
 
         const sent = await this.api.sendRichMessage({ chat_id: approvedGroupId, rich_message: richMessage, ...options });

@@ -17,7 +17,7 @@ import captureRepository from "../repositories/captureRepository";
 import { isApiError } from "../config/telegramErrors";
 import { isMeetupLocation } from "./meetup";
 import { findBlockedField, findBlockedWord, withLinkUrls, BlockedFieldName } from "./blockedWords";
-import { classify } from "./classifier";
+import { classify, normalize } from "./classifier";
 import { isSearchable, matchListings, parseQuery } from "./matchService";
 import { buildDmMatches, displayQuery } from "./buyerCards";
 import { listingLines } from "./buyerNoteService";
@@ -56,6 +56,39 @@ const CALLBACKS: { prefix: string; action: WizardAction }[] = [
 ];
 // The step a press must find the draft in; continue/restart work on any step.
 const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm", editTitle: "confirm", editPrice: "confirm", editLocation: "confirm" };
+
+const FIELD_LABEL_ONLY = /^(?:מחיר|מיקום|איפה|אזור|איזור|price|location|цена|место)\s*[:\-–]?$/iu;
+
+// Removes the first run of words that spells the city (with a Hebrew prefix letter, like the classifier's match).
+function removeCity(line: string, city: string): string {
+    const target = normalize(city);
+    const words = line.trim().split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+        for (let n = 1; n <= target.split(" ").length && i + n <= words.length; n++) {
+            const got = normalize(words.slice(i, i + n).join(" "));
+            if (got === target || (/^[בלמה]/.test(got) && got.slice(1) === target)) return [...words.slice(0, i), ...words.slice(i + n)].join(" ");
+        }
+    }
+    return line;
+}
+
+// What a caption says beyond the title, price and location it was parsed into; undefined when nothing is left.
+function quickDescription(caption: string, title: string | undefined, price: string | undefined, location: string | undefined): string | undefined {
+    const priceRe = price && new RegExp(`(?<![\\d,.])${price.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`, "u");
+    const [first = "", ...rest] = (priceRe ? caption.replace(priceRe, " ") : caption).split("\n");
+    // The title is cut at 60 characters: what the cut left of its line (from a whole word) stays, the rest is the title.
+    const flat = first.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
+    const cut = title && flat.startsWith(title) ? title.length : flat.length;
+    const tail = /\S/.test(flat[cut - 1] ?? "") && /\S/.test(flat[cut] ?? "") ? flat.slice(flat.lastIndexOf(" ", cut) + 1) : flat.slice(cut);
+    const original = caption.split("\n");
+    const lines = [tail, ...rest].flatMap((raw, i) => {
+        const line = location ? removeCity(raw, location) : raw;
+        if (line === original[i]) return [line]; // untouched: as the seller wrote it
+        const clean = line.replace(/\s+/g, " ").replace(/^[\s,\-–:]+|[\s,\-–:]+$/g, "");
+        return normalize(clean) && !FIELD_LABEL_ONLY.test(clean) ? [clean] : [];
+    });
+    return lines.join("\n").trim() || undefined;
+}
 
 export function parseWizardCallback(data: string): { action: WizardAction; userId: string } | null {
     for (const { prefix, action } of CALLBACKS) {
@@ -302,9 +335,14 @@ export class WizardService {
     // No draft yet: a photo/video with a caption, or any album item, starts a quick draft (quickListing only).
     private async quickStart(msg: Message): Promise<boolean> {
         const item = this.mediaItem(msg);
-        if (!this.quickOn() || !item || !this.isQuickMessage(msg) || !msg.from || msg.caption?.startsWith("/")) return false;
+        if (!this.quickOn() || !item || !msg.from || msg.caption?.startsWith("/")) return false;
         const userId = String(msg.from.id);
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        // A single photo with no caption: a hint, no draft. An album item stays silent, it can be a late one.
+        if (!this.isQuickMessage(msg)) {
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickPhotoHint") });
+            return true;
+        }
         const draft = await draftRepository.collectQuick({ userId, chatId: msg.chat.id, locale, item, caption: msg.caption, mediaGroupId: msg.media_group_id });
         if (!draft) return false;
         if (msg.media_group_id) this.scheduleFinish(userId, msg.from);
@@ -346,11 +384,10 @@ export class WizardService {
         const firstLine = draft.caption.split("\n")[0];
         // A bare number under 100 is a model number ("Glock 17"), not a price: the first line is the title.
         const modelNumber = rules.includes("price-bare") && (parsed.priceValue ?? 0) < 100;
-        // The title is cut at 60 characters: a longer first line keeps all its text in the description.
-        const description = [firstLine.length > 60 ? firstLine : "", parsed.description ?? ""].filter(Boolean).join("\n") || undefined;
+        const title = modelNumber ? firstLine.replace(/\s+/g, " ").trim().slice(0, 60).trim() || undefined : parsed.title;
         const updated = await draftRepository.update(userId, {
-            title: modelNumber ? firstLine.replace(/\s+/g, " ").trim().slice(0, 60).trim() || undefined : parsed.title,
-            description, location: parsed.location,
+            title,
+            description: quickDescription(draft.caption, title, modelNumber ? undefined : parsed.price, parsed.location), location: parsed.location,
             price: !modelNumber && parsed.priceValue ? String(parsed.priceValue) : undefined, caption: undefined,
         });
         if (updated) await this.advance(updated, from);

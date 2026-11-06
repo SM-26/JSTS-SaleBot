@@ -4,6 +4,9 @@ import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
 
+// A button is as wide as its bubble: one line of invisible braille blanks (not whitespace, so Telegram keeps it) widens every FAQ message.
+export const FAQ_PADDING = "\n" + "\u2800".repeat(30);
+
 export class FaqService {
     constructor(
         private api: Api,
@@ -75,7 +78,7 @@ export class FaqService {
             }
         }
 
-        const text = [baseText, ...bodyParts].join('\n\n');
+        const text = [baseText, ...bodyParts].join('\n\n') + FAQ_PADDING;
 
         // Add Back button
         if (nodeId) {

@@ -625,16 +625,15 @@ async function run() {
                 await settle();
                 const sent = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
                 const listing = (await Listing.findOne({ source: "bot", postId: id }))!;
+                assert.ok(!sent.params.reply_markup, "no button under a group post");
                 if (id === meetupId) {
-                    const markup = sent.params.reply_markup as { inline_keyboard: { url?: string }[][] };
-                    assert.ok(markup.inline_keyboard[0][0].url!.endsWith("?start=faq_1"), "meeting-point button deep-links faq_1");
+                    assert.ok(JSON.stringify(sent.params.rich_message).includes("?start=faq_1"), "the meeting point's words link to faq_1");
                     assert.strictEqual(listing.meetup, true);
                 } else {
-                    assert.ok(!sent.params.reply_markup, "no buttons on a plain post");
                     assert.ok(!("meetup" in listing.toObject()), "meetup is never written as false");
                 }
             }
-            console.log("  [OK] (m2) the meeting-point button and flag follow the post.");
+            console.log("  [OK] (m2) the meeting-point link and flag follow the post.");
         }
 
         // (n) a listing failure does not stop the author's DM; the card gets no Take down

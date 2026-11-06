@@ -756,7 +756,7 @@ async function wipeTestRows(userId: string, title: string): Promise<void> {
 
 async function seedTestPost(userId: string, title: string, now: Date) {
     return postRepository.createPost({
-        userId, title, description: "test", price: "100", location: "test", media: [TEST_MEDIA[0]],
+        userId, title, description: "test", price: "100", location: "test", media: [], // no photo: a lifecycle test needs none, and a stale file id breaks the rich message
         status: "approved", approvedMessageId: null, createdAt: now,
     });
 }

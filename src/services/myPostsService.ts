@@ -10,6 +10,7 @@ import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
 import { buildEndedCard, buildManagementCard, Card, lifecycleActionData } from "./listingCards";
 import { safeTrustLine } from "./trustService";
+import { meetupLocationText } from "./meetup";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
 
@@ -64,8 +65,11 @@ export class MyPostsService {
     }
 
     async showPosts(msg: Message): Promise<void> {
-        await this.sendPosts(msg);
-        await this.sendRelistSection(msg);
+        try {
+            await this.sendPosts(msg);
+        } finally {
+            await this.sendRelistSection(msg);
+        }
     }
 
     // Expired bot listings, one Relist row each (expired group listings already have a 🔄 in the group section).
@@ -119,7 +123,11 @@ export class MyPostsService {
         // Show full details for approved posts
         for (const post of posts) {
             if (post.status === "approved") {
-                await this.sendApprovedPostDetail(msg.chat.id, post, user, locale);
+                try {
+                    await this.sendApprovedPostDetail(msg.chat.id, post, user, locale);
+                } catch (err) {
+                    console.error(`[ERROR - sendPosts] post ${post._id}`, (err as Error).message);
+                }
             }
         }
 
@@ -199,7 +207,15 @@ export class MyPostsService {
             { text: localeService.t(locale, 'bumpButton'), callback_data: `bump_${post._id}` },
         ]];
 
-        await this.api.sendRichMessage({ chat_id: chatId, rich_message: richMessage, reply_markup: { inline_keyboard: buttons } });
+        try {
+            await this.api.sendRichMessage({ chat_id: chatId, rich_message: richMessage, reply_markup: { inline_keyboard: buttons } });
+        } catch (err) {
+            // A photo Telegram refuses must not cost the seller the buttons: the same post as plain text.
+            console.error(`[ERROR - sendApprovedPostDetail] post ${post._id}`, (err as Error).message);
+            const location = post.meetup ? meetupLocationText(post.location, localeService.t(locale, 'meetupPlace')) : post.location;
+            const text = [post.title, post.description, `💰 ${post.price}`, location ? `📍 ${location}` : ""].filter(Boolean).join("\n");
+            await this.api.sendMessage({ chat_id: chatId, text, reply_markup: { inline_keyboard: buttons } });
+        }
     }
 
     private async refreshMessage(query: CallbackQuery): Promise<void> {
@@ -350,7 +366,7 @@ export class MyPostsService {
             firstName: postUser?.firstName || "User",
         }, { showCta: true, trustLine });
 
-        const newMessageId = await this.postService.sendToApproved(richMessage, post.meetup);
+        const newMessageId = await this.postService.sendToApproved(richMessage);
 
         // Update bump tracking and store new message ID
         await postRepository.updateBump(postId, bumpCount + 1);

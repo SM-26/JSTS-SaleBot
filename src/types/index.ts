@@ -46,6 +46,7 @@ export interface LocaleStrings {
     contactSellerCta: string;
     meetupPlace: string;
     quickSellHint: string;
+    quickPhotoHint: string;
     dmAlertHint: string;
     dmSellHint: string;
     dmWantedOff: string;
