@@ -29,11 +29,11 @@ import { sellerLayout, sellerTier, type SellerTier } from "../services/trustServ
  * can test approve/reject quickly. None of them waits on a typed reply.
  */
 
-// Telegram file_ids from previously uploaded photos (reusable within the same bot)
+// Telegram file_ids of photos the owner sent to the TEST bot (they only work on that bot)
 const TEST_MEDIA: MediaItem[] = [
-    { fileId: "AgACAgQAAxkBAAINXGm-_OK_AAH4GQnBW-0HVvslh49hbgACsg1rGy28-FEImRX00Ng_2AEAAwIAA3kAAzoE", type: "photo" },
-    { fileId: "AgACAgQAAxkBAAINW2m-_OKCg3jnCq9lJ83ir9wv2VEvAAKxDWsbLbz4UTzQXIYguRLzAQADAgADeQADOgQ", type: "photo" },
-    { fileId: "AgACAgQAAxkBAAINXWm-_OkLEuv9Tex5FGbcr9AzGJZiAAKzDWsbLbz4UfeDwqmcdSY1AQADAgADeAADOgQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBeGrt8G3EwiBqDvkbH4S95jdTfOKlAAJfDmsbSnJwUwj9XBgc7zudAQADAgADeQADPQQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBeWrt8G2SL-v_NX1utD_qmTDR1QILAAJgDmsbSnJwU6XaBpCPj_ubAQADAgADeQADPQQ", type: "photo" },
+    { fileId: "AgACAgQAAyEFAASRyiESAAIBd2rt8G3Gjdpb3d8qWys-7FPgiHDGAAJeDmsbSnJwUxWtNAok_u-GAQADAgADeQADPQQ", type: "photo" },
 ];
 
 export const TEST_CASES: Record<string, { label: string; run: TestCaseFn }> = {
