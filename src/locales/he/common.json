@@ -181,6 +181,8 @@
     "listingSoldNote": "🤝 נמכר: {title}",
     "listingRemovedNote": "הוסרה מהשוק.",
     "listingEnded": "המודעה הזו הסתיימה.",
+    "endedSectionTitle": "מודעות שהסתיימו. לחצו כדי להחזיר מודעה לשוק.",
+    "relistButton": "🔄 פרסום מחדש {title}",
     "listingSoldButton": "🤝 נמכר",
     "listingRefreshButton": "🔄 רענון",
     "listingRemoveButton": "🗑 הסרה",

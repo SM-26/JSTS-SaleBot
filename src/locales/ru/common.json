@@ -181,6 +181,8 @@
     "listingSoldNote": "🤝 Продано: {title}",
     "listingRemovedNote": "Снято с рынка.",
     "listingEnded": "Это объявление завершено.",
+    "endedSectionTitle": "Завершённые объявления. Нажмите, чтобы вернуть объявление на рынок.",
+    "relistButton": "🔄 Выложить снова {title}",
     "listingSoldButton": "🤝 Продано",
     "listingRefreshButton": "🔄 Обновить",
     "listingRemoveButton": "🗑 Удалить",

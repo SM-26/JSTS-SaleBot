@@ -464,6 +464,42 @@ async function run() {
             const bad = await press("lc_", dm);
             assert.strictEqual(bad.toast, tt("staleButton"));
 
+            // /myposts relist section: expired BOT listings only, one Relist row each
+            const sectionMsgs = async (chatId: number) => {
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: chatId, chatId });
+                await sleep(QUIET_MS * 2);
+                return h.calls.filter((c) => c.method === "sendMessage" && String(c.params.text).startsWith(tt("endedSectionTitle")));
+            };
+            await Listing.deleteMany({ sellerId: String(SELLER) });
+            await Post.deleteMany({ userId: String(SELLER) });
+            assert.strictEqual((await sectionMsgs(SELLER)).length, 0, "no expired listing: no relist message");
+            await lcGroup({ status: "expired", endedBy: "system", endedAt: new Date() });
+            assert.strictEqual((await sectionMsgs(SELLER)).length, 0, "an expired group listing gets no extra message");
+            const rl = await lcBot("expired");
+            const rlSold = await lcBot("expired");
+            await Listing.updateOne({ _id: rlSold.listing._id }, { $set: { status: "sold" } });
+            const sec = await sectionMsgs(SELLER);
+            assert.strictEqual(sec.length, 1, "one relist message (also with no posts rows)");
+            assert.deepStrictEqual(kbOf(sec[0]).flat().map((b) => b.callback_data), [`lc_r_${rl.listing._id}`], "only the expired bot listing has Relist");
+            assert.strictEqual(sec[0].params.parse_mode, undefined, "titles are in buttons: no parse mode");
+            const rp = await press(`lc_r_${rl.listing._id}`, { ...dm, replyMarkup: { inline_keyboard: kbOf(sec[0]) } });
+            const after = await listingRepository.findById(String(rl.listing._id));
+            assert.strictEqual(after!.status, "live", "relist makes it live");
+            assert.ok(after!.refreshedAt.getTime() > new Date(2026, 0, 2).getTime(), "relist updates refreshedAt");
+            assert.ok(rp.edits.length === 1 && kbOf(rp.edits[0]).length === 0, "the only row goes: no keyboard left");
+            // /start l_<id> on an expired bot listing offers Relist; a sold one does not
+            const ex = await lcBot("expired");
+            h.calls.length = 0;
+            await h.sendText(`/start l_${ex.listing._id}`, { userId: SELLER, chatId: SELLER });
+            await sleep(QUIET_MS * 2);
+            const card = h.calls.filter((c) => c.method === "sendMessage").at(-1)!;
+            assert.deepStrictEqual(kbOf(card).flat().map((b) => b.callback_data), [`lc_r_${ex.listing._id}`], "expired bot card has Relist");
+            h.calls.length = 0;
+            await h.sendText(`/start l_${rlSold.listing._id}`, { userId: SELLER, chatId: SELLER });
+            await sleep(QUIET_MS * 2);
+            assert.deepStrictEqual(kbOf(h.calls.filter((c) => c.method === "sendMessage").at(-1)!), [], "a sold listing never gets Relist");
+
             await Listing.deleteMany({ sellerId: String(SELLER) });
             await Post.deleteMany({ userId: String(SELLER) });
         }

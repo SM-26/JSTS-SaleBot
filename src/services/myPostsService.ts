@@ -8,7 +8,7 @@ import { PostService } from "./postService";
 import { GroupListingService } from "./groupListingService";
 import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
-import { buildEndedCard, buildManagementCard, Card } from "./listingCards";
+import { buildEndedCard, buildManagementCard, Card, lifecycleActionData } from "./listingCards";
 import { safeTrustLine } from "./trustService";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
@@ -64,6 +64,24 @@ export class MyPostsService {
     }
 
     async showPosts(msg: Message): Promise<void> {
+        await this.sendPosts(msg);
+        await this.sendRelistSection(msg);
+    }
+
+    // Expired bot listings, one Relist row each (expired group listings already have a 🔄 in the group section).
+    private async sendRelistSection(msg: Message): Promise<void> {
+        const userId = String(msg.from!.id);
+        const expired = await listingRepository.findSellerExpired(userId, 10);
+        if (!expired.length) return;
+        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        await this.api.sendMessage({
+            chat_id: msg.chat.id,
+            text: localeService.t(locale, 'endedSectionTitle'),
+            reply_markup: { inline_keyboard: expired.map((l) => [{ text: localeService.t(locale, 'relistButton', { title: l.title ?? "" }), callback_data: lifecycleActionData(String(l._id), "r") }]) },
+        });
+    }
+
+    private async sendPosts(msg: Message): Promise<void> {
         const userId = String(msg.from!.id);
         const user: User | null = await userRepository.findByUserId(userId);
         const locale = localeService.resolveUserLocale(user); //
@@ -148,6 +166,11 @@ export class MyPostsService {
             const card = buildManagementCard(t, listing, { surface: "c" });
             const trustLine = await safeTrustLine(userId, locale, "showListingCard");
             await sendCard(trustLine ? { ...card, text: `${card.text}\n${trustLine}` } : card);
+            return;
+        }
+        if (listing.status === "expired") {
+            const card = buildEndedCard(t, listing);
+            await sendCard({ ...card, keyboard: [[{ text: t("relistButton", { title: listing.title ?? "" }), callback_data: lifecycleActionData(String(listing._id), "r") }]] });
             return;
         }
         const post = listing.status === "live" && listing.postId ? await postRepository.findById(listing.postId) : null;

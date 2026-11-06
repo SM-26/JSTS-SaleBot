@@ -181,6 +181,8 @@
     "listingSoldNote": "🤝 Sold: {title}",
     "listingRemovedNote": "Removed from the market.",
     "listingEnded": "This listing has ended.",
+    "endedSectionTitle": "Ended listings. Tap to put one back on the market.",
+    "relistButton": "🔄 Relist {title}",
     "listingSoldButton": "🤝 Sold",
     "listingRefreshButton": "🔄 Refresh",
     "listingRemoveButton": "🗑 Remove",
