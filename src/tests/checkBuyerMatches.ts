@@ -417,7 +417,7 @@ async function checkAlerts() {
     const [u1, u2] = [String(base), String(base + 1)];
     const created = new Date(Date.now() - 3600_000);
     const fresh = new Date(Date.now() - 1800_000);
-    const groupListings = { groupLink: async (id: number) => `https://t.me/g/${id}` } as unknown as GroupListingService;
+    const groupListings = { groupLink: async (id: number) => { if (id === 666) throw new Error("poison"); return `https://t.me/g/${id}`; } } as unknown as GroupListingService;
     const mkSvc = (buyerMatches: BotConfig["buyerMatches"], responses?: HarnessOptions["responses"]) => {
         const h = createHarness({ responses });
         return { h, svc: new AlertService(h.bot.api, { lang: "en", buyerMatches } as BotConfig, groupListings) };
@@ -551,6 +551,32 @@ assert.strictEqual(to(h, u1).length, 1, "one alert");
         await svc.tick(new Date());
         assert.strictEqual(to(h, u1).length, 30, "the other 5 in the second");
         assert.strictEqual(new Set(to(h, u1).map(c => c.params.text)).size, 30, "none repeated");
+
+        // a card that cannot be built is skipped and does not block the others
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await search(u1);
+        await search(u2);
+        await mkListing(`al-${U}-x`, "Glock 17 poison", { messageIds: [666] });
+        await mkListing(`al-${U}-y`, "Glock 17 fine");
+        await svc.tick(new Date());
+        for (const u of [u1, u2]) {
+            assert.strictEqual(to(h, u).length, 1, "the good listing is alerted");
+            assert.ok(String(to(h, u)[0].params.text).includes("Glock 17 fine"));
+            assert.strictEqual(await AlertLog.countDocuments({ userId: u, ok: false }), 1, "the poison pair is marked failed");
+        }
+
+        // the cap is shared with renew offers
+        await reset();
+        ({ h, svc } = mkSvc("on"));
+        await search(u1);
+        for (let i = 0; i < 25; i++) await mkListing(`al-${U}-c${i}`, `Glock 17 item ${i}`);
+        await SavedSearch.create({ userId: u2, query: "cz 75", terms: ["cz", "75"], createdAt: created, scannedAt: new Date(), expiresAt: new Date(Date.now() + 2 * 86400_000) });
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u1).length, 25);
+        assert.strictEqual(to(h, u2).length, 0, "no offer when the cap is used up");
+        await svc.tick(new Date());
+        assert.strictEqual(to(h, u2).length, 1, "the offer goes out next tick");
 
         // expired
         await reset();

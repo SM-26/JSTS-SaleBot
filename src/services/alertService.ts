@@ -28,6 +28,7 @@ function outcomeOf(err: unknown): Outcome {
     return err.errorCode === 429 || err.errorCode >= 500 ? "retry" : "failed";
 }
 
+const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const query = (s: ISavedSearch) => ({ terms: s.terms, maxPrice: s.maxPrice, meetup: s.meetup ?? false });
 const alertable = (l: IListing) => !findBlockedWord(l.title ?? "");
 
@@ -93,15 +94,24 @@ export class AlertService {
             for (const id of matchListings(query(s), candidates, candidates.length)) {
                 if (await alertLogRepository.userHas(s.userId, id)) continue;
                 if (budget === 0) return; // cursor unmoved: the rest goes out next tick
+                // a crash between claim and send loses this alert on purpose: at most once
                 if (!(await alertLogRepository.claim(searchId, s.userId, id, now))) continue;
+                const listing = byId.get(id)!;
+                let card: Card;
+                try {
+                    card = buildAlertCard(await this.translator(s.userId), s.query, await lineOf(listing));
+                } catch (err) { // a card that cannot be built is skipped, never retried
+                    console.error("[ERROR - alerts]", "card", s.userId, id, describe(err));
+                    await alertLogRepository.markFailed(searchId, id);
+                    continue;
+                }
                 budget--;
                 let outcome: Outcome = "ok";
                 try {
-                    const t = await this.translator(s.userId);
-                    const listing = byId.get(id)!;
-                    await this.sendAlert(s.userId, buildAlertCard(t, s.query, await lineOf(listing)), listing);
+                    await this.sendAlert(s.userId, card, listing);
                 } catch (err) {
                     outcome = outcomeOf(err);
+                    if (outcome === "retry" || outcome === "failed") console.error("[ERROR - alerts]", outcome, s.userId, id, describe(err));
                 }
                 if (outcome === "ok") delivered = true;
                 else if (outcome === "failed") await alertLogRepository.markFailed(searchId, id);
@@ -119,7 +129,8 @@ export class AlertService {
             } else await savedSearchRepository.setScanned(searchId, now, delivered);
         }
 
-        const due = await savedSearchRepository.findDueRenewal(now, new Date(now.getTime() + RENEW_BEFORE_MS), budget);
+        // findDueRenewal(.., 0) would mean no limit
+        const due = budget > 0 ? await savedSearchRepository.findDueRenewal(now, new Date(now.getTime() + RENEW_BEFORE_MS), budget) : [];
         for (const s of due) {
             if (gone.has(s.userId)) continue;
             const searchId = String(s._id);
@@ -128,6 +139,7 @@ export class AlertService {
                 await this.sendText(s.userId, buildRenewOffer(await this.translator(s.userId), { id: searchId, query: s.query, expiresAt: s.expiresAt }), false);
             } catch (err) {
                 const outcome = outcomeOf(err);
+                if (outcome !== "blocked") console.error("[ERROR - alerts]", "renew", outcome, s.userId, searchId, describe(err));
                 if (outcome === "blocked") {
                     gone.add(s.userId);
                     await savedSearchRepository.deleteByUser(s.userId);
