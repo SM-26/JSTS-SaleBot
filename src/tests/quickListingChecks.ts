@@ -397,7 +397,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             const { h } = boot();
             const mine = user();
             await mk(String(mine), `Mine ${tag} own`);
-            cfg.buyerMatches = "off";
+            cfg.buyerMatches = "on";
             await single(h, mine, `מחפש ${tag}`);
             await settle();
             assert.strictEqual(await draftOf(mine), null, "no draft");
@@ -406,21 +406,26 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.ok(text(reply).includes(`Rifle ${tag} scope`), text(reply));
             assert.ok(!text(reply).includes("own"), "the user's own listing is not listed");
             assert.strictEqual(reply.params.parse_mode, "HTML");
-            assert.ok(!text(reply).includes("/alerts"), "no alert hint with buyerMatches off");
-
             const q = displayQuery(parseQuery(`מחפש ${tag}`).query);
-            cfg.buyerMatches = "on";
-            h.calls.length = 0;
-            await single(h, user(), `מחפש ${tag}`, "s3");
-            await settle();
-            assert.ok(text(sent(h)[0]).includes(T("dmAlertHint").replace("{query}", q)), text(sent(h)[0]));
+            assert.ok(text(reply).includes(T("dmAlertHint").replace("{query}", q)), text(reply));
+            assert.strictEqual(text(reply).split("\n").pop(), T("dmSellHint"), "the sell hint is the last line");
 
             h.calls.length = 0;
             await single(h, user(), "מחפש nomatchzz77", "s4");
             await settle();
             assert.ok(text(sent(h)[0]).startsWith(T("buyerNoteEmpty")), text(sent(h)[0]));
+            assert.ok(text(sent(h)[0]).endsWith(T("dmSellHint")));
+
+            // off: no search, no list, no hints; one line
+            cfg.buyerMatches = "off";
+            h.calls.length = 0;
+            const offUser = user();
+            await single(h, offUser, `מחפש ${tag}`, "s5");
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("dmWantedOff")]);
+            assert.strictEqual(await draftOf(offUser), null);
             cfg.buyerMatches = undefined;
-            console.log("  [OK] (k11) a WTB caption lists live matches (not the user's own), hints /alerts only with buyerMatches on, leaves no draft.");
+            console.log("  [OK] (k11) a WTB caption: buyerMatches on lists live matches (not the user's own) with the /alerts and sell hints; off, one line; never a draft.");
         }
 
         // (k12) restart: a second controller finishes the album through /newpost then Continue; the old timer then finds nothing
@@ -518,18 +523,28 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             const d2 = (await rawDraft(u2))!;
             assert.deepStrictEqual([d2.quick, d2.step, d2.media.length], [undefined, "title", 0]);
 
-            // an expired draft + an album: one quick draft, no draftExpired
+            // an expired draft + a captioned photo: one quick draft, no draftExpired
             const u3 = user();
             await h.sendText("/newpost", { userId: u3 });
             await Draft.updateOne({ userId: String(u3) }, { $set: { updatedAt: new Date(Date.now() - 3 * 3600_000) } });
             h.calls.length = 0;
-            await album(h, u3, `e${u3}`, 2, "Glock 17 900₪");
-            await waitTimer();
+            await single(h, u3, "Glock 17 900₪", "s6");
+            await settle();
             assert.ok(!sent(h).some((c) => text(c) === T("draftExpired")), "no draftExpired");
             assert.strictEqual(previews(h).length, 1);
             const d3 = (await rawDraft(u3))!;
-            assert.deepStrictEqual([d3.quick, d3.step, d3.media.length], [true, "confirm", 3]);
+            assert.deepStrictEqual([d3.quick, d3.step, d3.media.length], [true, "confirm", 1]);
             assert.strictEqual(await Draft.countDocuments({ userId: String(u3) }), 1);
+
+            // an expired draft + a caption-less photo: today's draftExpired
+            const u4 = user();
+            await h.sendText("/newpost", { userId: u4 });
+            await Draft.updateOne({ userId: String(u4) }, { $set: { updatedAt: new Date(Date.now() - 3 * 3600_000) } });
+            h.calls.length = 0;
+            await h.sendPhoto("bare", { userId: u4 });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("draftExpired")]);
+            assert.strictEqual(await draftOf(u4), null);
             console.log("  [OK] (k15) /cancel in the window leaves nothing; a live draft keeps expectedText; an expired draft is replaced.");
         }
 
@@ -635,6 +650,7 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
 
         // (k21) the DM reply lists a meetup listing with the place and a faq_1 button; a plain one has no keyboard
         {
+            cfg.buyerMatches = "on";
             const stamp = new Date();
             const tag = `zr${String(user()).slice(-5)}`;
             const mk = (title: string, extra: Record<string, unknown>) => Listing.create({
@@ -655,7 +671,8 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             await single(h, u, `מחפש ${tag}`, "s2");
             await settle();
             assert.ok(!text(sent(h)[0]).includes(PLACE) && !sent(h)[0].params.reply_markup, "plain listing: no place, no keyboard");
-            console.log("  [OK] (k21) the DM reply shows the meeting point and its button only for a meetup listing.");
+            cfg.buyerMatches = undefined;
+console.log("  [OK] (k21) the DM reply shows the meeting point and its button only for a meetup listing.");
         }
 
         // (k22) bumping a post with meetup sends the faq_1 button
@@ -671,6 +688,79 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             const out = h.calls.find((c) => c.method === "sendRichMessage" && Number(c.params.chat_id) === APPROVED_GROUP)!;
             assert.ok((out.params.reply_markup as { inline_keyboard: { url?: string }[][] }).inline_keyboard[0][0].url!.endsWith("?start=faq_1"), "bump keeps the meeting-point button");
             console.log("  [OK] (k22) a bumped meetup post is re-posted with the faq_1 button.");
+        }
+
+        // (k23) a long one-liner keeps all its text; a model number is a title, not a price
+        {
+            const { h } = boot();
+            const u = user();
+            const long = "Glock 17 Gen3 with two spare magazines, holster, light and a case 900₪";
+            await single(h, u, long);
+            await settle();
+            let d = (await draftOf(u))!;
+            assert.ok(long.length > 60);
+            assert.ok(`${d.title} ${d.description ?? ""}`.includes("holster, light and a case"), "no text lost");
+            assert.strictEqual(d.description?.split("\n")[0], long, "the full first line is the description");
+
+            const u2 = user();
+            await single(h, u2, "Glock 17\nnice", "s7");
+            await settle();
+            d = (await draftOf(u2))!;
+            assert.deepStrictEqual([d.step, d.title, d.price, d.description], ["price", "Glock 17", undefined, "nice"]);
+            const u3 = user();
+            await single(h, u3, "Glock 17 900", "s8");
+            await settle();
+            d = (await draftOf(u3))!;
+            assert.deepStrictEqual([d.step, d.title, d.price], ["confirm", "Glock 17", "900"]);
+            console.log("  [OK] (k23) a long first line keeps all its text; a bare number under 100 is part of the title.");
+        }
+
+        // (k24) a new captioned photo at a pending preview asks Continue / Start over; key off stays silent
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "Glock 17 900₪");
+            await settle();
+            h.calls.length = 0;
+            await single(h, u, "Hammer 12 300₪", "s9");
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("draftInProgress")]);
+            assert.strictEqual((await draftOf(u))!.media.length, 1);
+            cfg.quickListing = false;
+            h.calls.length = 0;
+            await single(h, u, "Hammer 12 300₪", "s10");
+            await settle();
+            assert.strictEqual(outbound(h).length, 0, "key off: silent as before");
+            cfg.quickListing = true;
+            console.log("  [OK] (k24) a new captioned photo at a preview gets the Continue / Start over question; key off is silent.");
+        }
+
+        // (k25) a crash between the claim and the update: Continue parses the caption
+        {
+            const { h } = boot();
+            const u = user();
+            const now = new Date();
+            await Draft.create({ userId: String(u), chatId: u, locale: "en", step: "media", quick: true, caption: "Glock 17 900₪", media: [{ fileId: "m1", type: "photo" }], promptMessageId: 0, startedAt: now, updatedAt: now });
+            await h.sendText("/newpost", { userId: u });
+            await settle();
+            h.calls.length = 0;
+            await h.pressButton(`draft_continue_${u}`, { userId: u, messageId: (await draftOf(u))!.promptMessageId });
+            await settle();
+            assert.strictEqual(previews(h).length, 1);
+            const d = (await rawDraft(u))!;
+            assert.deepStrictEqual([d.step, d.title, d.price, d.caption], ["confirm", "Glock 17", "900", undefined]);
+            console.log("  [OK] (k25) Continue on a draft that kept its caption gives the parsed preview.");
+        }
+
+        // (k26) a photo captioned with a command creates nothing
+        {
+            const { h } = boot();
+            const u = user();
+            await single(h, u, "/cancel", "s11");
+            await settle();
+            assert.strictEqual(await draftOf(u), null);
+            assert.strictEqual(outbound(h).length, 0);
+            console.log("  [OK] (k26) a photo captioned /cancel creates nothing.");
         }
     } finally {
         cfg.quickListing = wasQuick;

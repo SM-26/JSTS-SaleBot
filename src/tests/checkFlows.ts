@@ -2894,7 +2894,7 @@ async function run() {
             }
         })();
 
-        // (k1)..(k6): quickListing field-edit buttons and the meetup toggle
+        // (k1)..(k26): quickListing buttons, the meetup toggle and the one-message quick draft
         await quickListingChecks({ boot: (o) => ({ h: boot(o).h }), cfg, user, settle, T, postIds, APPROVED_GROUP, MOD_GROUP });
 
         console.log("[OK] persistent flows.");

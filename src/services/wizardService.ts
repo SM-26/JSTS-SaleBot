@@ -302,7 +302,7 @@ export class WizardService {
     // No draft yet: a photo/video with a caption, or any album item, starts a quick draft (quickListing only).
     private async quickStart(msg: Message): Promise<boolean> {
         const item = this.mediaItem(msg);
-        if (!this.quickOn() || !item || !this.isQuickMessage(msg) || !msg.from) return false;
+        if (!this.quickOn() || !item || !this.isQuickMessage(msg) || !msg.from || msg.caption?.startsWith("/")) return false;
         const userId = String(msg.from.id);
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
         const draft = await draftRepository.collectQuick({ userId, chatId: msg.chat.id, locale, item, caption: msg.caption, mediaGroupId: msg.media_group_id });
@@ -323,24 +323,35 @@ export class WizardService {
         this.timers.set(userId, timer);
     }
 
-    // The album is complete (or a single photo arrived): read the caption and ask only for what is missing.
+    // The album is complete (or a single photo arrived): claim it once, then read the caption.
     private async finishQuick(userId: string, from: TelegramUser): Promise<void> {
         const draft = await draftRepository.claimCollecting(userId);
-        if (!draft) return;
+        if (draft) await this.parseQuick(draft, from);
+    }
+
+    // Reads the caption of a claimed draft and asks only for what is missing.
+    private async parseQuick(draft: IDraft, from: TelegramUser): Promise<void> {
+        const userId = draft.userId;
         // No caption came with the album (a straggler after a WTB reply, /cancel or Confirm): say nothing.
         if (!draft.caption?.trim()) {
             await draftRepository.delete(userId);
             return;
         }
-        const { tier, parsed } = classify(draft.caption ?? "", draft.media.length > 0);
-        if (tier === "wtb" && draft.caption) {
+        const { tier, rules, parsed } = classify(draft.caption, draft.media.length > 0);
+        if (tier === "wtb") {
             await draftRepository.delete(userId);
             await this.replyAsBuyer(draft, draft.caption);
             return;
         }
+        const firstLine = draft.caption.split("\n")[0];
+        // A bare number under 100 is a model number ("Glock 17"), not a price: the first line is the title.
+        const modelNumber = rules.includes("price-bare") && (parsed.priceValue ?? 0) < 100;
+        // The title is cut at 60 characters: a longer first line keeps all its text in the description.
+        const description = [firstLine.length > 60 ? firstLine : "", parsed.description ?? ""].filter(Boolean).join("\n") || undefined;
         const updated = await draftRepository.update(userId, {
-            title: parsed.title, description: parsed.description, location: parsed.location,
-            price: parsed.priceValue ? String(parsed.priceValue) : undefined, caption: undefined,
+            title: modelNumber ? firstLine.replace(/\s+/g, " ").trim().slice(0, 60).trim() || undefined : parsed.title,
+            description, location: parsed.location,
+            price: !modelNumber && parsed.priceValue ? String(parsed.priceValue) : undefined, caption: undefined,
         });
         if (updated) await this.advance(updated, from);
     }
@@ -354,16 +365,20 @@ export class WizardService {
         await draftRepository.update(draft.userId, { step, promptMessageId });
     }
 
-    // A wanted caption sent with photos: answer with the live matches (not their own), never a draft.
+    // A wanted caption sent with photos: with buyerMatches on, the live matches (not their own); never a draft.
     private async replyAsBuyer(draft: IDraft, caption: string): Promise<void> {
+        const t = (key: string, params?: Record<string, string | number | boolean>) => this.t(draft.locale, key, params);
+        if (this.config.buyerMatches !== "on") {
+            await this.api.sendMessage({ chat_id: draft.chatId, text: t("dmWantedOff") });
+            return;
+        }
         const q = parseQuery(caption);
         const live = (await listingRepository.findLiveForMatching()).filter(l => l.sellerId !== draft.userId);
         const byId = new Map(live.map(l => [String(l._id), l]));
         const listings = matchListings(q, live).flatMap(id => byId.get(id) ?? []).filter(l => !findBlockedWord(l.title ?? ""));
         const lines = await listingLines(listings, this.groupListings);
-        const alertQuery = this.config.buyerMatches === "on" && isSearchable(q) ? displayQuery(q.query) : undefined;
-        const card = buildDmMatches((key, params) => this.t(draft.locale, key, params), lines, alertQuery, this.botUsername());
-        await this.api.sendMessage({ chat_id: draft.chatId, text: card.text, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
+        const card = buildDmMatches(t, lines, isSearchable(q) ? displayQuery(q.query) : undefined, this.botUsername());
+        await this.api.sendMessage({ chat_id: draft.chatId, text: `${card.text}\n${t("dmSellHint")}`, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
     }
 
     /** /start sell: with quickListing on and no live draft, say how to post in one message. */
@@ -395,7 +410,7 @@ export class WizardService {
             if (!draft) return this.quickStart(msg);
 
             if (isDraftExpired(draft, this.config.timeOut)) {
-                if (this.quickOn() && this.isQuickMessage(msg)) {
+                if (this.quickOn() && msg.caption && this.isQuickMessage(msg)) {
                     await draftRepository.deleteIfUnchanged(draft);
                     return this.quickStart(msg);
                 }
@@ -414,6 +429,8 @@ export class WizardService {
                 if (updated?.step === "confirm") await this.refreshPreview(updated, msg.from);
                 return true;
             }
+            // A new captioned photo while a preview waits: the Continue / Start over question, not silence.
+            if (this.quickOn() && draft.step === "confirm" && msg.caption && !(msg.media_group_id && msg.media_group_id === draft.mediaGroupId)) return this.handleNewPost(msg);
 
             if (draft.step === "media") {
                 if (msg.photo && msg.photo.length > 0) {
@@ -547,8 +564,9 @@ export class WizardService {
                         await this.finishQuick(draft.userId, query.from);
                         return true;
                     }
-                    if (draft.quick && draft.step === "media") { // a crash between the claim and the send
-                        await this.advance(draft, query.from);
+                    if (draft.quick && draft.step === "media") { // a crash between the claim and the update
+                        if (draft.caption) await this.parseQuick(draft, query.from);
+                        else await this.advance(draft, query.from);
                         return true;
                     }
                     const messageId = await this.sendStep(draft, query.from);

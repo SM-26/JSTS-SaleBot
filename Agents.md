@@ -160,7 +160,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 ```
 User sends /newPost (or, with config.quickListing, a photo/video/album with a caption in DM and no draft:
                        a quick draft is built from the caption; album items are collected, preview 1.5 s after the last;
-                       a wanted caption gets matches instead; missing title/price/minimumPhotos go to that wizard step)
+                       a wanted caption gets matches (buyerMatches on) or a one-line pointer instead; missing title/price/minimumPhotos go to that wizard step)
   → WizardService walks the user's draft (collection `drafts`): title, description, price, location, media
   → PostService shows preview
       (blocked words, including those in hidden link URLs, are stopped here, for everyone, trusted sellers included)

@@ -248,5 +248,7 @@
     "staleNothing": "אין מודעות ישנות שממתינות לשאלה.",
     "helpStalecheck": "/stalecheck [userId ...] - שאלת מוכרים ותיקים אם המודעות עדיין למכירה (קודם הרצת ניסיון)",
     "quickSellHint": "שלחו תמונות עם כיתוב: מה, מחיר, איפה.",
-    "dmAlertHint": "כדי לקבל התראה על חדשים, שלחו /alerts {query}"
+    "dmAlertHint": "כדי לקבל התראה על חדשים, שלחו /alerts {query}",
+    "dmSellHint": "רוצים למכור? שלחו /newpost",
+    "dmWantedOff": "בקשות קנייה מפרסמים בנושא המכירות בקבוצה. כדי למכור משהו, שלחו /newpost."
 }

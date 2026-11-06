@@ -47,6 +47,8 @@ export interface LocaleStrings {
     meetupPlace: string;
     quickSellHint: string;
     dmAlertHint: string;
+    dmSellHint: string;
+    dmWantedOff: string;
     trustLine: string;
     enterDescription: string;
     enterPrice: string;
