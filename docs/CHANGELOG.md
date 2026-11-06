@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased (slice 4) - Buyer matches and alerts (slice 4 of "the market", #104).
+  - Added:
+    - **Buyer notes.** With `buyerMatches: "on"`, a "wanted" message in the sale topic gets a private note to its author listing the live listings that match (or saying there are none), with an **Alert me** link into the bot (`?start=s_<captureId>`). A buyer gets at most one note per 6 hours.
+    - **Saved searches and alerts.** The `s_` link saves the search. `/alerts <text>` also saves one, `/alerts` lists them (max 5 per buyer) with remove and renew buttons (`al_<searchId>_<d|r>`), and when the text is too thin the bot asks for one reply to fix it. The sweeper DMs a buyer when a new listing matches (25 per tick, each pair sent once, a blocked-bot reply stops further tries). A search holds the parsed query, never the original message. A renewal offer goes out a few days before expiry.
+    - `buyerMatches` accepts `on` besides `off` and `shadow`. The code default stays `off` and `config.json.example` stays `shadow`; `/config buyerMatches shadow` is the kill switch.
+    - `/label` also labels buyer matches as useful or not (`lb_<id>_<u|d|m>`), and `/stats` gained a buyer line.
+    - Tests: `check-buyer` (new, in `pnpm test`, needs `MONGO_URI`), plus coverage in `check-callbacks`, `check-cards`, `check-routes`, `check-classifier` and `check-rich`. `/test` gained buyer cases. `src/tests/syntheticBuyer.ts` is manual (not in `pnpm test`), TEST bot and groups only.
+  - Notes:
+    - `s_` carries a capture id, and captures live 7 days, so an `s_` link stops working after 7 days. `/alerts <text>` has no such limit.
+    - Private notes are best effort: they reach only apps online when sent. The alert DMs are ordinary messages.
+    - The `saved_searches` TTL deletes a search at 60 days in every mode, including `shadow` and `off`.
+    - Data: additive only. New collections `saved_searches` and `alert_log`; new optional fields `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. Rolling back to 3.1.0 leaves them as harmless leftovers; `al_` buttons fall to the stale toast and `s_` links to the greeting.
+    - Take the `mongodump` from `docs/BACKUP.md` first, before deploying. Deploys need the owner's go-ahead. The version is not bumped here; the owner picks the release order.
+
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).
   - Added:
     - **Opt-in capture notes.** With `captureMode: "optin"`, a sale post in the sale topic gets a private note to its author (an ephemeral message only they see; nothing is posted publicly) with **Add** (`mk_<captureId>_a`), **Not now** and **Don't ask again**. Add makes a group listing pointing at the member's own message; a post missing a title or price offers a button into the bot instead. A repost of the same item (same text, or a near-identical text with the same title) refreshes the listing, which follows the newest repost (message, text, price, photos), and sends a short refresh note; a different item that reads alike gets its own note. Limits: 3 notes per seller per 24 h (ask and refresh notes both count), and a text a note was sent for is not asked again for 30 days, answered or not. A blocked word ends the capture silently.
