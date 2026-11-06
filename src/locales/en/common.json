@@ -180,6 +180,8 @@
     "captureNoteIncomplete": "Add this to the market? Some details are missing, finish it in the bot.",
     "captureAddButton": "✅ Add",
     "captureCompleteButton": "➕ Finish in bot",
+    "captureEditButton": "✏️ Edit",
+    "captureNoteTrade": "This looks like a trade. Edit the details in the bot to add it.",
     "captureNotNowButton": "Not now",
     "captureNeverButton": "Don't ask again",
     "captureNeverNote": "OK, I won't ask again. To change this, open /myposts in the bot.",

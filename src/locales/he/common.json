@@ -180,6 +180,8 @@
     "captureNoteIncomplete": "להוסיף את זה לשוק? חסרים כמה פרטים, אפשר להשלים בבוט.",
     "captureAddButton": "✅ הוספה",
     "captureCompleteButton": "➕ להשלים בבוט",
+    "captureEditButton": "✏️ עריכה",
+    "captureNoteTrade": "נראה שזו החלפה או טרייד. אפשר לערוך את הפרטים בבוט ולהוסיף.",
     "captureNotNowButton": "לא עכשיו",
     "captureNeverButton": "לא לשאול שוב",
     "captureNeverNote": "בסדר, לא אשאל שוב. כדי לשנות את זה, פתחו את /myposts בבוט.",

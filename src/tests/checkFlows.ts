@@ -1798,7 +1798,7 @@ async function run() {
                 assert.deepStrictEqual(
                     [(p.ephemeral_message_parameters as { receiver_user_id: number }).receiver_user_id, Number(p.chat_id), "message_thread_id" in p],
                     [u, APPROVED_GROUP, false]);
-                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
+                assert.deepStrictEqual(rows(sent[0]).flat().map((b) => b.callback_data).filter(Boolean), [`mk_${cap._id}_a`, `mk_${cap._id}_n`, `mk_${cap._id}_x`]);
                 assert.strictEqual(cap.state, "asked");
                 assert.ok(ephemeralId(sent[0]) !== undefined && ephemeralId(sent[0])! >= 5000);
                 assert.strictEqual(cap.note?.ephemeralMessageId, ephemeralId(sent[0]));
