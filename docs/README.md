@@ -79,7 +79,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
 | `/donate` | Support the bot by donating Telegram Stars. |
-| `/alerts` | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists your saved searches (max 5) and lets you remove or renew them. Needs `buyerMatches: "on"`. |
+| `/alerts` | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists your saved searches (max 5) and lets you remove or renew them. Saving needs `buyerMatches: "on"`; listing and the buttons work in every mode. |
 | `/help` | Show the list of available commands. |
 
 ### 🛡️ Moderator Commands
@@ -374,7 +374,7 @@ docker compose -f compose.prod.yaml logs -f bot
 > **Deploying slice 0 (market core + shadow classifier).** The new collections are additive; the 2.0.1 image still runs against the same database. (1) Create `./blocklist/` and copy `src/config/blockedWords.json` into it (see above). (2) The production `config.json` predates the `captureMode` and `buyerMatches` keys, so capture starts **off**. Turn it on as an admin with `/config captureMode shadow` and `/config buyerMatches shadow`; both only record, nothing is sent to the group. (3) Confirm `LEGACY_CUTOFF` (`2026-11-04`, in `src/services/marketService.ts`): posts created before it become held legacy listings, posts after it become normal ones.
 
 > **Deploying 3.1.0 (opt-in capture notes).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. Deploy with `captureMode: shadow` (no behaviour change); set `/config captureMode optin` only after a second account (not the poster, not an admin) has confirmed in the test group that other members do not see the note. `/config captureMode shadow` stops the notes at once.
-> **Deploying slice 4 (buyer matches and alerts).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. The new collections and fields are additive. `buyerMatches: on` needs `captureMode` `shadow` or `optin`, because the notes hang off captured "wanted" messages. `/config buyerMatches on` starts the notes and alerts; `/config buyerMatches shadow` is the kill switch. Saved searches stay in the database and resume when it is turned on again, unless their 60-day TTL has deleted them.
+> **Deploying slice 4 (buyer matches and alerts).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. The new collections and fields are additive. The buyer notes need `captureMode` `shadow` or `optin`, because they hang off captured "wanted" messages; the saved-search alerts do not. `/config buyerMatches on` starts the notes and alerts; `/config buyerMatches shadow` is the kill switch. Saved searches stay in the database and resume when it is turned on again, unless their 60-day TTL has deleted them or a 403 (the buyer blocked the bot) deleted that buyer's searches.
 
 > **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
 
@@ -461,7 +461,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
 | `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
-| `buyerMatches`       | enum | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the private buyer notes and the DM alerts for saved searches. `shadow` is the kill switch (notes and alerts stop at once, saved searches stay and resume). Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`       | enum | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the private buyer notes and the DM alerts for saved searches. `shadow` is the kill switch (notes and alerts stop at once; saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`             | boolean | Reserved for a later slice; nothing reads it yet |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |

@@ -141,7 +141,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
 | `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
-| `buyerMatches`      | string  | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the buyer notes and saved-search alerts (`shadow` is the kill switch). Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`      | string  | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the buyer notes and saved-search alerts (`shadow` is the kill switch: saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`            | boolean | Reserved for a later slice; nothing reads it yet          |
 | `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 
@@ -181,7 +181,7 @@ Nothing a user or moderator is in the middle of lives in process memory: a resta
 - **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
 - **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
 - **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
-- **Slice 4 fields** are optional and additive: new collections `saved_searches` (60-day TTL on `expiresAt`, in every mode) and `alert_log` (unique per search and listing), plus `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. A saved search holds the parsed query, never the original message. After a rollback the `al_` buttons answer "expired" and `s_` links fall to the greeting.
+- **Slice 4 fields** are optional and additive: new collections `saved_searches` (60-day TTL on `expiresAt`, in every mode) and `alert_log` (unique per search and listing), plus `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. A saved search holds the parsed query, never the original message; it stays and resumes when `buyerMatches` goes back to `on`, except that a 403 (the buyer blocked the bot) deletes that buyer's searches, and the 60-day TTL deletes the rest. After a rollback the `al_` buttons answer "expired" and `s_` links fall to the greeting.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
 ### Localization
@@ -203,7 +203,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/config` | Admin     | View/update `config.json` keys at runtime        |
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
-| `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (needs `buyerMatches: on`) |
+| `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
