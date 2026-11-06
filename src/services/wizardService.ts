@@ -326,6 +326,11 @@ export class WizardService {
     private async finishQuick(userId: string, from: TelegramUser): Promise<void> {
         const draft = await draftRepository.claimCollecting(userId);
         if (!draft) return;
+        // No caption came with the album (a straggler after a WTB reply, /cancel or Confirm): say nothing.
+        if (!draft.caption?.trim()) {
+            await draftRepository.delete(userId);
+            return;
+        }
         const { tier, parsed } = classify(draft.caption ?? "", draft.media.length > 0);
         if (tier === "wtb" && draft.caption) {
             await draftRepository.delete(userId);
@@ -539,6 +544,10 @@ export class WizardService {
                     await this.removeKeyboard(message.chat.id, message.message_id);
                     if (draft.collecting) {
                         await this.finishQuick(draft.userId, query.from);
+                        return true;
+                    }
+                    if (draft.quick && draft.step === "media") { // a crash between the claim and the send
+                        await this.advance(draft, query.from);
                         return true;
                     }
                     const messageId = await this.sendStep(draft, query.from);

@@ -595,6 +595,43 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             cfg.quickListing = true;
             console.log("  [OK] (k18) key off: an album with a caption is ignored; /start sell asks for the title.");
         }
+
+        // (k19) a caption-less album is silence; so is a straggler item after a WTB reply
+        {
+            const { h } = boot();
+            const u = user();
+            await album(h, u, `n${u}`, -1, "");
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "no message");
+            assert.strictEqual(await draftOf(u), null, "no draft");
+
+            const w = user();
+            await h.message(photo("w0"), { userId: w, mediaGroupId: `w${w}`, caption: "מחפש nomatchzz78" });
+            await waitTimer();
+            assert.ok(sent(h).length === 1, "the WTB reply");
+            h.calls.length = 0;
+            await h.message(photo("w1"), { userId: w, mediaGroupId: `w${w}` });
+            await waitTimer();
+            assert.strictEqual(outbound(h).length, 0, "a straggler says nothing");
+            assert.strictEqual(await draftOf(w), null);
+            console.log("  [OK] (k19) a caption-less album or a straggler item leaves no draft and no message.");
+        }
+
+        // (k20) Continue on a quick draft left at step media with title and price: the preview
+        {
+            const { h } = boot();
+            const u = user();
+            const now = new Date();
+            await Draft.create({ userId: String(u), chatId: u, locale: "en", step: "media", quick: true, title: "Glock", price: "900", media: [{ fileId: "m1", type: "photo" }], promptMessageId: 0, startedAt: now, updatedAt: now });
+            await h.sendText("/newpost", { userId: u });
+            await settle();
+            h.calls.length = 0;
+            await h.pressButton(`draft_continue_${u}`, { userId: u, messageId: (await draftOf(u))!.promptMessageId });
+            await settle();
+            assert.strictEqual(previews(h).length, 1);
+            assert.strictEqual((await draftOf(u))!.step, "confirm");
+            console.log("  [OK] (k20) Continue on a crashed quick draft gives the preview.");
+        }
     } finally {
         cfg.quickListing = wasQuick;
         cfg.minimumPhotos = wasMin;
