@@ -10,7 +10,7 @@ const REPOST_MS = 30 * 24 * 3600_000;
 const REPOST_OVERLAP = 0.8;
 
 // What the sweeper just decided about one capture (`capture` is the claimed document, as it was before the classification was saved).
-export interface ClassifiedEvent { capture: ICapture; result: ClassifyResult; mergeWith?: string }
+export interface ClassifiedEvent { capture: ICapture; result: ClassifyResult; mergeWith?: string; shadowId: string; matches?: string[] }
 export type OnClassified = (event: ClassifiedEvent, now: Date) => Promise<void>;
 
 // Claims one closed capture, records what automatic capture would have done
@@ -33,12 +33,12 @@ export async function processOneClosed(config: BotConfig, now: Date, onClassifie
         mergeWith = repost ? String(repost._id) : undefined;
     }
 
-    const matches = tier === "wtb" && config.buyerMatches === "shadow"
-        ? rankMatches(cap.text, await listingRepository.findLiveForMatching())
+    const matches = tier === "wtb" && (config.buyerMatches === "shadow" || config.buyerMatches === "on")
+        ? rankMatches(cap.text, (await listingRepository.findLiveForMatching()).filter(l => l.sellerId !== cap.senderId))
         : undefined;
 
     const wouldList = tier === "strict" && !mergeWith;
-    await shadowLogRepository.insert({
+    const row = await shadowLogRepository.insert({
         chatId: cap.chatId,
         messageIds: cap.messageIds,
         senderId: cap.senderId,
@@ -53,7 +53,7 @@ export async function processOneClosed(config: BotConfig, now: Date, onClassifie
     await captureRepository.saveClassification(String(cap._id), tier, rules, parsed);
     if (onClassified) {
         try {
-            await onClassified({ capture: cap, result, mergeWith }, now);
+            await onClassified({ capture: cap, result, mergeWith, shadowId: String(row._id), matches }, now);
         } catch (err) {
             console.error("[ERROR - shadow:onClassified]", (err as Error).message);
         }

@@ -9,6 +9,7 @@ import Capture from "../models/Capture";
 import Member from "../models/Member";
 import Listing from "../models/Listing";
 import ShadowLog from "../models/ShadowLog";
+import { TEST_CASES } from "./testCases";
 import { createHarness, BOT_USERNAME } from "./harness";
 import { seedCapture } from "./fixtures";
 import { AuthLevel, BotConfig } from "../types";
@@ -78,7 +79,7 @@ async function run() {
     try {
         // Admin commands answer a plain user with "not an admin", which is still a reply.
         const commands = [
-            "/start", "/myposts", "/help", "/lang", "/config", "/activeUsers", "/pending",
+            "/start", "/myposts", "/alerts", "/help", "/lang", "/config", "/activeUsers", "/pending",
             "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
             "/auth", "/test", "/donate", "/cancel", "/stats", "/label",
             "/start@" + BOT_USERNAME, "/START",
@@ -240,6 +241,60 @@ async function run() {
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")), "shadow_last5 answers");
             const last5 = String(h.calls.find((c) => c.method === "sendMessage")!.params.text);
             assert.ok(last5.split("\n")[0].endsWith(" · —") && !last5.includes("undefined"), `shadow_last5 shows — for empty messageIds, got ${last5}`);
+
+            // /label matches: wanted posts with matches, useful / not useful / skip, admin only.
+            await ShadowLog.deleteMany({ _id: { $ne: shadow._id }, tier: "wtb", "matches.0": { $exists: true }, matchLabel: { $exists: false } });
+            const botListing = await Listing.create({ source: "bot", origin: "dm", messageIds: [], sellerId: "match-test", title: "Glock 17", media: [], status: "live", hold: false, isBundle: false, createdAt: new Date(), refreshedAt: new Date() });
+            const untitled = await Listing.create({ source: "group", origin: "capture", chatId: config.approvedGroupId, messageIds: [777], sellerId: "match-test", media: [], status: "live", hold: false, isBundle: false, createdAt: new Date(), refreshedAt: new Date() });
+            const mkWanted = (messageId: number) => ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [messageId], senderId: "match-test", at: new Date(), tier: "wtb", rules: [], wouldList: false, matches: [String(botListing._id), String(untitled._id)] });
+            const wantA = await mkWanted(8181);
+            try {
+                h.calls.length = 0;
+                await h.sendText("/label matches", { userId: adminId });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")), "/label matches answers");
+                const mc = h.calls.find((c) => c.method === "sendMessage")!;
+                assert.strictEqual(String(mc.params.text), "https://t.me/pubgroup/8181\nGlock 17\n—", "wanted link, then one line per match (— when no title)");
+                assert.deepStrictEqual((mc.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat().map((b) => b.callback_data), [`lb_${wantA._id}_u`, `lb_${wantA._id}_d`, `lb_${wantA._id}_m`]);
+                await ShadowLog.deleteMany({ label: { $exists: false }, wouldList: true });
+                const sale = await ShadowLog.create({ chatId: config.approvedGroupId, messageIds: [9191], senderId: "match-test", at: new Date(), tier: "strict", rules: [], wouldList: true });
+                await expectCalls("/label alone", () => h.sendText("/label", { userId: adminId }));
+                assert.ok(JSON.stringify(h.calls.find((c) => c.method === "sendMessage")!.params.reply_markup).includes(`lb_${sale._id}_s`), "/label alone is still the sale mode");
+
+                h.calls.length = 0;
+                await h.pressButton(`lb_${wantA._id}_u`, { userId: modId, messageId: 64 });
+                assert.strictEqual((await ShadowLog.findById(wantA._id))?.matchLabel, undefined, "a moderator cannot label a match");
+                await h.pressButton(`lb_${wantA._id}_m`, { userId: adminId, messageId: 64 });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")), "Skip edits the message");
+                assert.strictEqual((await ShadowLog.findById(wantA._id))?.matchLabel, undefined, "Skip labels nothing");
+                assert.strictEqual(h.calls.find((c) => c.method === "editMessageText")!.params.text, localeService.t(config.lang, "labelMatchEmpty"), "Skip with no other row shows labelMatchEmpty");
+
+                const wantB = await mkWanted(8282);
+                h.calls.length = 0;
+                await h.pressButton(`lb_${wantA._id}_m`, { userId: adminId, messageId: 64 });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")));
+                assert.ok(JSON.stringify(h.calls.find((c) => c.method === "editMessageText")!.params.reply_markup).includes(`lb_${wantB._id}_u`), "Skip shows the other row");
+                h.calls.length = 0;
+                await h.pressButton(`lb_${wantA._id}_u`, { userId: adminId, messageId: 64 });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")));
+                const ua = await ShadowLog.findById(wantA._id);
+                assert.deepStrictEqual([ua?.matchLabel, ua?.matchLabeledBy], ["useful", String(adminId)]);
+                await h.pressButton(`lb_${wantB._id}_d`, { userId: adminId, messageId: 64 });
+                await waitFor(() => false, 100);
+                assert.strictEqual((await ShadowLog.findById(wantB._id))?.matchLabel, "not_useful");
+
+                // /stats buyer line: shown under shadow when there are wanted rows
+                controller.config.buyerMatches = "shadow";
+                const b = await (await import("../repositories/shadowLogRepository")).default.buyerStats(new Date(Date.now() - 7 * 24 * 3600 * 1000));
+                h.calls.length = 0;
+                await h.sendText("/stats", { userId: modId });
+                assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
+                assert.ok(lastText().includes(`Wanted: ${b.wanted}, with matches: ${b.withMatches}`), "/stats shows the buyer line");
+            } finally {
+                delete controller.config.buyerMatches;
+                await ShadowLog.deleteMany({ senderId: "match-test" });
+                await Listing.deleteMany({ sellerId: "match-test" });
+            }
+            assert.ok("match_for_text" in TEST_CASES && "alert_me_now" in TEST_CASES, "/test has the buyer cases");
         } finally {
             await ShadowLog.deleteMany({ senderId: { $in: ["skip-test", "last5-test"] } });
             await ShadowLog.deleteOne({ _id: shadow._id });

@@ -6,7 +6,7 @@ import { isMeetupLocation, meetupLocationText } from "./meetup";
 
 export type Translate = (key: string, params?: Record<string, string | number | boolean>) => string;
 export type Surface = "n" | "c" | "l";
-export interface Card { text: string; keyboard: InlineKeyboardButton[][] }
+export interface Card { text: string; keyboard: InlineKeyboardButton[][]; html?: boolean }
 
 type ListingAction = "s" | "f" | "r";
 type CaptureAction = "a" | "n" | "x";

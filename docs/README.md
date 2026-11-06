@@ -34,6 +34,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 - **Multi Localization** — User-specific language preferences with automatic detection from Telegram language settings. Supports multiple languages in structured `src/locales/<lang>/common.json` files.
 - **Shadow Classifier (market groundwork)** — With `captureMode: "shadow"` the bot records messages in the sale topic into per-sender posting windows (90 s, closed after 30 s of quiet), classifies each (`strict`, `ask`, `wtb`, `none`) and logs what automatic capture *would* have done (`shadow_log`, 120 days). It **sends nothing** to the group or to members. Captured text lives 7 days. `buyerMatches: "shadow"` also logs which live listings a "wanted" message would match
 - **Opt-in Capture Notes** — With `captureMode: "optin"`, a member who posts a sale message in the sale topic gets a **private note** (an ephemeral message only they see, nothing public) asking whether to add it to the market: **Add**, **Not now** or **Don't ask again**. Add makes a *group listing* that points at their own message; the member can mark it **Sold**, **Refresh** or **Remove** from the note, from `/myposts` or from a bot card, and editing the message keeps the listing in step. Reposting the same item refreshes the listing and brings its text and price up to date. The bot never touches the member's message and a seller can never remove an approved bot post. At most 3 notes per seller per 24 h; a text a note was already sent for is not asked again for 30 days. A seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) gets a **Take down** card in the moderation topic (group listings are post-moderated). The card offers **Take down** (the member's message stays) or **Take down and delete original post**, which asks once more and then deletes the member's message and all its photos (moderators only; Telegram lets a bot delete only messages under 48 h old, and the card says how many were left). A seller's Remove never deletes anything
+- **Buyer Matches and Alerts**: With `buyerMatches: "on"`, a member who posts a "wanted" message in the sale topic gets a private note listing the live listings that match, with an **Alert me** link (`?start=s_<captureId>`) that saves the search. A saved search DMs the buyer when a new matching listing appears. `/alerts <text>` also saves a search, and `/alerts` lists and removes them (max 5 per buyer). Searches hold the parsed query, never the original message. Private notes are best effort (they reach only apps online when sent), and the `s_` link carries a capture id, so it stops working after 7 days. A saved search is deleted by TTL at 60 days in every mode, with a renewal offer a few days before
 - **Listing Lifecycle** — With `nudges: true` a listing not refreshed for 7 days gets a DM with **Refresh** and **Sold** (group listings also **Remove**); after 30 days it expires (this runs whatever `nudges` says). An approved bot post stays `approved` when its listing expires, and `/myposts` offers **Relist**. A held nudge (seller not reachable) arrives as a private note (with **Manage**) after their next sale-topic message; held nudges need capture on (`captureMode` not `off`). **Bump** lifts a legacy hold, which shrinks the `/stalecheck` count. New group cards carry a short trust line about the seller
 - **`/stalecheck`** — Admin DM command: asks the sellers of legacy (held) listings whether each is still for sale. A dry run first, nothing is sent before **Send** is pressed; unanswered listings expire 7 days later
 - **Deep Links** — `t.me/<bot>?start=c_<captureId>` opens a draft prefilled from a captured message (to complete a missing title or price, refused while another draft is open); `?start=l_<listingId>` opens the management card of a group or bot listing
@@ -80,6 +81,7 @@ This is Built with **TypeScript**, **node-telegram-bot-api**, and **MongoDB** an
 | `/lang` | Set your preferred language for bot interactions. |
 | `/faq` | View airsoft frequently asked questions and information. |
 | `/donate` | Support the bot by donating Telegram Stars. |
+| `/alerts` | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists your saved searches (max 5) and lets you remove or renew them. Saving needs `buyerMatches: "on"`; listing and the buttons work in every mode. |
 | `/help` | Show the list of available commands. |
 
 ### 🛡️ Moderator Commands
@@ -105,7 +107,7 @@ Every published post card carries **🚫 Take down** (when its listing exists). 
 | `/activeUsers` | List users with a post in progress (a live draft). |
 | `/config` | View or update bot configuration at runtime (e.g., `/config dailyBumpLimit 5`). |
 | `/stalecheck` | DM only. Dry run of the legacy-listing check, then **Send** to ask the sellers (`/stalecheck <userId ...>` limits it to those sellers). |
-| `/label` | Label a random unlabeled would-list row as sale / not sale (or skip) to measure the shadow classifier. |
+| `/label` | Label a random unlabeled would-list row as sale / not sale (or skip) to measure the shadow classifier. With matches logged it also asks whether a match was useful. |
 | `/test` | Run built-in test scenarios to verify bot functionality. |
 | `/broadcast` | Send a message to the approved channel, either by replying to an existing message or by typing a new message. |
 | `/broadcastUsers` | Send a direct message (PM) to every active user and every author of a pending or approved post (de-duplicated, excluding you). Text only; reports per-recipient delivery failures. |
@@ -274,6 +276,10 @@ src/
 │   ├── marketService.ts      # Reconciles bot posts into listings
 │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
 │   ├── shadowAdminService.ts # /label and /stats
+│   ├── buyerNoteService.ts   # Private buyer note on a "wanted" post: matching listings and an Alert me link
+│   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list and alert DMs (al_)
+│   ├── savedSearchService.ts # /alerts, the s_ link, the one-reply fix and the al_ buttons
+│   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
 │   ├── captureNoteService.ts # Private opt-in capture notes: ask, refresh, Add / Not now / Don't ask again (mk_)
 │   ├── lifecycleService.ts   # Refresh / sold / remove for any listing, 7-day nudge, 30-day expiry, lc_ buttons
 │   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
@@ -294,6 +300,8 @@ src/
 │   ├── syntheticCapture.ts   # Manual: 20 messages through the controller on the TEST bot/group; sends nothing
 │   ├── syntheticLifecycle.ts # Manual: a stale-check DM and a nudge DM to the owner on the TEST bot
 │   ├── syntheticOptin.ts     # Manual: one real private note + one moderation card on the TEST bot/groups, cleaned up after
+│   ├── checkBuyerMatches.ts  # `pnpm run check-buyer`: saved searches, alerts, buyer notes (needs MONGO_URI)
+│   ├── syntheticBuyer.ts     # Manual: one buyer note and one alert on the TEST bot/groups, cleaned up after
 │   ├── checkListingCards.ts  # Card builders, callback_data and start payload formats (`pnpm run check-cards`)
 │   ├── fixtures.ts           # `seedCapture`: a classified capture straight through the model
 │   ├── checkCallbackData.ts  # Golden test pinning callback_data formats
@@ -372,6 +380,7 @@ docker compose -f compose.prod.yaml logs -f bot
 > **Deploying slice 0 (market core + shadow classifier).** The new collections are additive; the 2.0.1 image still runs against the same database. (1) Create `./blocklist/` and copy `src/config/blockedWords.json` into it (see above). (2) The production `config.json` predates the `captureMode` and `buyerMatches` keys, so capture starts **off**. Turn it on as an admin with `/config captureMode shadow` and `/config buyerMatches shadow`; both only record, nothing is sent to the group. (3) Confirm `LEGACY_CUTOFF` (`2026-11-04`, in `src/services/marketService.ts`): posts created before it become held legacy listings, posts after it become normal ones.
 
 > **Deploying 3.1.0 (opt-in capture notes).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. Deploy with `captureMode: shadow` (no behaviour change); set `/config captureMode optin` only after a second account (not the poster, not an admin) has confirmed in the test group that other members do not see the note. `/config captureMode shadow` stops the notes at once.
+> **Deploying slice 4 (buyer matches and alerts).** Take the `mongodump` from `docs/BACKUP.md` first and deploy only on the owner's go-ahead. The new collections and fields are additive. The buyer notes need `captureMode` `shadow` or `optin`, because they hang off captured "wanted" messages; the saved-search alerts do not. `/config buyerMatches on` starts the notes and alerts; `/config buyerMatches shadow` is the kill switch. Saved searches stay in the database and resume when it is turned on again, unless their 60-day TTL has deleted them or a 403 (the buyer blocked the bot) deleted that buyer's searches.
 
 > **First publish only:** GHCR creates the package as private. Set its visibility to **Public** once in the package settings, so the host can pull without logging in.
 
@@ -458,7 +467,7 @@ Values set via `/config` are validated per key (see `src/services/configSchema.t
 | `enableFaq`          | boolean | Enable/Disable the /faq command                   |
 | `mediaLayout`        | enum | How multiple photos render: `"slideshow"` (swipeable) or `"collage"` (grid) |
 | `captureMode`        | enum | `"off"`, `"shadow"` or `"optin"`: `shadow` records and classifies sale-topic messages without sending anything; `optin` also sends the private capture notes. `shadow` is the kill switch (notes stop at once, existing listings stay manageable). Code default `off`; `config.json.example` ships `shadow` |
-| `buyerMatches`       | enum | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`       | enum | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the private buyer notes and the DM alerts for saved searches. `shadow` is the kill switch (notes and alerts stop at once; saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`             | boolean | `true` sends the 7-day refresh nudge to sellers (default `false`; expiry runs regardless) |
 | `rulesUrl`           | string | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 | `timeOut`            | number | Minutes of inactivity before a `/newPost` draft expires (`0` = never). Checked on every touch against the live value, so `/config timeOut` applies immediately |

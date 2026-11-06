@@ -175,6 +175,8 @@ export interface UserSession {
     // reply-tracking table itself has no read-only peek. postId is absent on
     // entries written before 3.0.
     pendingRejects?: { promptId: number; skipMsgId: number; postId?: string }[];
+    // The buyer's one-reply fix after a saved search (or a failed one): the row it edits, the prompt and when.
+    pendingAlertFix?: { searchId?: string; promptId: number; at: number };
     // Admin's /stalecheck dry run waiting for sc_go; ignored after an hour.
     pendingStalecheck?: { sellerIds: string[]; at: number; promptMessageId?: number };
 }

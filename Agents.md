@@ -53,6 +53,10 @@
 │   │   ├── marketService.ts      # Reconciles bot posts into listings (LEGACY_CUTOFF)
 │   │   ├── sweeper.ts            # Overlap-free interval jobs (10 s capture tick, hourly reconcile)
 │   │   ├── shadowAdminService.ts # /label and /stats
+│   │   ├── buyerNoteService.ts   # Private buyer note on a "wanted" post: matching listings, Alert me link (s_)
+│   │   ├── buyerCards.ts         # Pure card builders for the buyer note, /alerts list, alert DMs; al_ helpers
+│   │   ├── savedSearchService.ts # /alerts, the s_ start link, the one-reply fix (pendingAlertFix), al_ buttons
+│   │   ├── alertService.ts       # Sweeper job: DM new matches for saved searches, renewal offers
 │   │   ├── captureNoteService.ts # Private opt-in capture notes: ask/refresh, Add / Not now / Don't ask again (mk_)
 │   │   ├── lifecycleService.ts   # Refresh / sold / remove for any listing (lc_), 7-day nudge, 30-day expiry, held nudges
 │   │   ├── staleCheckService.ts  # /stalecheck: ask legacy sellers if a listing is still for sale (sc_)
@@ -67,7 +71,9 @@
 │   │   ├── Listing.ts            # Mongoose schema: Listing (bot post or group message; collection `listings`)
 │   │   ├── Capture.ts            # Mongoose schema: Capture (sale-topic posting window; collection `captures`, 7-day TTL)
 │   │   ├── ShadowLog.ts          # Mongoose schema: ShadowLog (what capture would have done; `shadow_log`, 120-day TTL)
-│   │   └── Member.ts             # Mongoose schema: Member (last seen; collection `members`)
+│   │   ├── Member.ts             # Mongoose schema: Member (last seen; collection `members`)
+│   │   ├── SavedSearch.ts        # Mongoose schema: SavedSearch (a buyer's parsed query; `saved_searches`, 60-day TTL)
+│   │   └── AlertLog.ts           # Mongoose schema: AlertLog (one row per search and listing alerted; `alert_log`)
 │   ├── repositories/
 │   │   ├── postRepository.ts     # Post CRUD + status query helpers
 │   │   ├── userRepository.ts     # User lookup and auth-level helpers
@@ -76,7 +82,9 @@
 │   │   ├── listingRepository.ts  # Listing upserts, seller lookups, matching candidates
 │   │   ├── captureRepository.ts  # Capture windows: atomic append, close and classify claims
 │   │   ├── shadowLogRepository.ts # Shadow log rows, labels, stats
-│   │   └── memberRepository.ts   # Member last-seen touches
+│   │   ├── memberRepository.ts   # Member last-seen touches
+│   │   ├── savedSearchRepository.ts # Saved searches: upsert, per-buyer cap, due scans and renewals
+│   │   └── alertLogRepository.ts # Alert send-once claim and failure marks
 │   ├── types/
 │   │   └── index.ts              # Shared TypeScript interfaces (BotConfig, LocaleService, UserSession, etc.)
 │   ├── tests/
@@ -88,6 +96,8 @@
 │   │   ├── lifecycleFakes.ts     # Fakes for the lifecycle checks
 │   │   ├── syntheticLifecycle.ts # Manual (not in `pnpm test`): a stale-check DM and a nudge DM to the owner on the TEST bot
 │   │   ├── syntheticOptin.ts     # Manual (not in `pnpm test`): one real private note + one moderation card on the TEST bot/groups, cleaned up after
+│   │   ├── checkBuyerMatches.ts  # `pnpm run check-buyer`: saved searches, alerts, buyer notes
+│   │   ├── syntheticBuyer.ts     # Manual (not in `pnpm test`): one buyer note and one alert on the TEST bot/groups, cleaned up after
 │   │   └── testCases.ts          # In-bot /test command suite (admin-only)
 │   └locales/
 │       ├── en/
@@ -135,7 +145,7 @@ Copy from `config.json.example`. Editable at runtime via `/config` (admin-only):
 | `mediaLayout`       | string  | How multiple photos render: `"slideshow"` or `"collage"`  |
 | `dailyBumpLimit`    | number  | Max number of bumps a user can perform per day per post  |
 | `captureMode`       | string  | `"off"` or `"shadow"`: record and classify sale-topic messages, send nothing. Code default `off`; `config.json.example` ships `shadow` |
-| `buyerMatches`      | string  | `"off"` or `"shadow"`: log the listings a "wanted" message would match. Code default `off`; `config.json.example` ships `shadow` |
+| `buyerMatches`      | string  | `"off"`, `"shadow"` or `"on"`: `shadow` logs the listings a "wanted" message would match; `on` also sends the buyer notes and saved-search alerts (`shadow` is the kill switch: saved searches stay and resume, except that a 403 deletes that buyer's searches, and the 60-day TTL still applies). Code default `off`; `config.json.example` ships `shadow` |
 | `nudges`            | boolean | `true` sends the 7-day refresh nudge (default `false`); expiry at 30 days runs regardless |
 | `rulesUrl`          | string  | `https://t.me/` link to the group rules (empty = none); adds a "Group rules" button to reject messages |
 
@@ -174,11 +184,12 @@ User sends /newPost
 Nothing a user or moderator is in the middle of lives in process memory: a restart must lose nothing. There is no in-memory session map and no `isIdle` flag.
 - **Wizard state** lives in the `drafts` collection (`Draft` model, `draftRepository`): one document per user with the step, the answers, the media and `promptMessageId`. `WizardService` reads the user's draft on every update. Wizard buttons (Done-media, Confirm, Cancel, Continue/Start over) are valid only against the draft itself: it exists, its step matches and the pressed message is `promptMessageId`. Anything else falls through to `staleButtonCatchAll`, which answers "expired".
 - **Expiry**: `isDraftExpired(draft, config.timeOut)` is checked on every touch against the live `timeOut` (minutes, 0 = never). There is deliberately no TTL index; startup deletes drafts already past `timeOut`.
-- **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag, the moderator's pending reject-reason prompts (`pendingRejects`) and the admin's pending `/stalecheck` send (`pendingStalecheck`, tied to its dry-run message by `promptMessageId`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
+- **v2 sessions** (`createSession` in `BotController`, backed by `MongoSessionStore`, collection `bot_sessions`) are keyed `chat:user` (`sessionKey()`) with a 3-day idle TTL. They hold only the donation custom-amount flag, the moderator's pending reject-reason prompts (`pendingRejects`), a buyer's one-reply fix for a thin `/alerts` text (`pendingAlertFix`: prompt message id and time, valid 1 hour; with a `searchId` it replaces that search) and the admin's pending `/stalecheck` send (`pendingStalecheck`, tied to its dry-run message by `promptMessageId`). Reject prompts use v2 `expectReply`/`expectCallback` markers keyed on the prompt message id.
 - **Slice 1 fields** (`posts.rejectionNotifiedAt`, `drafts.fixing`) are optional and additive: the 2.0.1 image ignores them. `fixing` marks a wizard re-asking one field after a blocked word.
 - **Market collections** (`listings`, `captures` with a 7-day TTL, `shadow_log` with a 120-day TTL, `members`) are additive like the two above: v1 ignores them, nothing in `posts`/`users` changed, and rolling back to the 2.0.1 image against the same database still works (the new collections are harmless leftovers). Capture windows are rows in `captures` (90 s window, closed after 30 s of quiet), advanced by the sweeper started in `bot.ts`; there is no in-memory window state.
 - **Session data** also holds `pendingStalecheck` (the admin's pending `/stalecheck` dry run, confirmed with `sc_go` or dropped with `sc_no`).
 - **Slice 2 fields** are optional and additive too: `captures.note.kind` (`ask`/`refresh`; both count toward the 3 notes per seller per 24 h), `members.declined` (hash and date of every text a note was sent for, answered or not, kept 30 days, 20 hashes max, so a member is never nagged about the same text) and `drafts.captureId` (a `/start c_` draft prefilled from a capture). `/start c_` refuses to overwrite a live draft, and nothing else creates capture drafts, because an older image's wizard would post one as a bot post. After a rollback the `mk_`/`ls_` buttons do nothing and `/myposts` does not show group listings.
+- **Slice 4 fields** are optional and additive: new collections `saved_searches` (60-day TTL on `expiresAt`, in every mode) and `alert_log` (unique per search and listing), plus `shadow_log.matchLabel*`, `shadow_log.buyerNoteAt`, `members.lastBuyerNoteAt` and `listings.meetup`. A saved search holds the parsed query, never the original message; it stays and resumes when `buyerMatches` goes back to `on`, except that a 403 (the buyer blocked the bot) deletes that buyer's searches, and the 60-day TTL deletes the rest. After a rollback the `al_` buttons answer "expired" and `s_` links fall to the greeting.
 - **Slice 3 fields** are optional and additive: `listings.nudgeHeld` (a nudge was claimed but could not be delivered; it waits for the seller's next sale-topic message) and `listings.staleSentAt` (set by `/stalecheck`, starts the 7-day answer window). `posts` and `users` are unchanged. After a rollback to 3.1.0 the `lc_`/`sc_` buttons do nothing and nothing expires or nudges; the fields are ignored.
 - A new multi-step flow stores its state in a document or in session data, never in an in-memory `Map`. `drafts` and `bot_sessions` are additive: keep their documents backward-compatible, and never change existing `posts`/`users` fields without a migration plan (see `docs/BACKUP.md`).
 
@@ -202,6 +213,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/stalecheck` | Admin | DM only: dry run, then ask legacy-listing sellers if each is still for sale (`sc_go`/`sc_no`) |
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
+| `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
@@ -252,6 +264,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-routes` | Route smoke test through the middleware chain | yes |
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
 | `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
+| `pnpm run check-buyer` | Buyer notes, saved searches, alert sweep and send-once claim, `/label` matches | yes |
 | `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
@@ -286,7 +299,7 @@ Never run the bot, or a check, against the production token or database.
 - **Don't hardcode strings in service files** — all text must come from `locals[config.lang]`.
 - **Don't import directly from `src/tests/testCases.ts`** outside of `botController.ts` — test cases are intentionally isolated.
 - **Don't bypass the moderation flow**: new sellers' posts pass through `moderationGroupId` before they appear in `approvedGroupId`. Trusted sellers' posts (an approved or sold post, no moderator take-down in the last 90 days) publish at once and are reviewed after publishing through the "Published (trusted seller)" card. Nothing else may publish to `approvedGroupId` without one of these two paths. Group listings (a member's own message, added through an opt-in capture note) are post-moderated instead: a seller's first listing of any kind (no listing yet, neither an approved bot post nor a group listing) sends a take-down card (`td_`) to the moderation topic. A seller can never remove an approved bot post (Sold is the way out): every `ls_` button is refused on a `bot` listing, and Remove on a group listing never touches the member's message. The bot posts nothing public for them. The one deliberate exception to "a member's own message is never touched" is a moderator's **Take down and delete original post** (`tx_`) on a group listing's take-down card: it ends the listing and deletes every id in `listing.messageIds` (photos included). It is moderators only and behind a confirm step; a seller's Remove still never deletes anything, and a bot listing's card has no such button.
-- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. The `c_<id>` / `l_<id>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
+- **Don't change the `rr_<postId>_<n>`, `td_<listingId>`, `tx_<listingId>_<d|y|n>`, `mk_<captureId>_<a|n|x>`, `mk_set_ask` / `mk_set_never` or `ls_<listingId>_<s|f|r>_<n|c|l>` callback formats**: they are frozen and pinned in `checkCallbackData.ts` (with `skip_reason_*`), and must stay within 64 bytes. Slice 4 adds `al_<searchId>_<d|r>`, `lb_<id>_<u|d|m>` (buyer-match labels, next to `lb_<id>_<s|n|k>`) and the `s_<captureId>` start payload, frozen the same way. The `c_<id>` / `l_<id>` start payloads are pinned there too. The same goes for `lc_<r|s|x>_<listingId>` and `sc_go` / `sc_no`.
 - **Don't use `var`**; prefer `const`/`let`. Follow the ESLint rules in `eslint.config.mjs`.
 - **Don't keep per-user flow state in memory** (a `Map`, a module variable, a temporary listener): it is lost on restart.
 - **Don't mutate `config.json` directly at runtime from code** — use `adminService` to handle `/config` updates.

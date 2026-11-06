@@ -55,7 +55,8 @@ assert.deepStrictEqual(parseConfigValue("captureMode", "shadow"), { ok: true, va
 assert.deepStrictEqual(parseConfigValue("captureMode", "optin"), { ok: true, value: "optin" });
 assert.strictEqual(parseConfigValue("captureMode", "hybrid").ok, false, "hybrid is not allowed");
 assert.deepStrictEqual(parseConfigValue("buyerMatches", "off"), { ok: true, value: "off" });
-assert.strictEqual(parseConfigValue("buyerMatches", "on").ok, false, "on is not allowed yet");
+assert.deepStrictEqual(parseConfigValue("buyerMatches", "on"), { ok: true, value: "on" });
+assert.strictEqual(parseConfigValue("buyerMatches", "maybe").ok, false, "maybe is not allowed");
 assert.deepStrictEqual(parseConfigValue("nudges", "true"), { ok: true, value: true });
 assert.deepStrictEqual(parseConfigValue("quickListing", "true"), { ok: true, value: true });
 const rules = "https://t.me/airsoft_yad2/54833/115880";
