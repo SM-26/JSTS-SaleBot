@@ -147,8 +147,7 @@ export class MyPostsService {
             }
             const card = buildManagementCard(t, listing, { surface: "c" });
             const trustLine = await safeTrustLine(userId, locale, "showListingCard");
-            await sendCard(trustLine ? { ...card, text: `${card.text}
-${trustLine}` } : card);
+            await sendCard(trustLine ? { ...card, text: `${card.text}\n${trustLine}` } : card);
             return;
         }
         const post = listing.status === "live" && listing.postId ? await postRepository.findById(listing.postId) : null;
