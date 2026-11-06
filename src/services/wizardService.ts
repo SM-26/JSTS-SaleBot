@@ -24,9 +24,9 @@ import { listingLines } from "./buyerNoteService";
 import listingRepository from "../repositories/listingRepository";
 
 type TextStep = "title" | "description" | "price" | "location";
-type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editPrice" | "editLocation" | "meetup";
-type EditAction = "editTitle" | "editPrice" | "editLocation";
-const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editPrice: "price", editLocation: "location" };
+type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editDescription" | "editPrice" | "editLocation" | "meetup";
+type EditAction = "editTitle" | "editDescription" | "editPrice" | "editLocation";
+const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editDescription: "description", editPrice: "price", editLocation: "location" };
 
 const TOTAL_STEPS = 5;
 /** How long after the last album item the quick draft is finished (an album arrives as separate updates). */
@@ -52,6 +52,7 @@ const CALLBACKS: { prefix: string; action: WizardAction }[] = [
     { prefix: "draft_continue_", action: "continue" },
     { prefix: "draft_restart_", action: "restart" },
     { prefix: "draft_edit_title_", action: "editTitle" },
+    { prefix: "draft_edit_description_", action: "editDescription" },
     { prefix: "draft_edit_price_", action: "editPrice" },
     { prefix: "draft_edit_location_", action: "editLocation" },
     { prefix: "draft_meetup_", action: "meetup" },
@@ -180,12 +181,13 @@ export class WizardService {
             inline_keyboard.push(
                 [
                     { text: this.t(draft.locale, "editTitleButton"), callback_data: `draft_edit_title_${draft.userId}` },
-                    { text: this.t(draft.locale, "editPriceButton"), callback_data: `draft_edit_price_${draft.userId}` },
+                    { text: this.t(draft.locale, "editDescriptionButton"), callback_data: `draft_edit_description_${draft.userId}` },
                 ],
                 [
+                    { text: this.t(draft.locale, "editPriceButton"), callback_data: `draft_edit_price_${draft.userId}` },
                     { text: this.t(draft.locale, "editLocationButton"), callback_data: `draft_edit_location_${draft.userId}` },
-                    this.meetupButton(draft.locale, draft.userId, draft.meetup),
-                ]
+                ],
+                [this.meetupButton(draft.locale, draft.userId, draft.meetup)]
             );
         }
         return {
@@ -608,6 +610,7 @@ export class WizardService {
                     return true;
                 }
                 case "editTitle":
+                case "editDescription":
                 case "editPrice":
                 case "editLocation": {
                     await this.ack(query);
@@ -658,7 +661,7 @@ export class WizardService {
     }
 
     private isQuickAction(action: WizardAction): boolean {
-        return action === "editTitle" || action === "editPrice" || action === "editLocation" || action === "meetup";
+        return action === "editTitle" || action === "editDescription" || action === "editPrice" || action === "editLocation" || action === "meetup";
     }
 
     // Save & send to moderation (the draft was already taken atomically).

@@ -38,7 +38,8 @@
 │   │   ├── postService.ts        # Post formatting, preview, sending to groups, bump/sold editing
 │   │   ├── moderationService.ts  # Approve/reject callbacks; reject presets (rr_) or reply (legacy Skip still works); once-only author notice
 │   │   ├── publishService.ts     # submitPost(): trusted sellers publish at once with a review card, others go to moderation
-│   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days
+│   │   ├── trustService.ts       # isTrustedSeller(): approved or sold post, no moderator take-down in 90 days; sellerTier()/sellerLayout(): regular/top/verified/both
+│   │   ├── tierLayouts.ts        # Rich post layouts for top, verified and both sellers (regular stays in postService)
 │   │   ├── takeDownService.ts    # Moderator take-down (td_): listing taken_down, group message removed, author told; tx_ also deletes a group listing's original post (confirm step)
 │   │   ├── myPostsService.ts     # /myposts listing, sold and bump callbacks
 │   │   ├── adminService.ts       # /config command for runtime config edits
@@ -225,6 +226,7 @@ All user-facing strings live in `src/locales/<lang>/common.json` files, where `<
 | `/label`  | Admin     | DM only: label a random would-list shadow row as sale / not sale |
 | `/stats`  | Mod       | DM only: shadow classifier numbers (tiers, merges, label precision) |
 | `/alerts` | All users | `/alerts <text>` saves a search for what you want to buy; `/alerts` lists, removes and renews them (saving needs `buyerMatches: on`; listing and the buttons work in every mode) |
+| `/verify`, `/unverify` | Mod | Set or clear the ✅ verified mark (`users.verifiedAt`); tiers pick the post layout |
 | `/test`   | Admin     | Runs in-bot test cases from `src/tests/testCases.ts` |
 | `/donate` | All users | Donate Stars to support the bot (optional)       |
 
@@ -276,6 +278,7 @@ pnpm run test            # runs every check-* script below, in this order
 | `pnpm run check-flows` | Wizard and reject-reason flows, including a simulated restart | yes |
 | `pnpm run check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
 | `pnpm run check-buyer` | Buyer notes, saved searches, alert sweep and send-once claim, `/label` matches | yes |
+| `pnpm run check-tiers` | Tier selection, /verify permissions, tier layouts at publish/sold, /test tier cases | yes |
 | `pnpm run check-rich` | Rich-message builders: help, broadcast report, post entities (golden strings) | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Point it at a throwaway database, never production, e.g. `docker run -d --rm --name test-mongo -p 127.0.0.1:27028:27017 mongo:8.2` and `MONGO_URI=mongodb://127.0.0.1:27028/SalesBotTestDB pnpm test`. The checks also need a `config.json` (`cp config.json.example config.json`). CI provides both.
@@ -293,6 +296,7 @@ Never run the bot, or a check, against the production token or database.
 - **Always update `src/locales/<lang>/common.json`** for all language keys when adding new user-facing messages. Validate with `pnpm run check-locals`.
 - **Use the `BotConfig` type** when reading runtime configuration; never hardcode group IDs or language strings.
 - **Tell the author once**: any path that notifies a post's author of a rejection must go through `postRepository.claimRejectionNotice`, so a double press or a restart never sends two notices.
+- **Post layout by tier**: `PostService.formatPostRichMessage` takes `tier`/`stats` from `sellerLayout()` (publish, bump, sold edit). Regular is the original code and its golden must not change; the other layouts are pinned in `tierLayouts.golden.json` (`UPDATE_GOLDEN=1 pnpm run check-rich`, review the diff). `posts.layoutTier` is set only by the `/test` "Post as" cases.
 - **Seller-post `/test` cases refuse outside the test bot** (`isTestBotToken`): they publish real posts, so never loosen that guard.
 - **Persist flow state**: flows are persisted (drafts, sessions), so there is no `isIdle` flag. Before acting on a wizard message or button, read the user's draft (`draftRepository.findByUserId`) and check it exists, is not expired (`isDraftExpired`) and is at the expected step. On errors, tell the user and leave the draft consistent, so they can `/cancel` or continue.
 - **Keep Mongoose queries in repositories**, not in services or controllers.

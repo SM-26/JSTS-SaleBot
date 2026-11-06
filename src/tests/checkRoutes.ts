@@ -81,7 +81,7 @@ async function run() {
         // Admin commands answer a plain user with "not an admin", which is still a reply.
         const commands = [
             "/start", "/myposts", "/alerts", "/help", "/lang", "/config", "/activeUsers", "/pending",
-            "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1",
+            "/clearpending", "/broadcast hello", "/broadcastUsers hello", "/promote 1", "/demote 1", "/verify 1", "/unverify 1",
             "/auth", "/test", "/donate", "/cancel", "/stats", "/label",
             "/start@" + BOT_USERNAME, "/START",
         ];

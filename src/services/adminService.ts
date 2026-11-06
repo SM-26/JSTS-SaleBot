@@ -211,6 +211,32 @@ export class AdminService {
     }
 
     /**
+     * Handle /verify and /unverify: the hand-picked verified mark (spec 17.1).
+     * Access: ADMIN (Level 2)
+     */
+    async handleVerify(msg: Message, args: string, verify: boolean): Promise<void> {
+        const actorId = String(msg.from!.id);
+        const actor = await this._getUser(msg.from!.id);
+        const locale = localeService.resolveUserLocale(actor);
+
+        if (!(await userService.hasAuthLevel(actorId, AuthLevel.MOD))) {
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'notAdmin') });
+            return;
+        }
+
+        const targetUser = await this._resolveTargetUser(msg, args);
+        if (!targetUser) {
+            await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'userNotFound') });
+            return;
+        }
+
+        const targetId = String(targetUser.userId);
+        await userRepository.setVerified(targetId, verify ? actorId : null);
+        console.info(`[INFO - handleVerify] Action: ${verify ? "VERIFY" : "UNVERIFY"} | Actor: ${actorId} | Target: ${targetId}`);
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, verify ? 'verifySuccess' : 'unverifySuccess', { userId: targetId }), parse_mode: "HTML" });
+    }
+
+    /**
      * Handle /demote command.
      * Access: ADMIN (Level 2)
      */

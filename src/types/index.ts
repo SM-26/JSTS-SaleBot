@@ -57,6 +57,7 @@ export interface LocaleStrings {
     enterMedia: string;
     doneMediaButton: string;
     editTitleButton: string;
+    editDescriptionButton: string;
     editPriceButton: string;
     editLocationButton: string;
     enterLocation: string;
@@ -207,6 +208,8 @@ export interface Post {
     rejectionReason?: string | null;
     rejectionNotifiedAt?: Date | null;
     meetup?: boolean;
+    layoutTier?: "regular" | "top" | "verified" | "both";
+    highlight?: string;
 }
 
 export interface User {

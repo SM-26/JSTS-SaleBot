@@ -9,7 +9,7 @@ import { GroupListingService } from "./groupListingService";
 import { LifecycleService } from "./lifecycleService";
 import { localeService } from "./localeService";
 import { buildEndedCard, buildManagementCard, Card, lifecycleActionData } from "./listingCards";
-import { safeTrustLine } from "./trustService";
+import { safeTrustLine, sellerLayout } from "./trustService";
 import { meetupLocationText } from "./meetup";
 import { isApiError } from "../config/telegramErrors";
 import { BotConfig, Post, User } from "../types";
@@ -196,11 +196,12 @@ export class MyPostsService {
             price: post.price,
             location: post.location,
             meetup: post.meetup,
+            highlight: post.highlight,
             media: post.media,
             userId: Number(post.userId),
             username: user?.userName || undefined,
             firstName: user?.firstName || "User",
-        }, { trustLine: await safeTrustLine(post.userId, locale, "sendApprovedPostDetail") });
+        }, await sellerLayout(post.userId, locale, "sendApprovedPostDetail", post.layoutTier));
 
         const buttons = [[
             { text: localeService.t(locale, 'markSoldButton'), callback_data: `sold_${post._id}` },
@@ -352,7 +353,7 @@ export class MyPostsService {
 
         // Fetch user for formatting
         const postUser: User | null = await userRepository.findByUserId(post.userId);
-        const trustLine = await safeTrustLine(post.userId, this.config.lang, "handleBumpCallback");
+        const layout = await sellerLayout(post.userId, this.config.lang, "handleBumpCallback", post.layoutTier);
         const richMessage = this.postService.formatPostRichMessage({
             title: post.title,
             description: post.description,
@@ -360,11 +361,12 @@ export class MyPostsService {
             price: post.price,
             location: post.location,
             meetup: post.meetup,
+            highlight: post.highlight,
             media: post.media,
             userId: Number(post.userId),
             username: postUser?.userName || undefined,
             firstName: postUser?.firstName || "User",
-        }, { showCta: true, trustLine });
+        }, { showCta: true, ...layout });
 
         const newMessageId = await this.postService.sendToApproved(richMessage);
 

@@ -34,6 +34,7 @@ import { parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
+import { sellerLayout } from "../services/trustService";
 import { AuthLevel } from "../types";
 import { routeCallback, CallbackAction } from "./callbackRoutes";
 import { command, ParsedCommand } from "./commands";
@@ -111,6 +112,7 @@ export class BotController {
             let synced = 0; //
             for (const post of soldPosts) {
                 const user: User | null = await userRepository.findByUserId(post.userId);
+                const layout = await sellerLayout(post.userId, this.config.lang, "syncSoldPosts", post.layoutTier);
                 const richMessage = this.postService.formatPostRichMessage({
                     title: post.title,
                     description: post.description,
@@ -122,7 +124,7 @@ export class BotController {
                     userId: Number(post.userId),
                     username: user?.userName || undefined,
                     firstName: user?.firstName || "User",
-                }, { sold: true });
+                }, { sold: true, tier: layout.tier, stats: layout.stats });
                 const success = await this.postService.markSoldInGroup(post.approvedMessageId!, richMessage);
                 if (success) {
                     synced++;
@@ -655,6 +657,14 @@ export class BotController {
         bot.use(cmd("demote", (msg, args) => {
             if (!isPrivate(msg)) return;
             return this.adminService.handleDemote(msg, args);
+        }));
+        bot.use(cmd("verify", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleVerify(msg, args, true);
+        }));
+        bot.use(cmd("unverify", (msg, args) => {
+            if (!isPrivate(msg)) return;
+            return this.adminService.handleVerify(msg, args, false);
         }));
         bot.use(cmd("auth", (msg, args) => {
             if (!isPrivate(msg)) return;
