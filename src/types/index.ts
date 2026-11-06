@@ -174,7 +174,7 @@ export interface UserSession {
     // entries written before 3.0.
     pendingRejects?: { promptId: number; skipMsgId: number; postId?: string }[];
     // Admin's /stalecheck dry run waiting for sc_go; ignored after an hour.
-    pendingStalecheck?: { sellerIds: string[]; at: number };
+    pendingStalecheck?: { sellerIds: string[]; at: number; promptMessageId?: number };
 }
 
 export interface Post {

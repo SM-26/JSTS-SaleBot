@@ -123,7 +123,7 @@ export class LifecycleService {
                 : buildEndedCard(t, listing);
             await editNote(this.api, listing.chatId, Number(listing.sellerId), listing.note.ephemeralMessageId, card);
         } catch (err) {
-            console.error("[ERROR - GroupListingService.syncNote]", (err as Error).message);
+            console.error("[ERROR - LifecycleService.syncNote]", (err as Error).message);
         }
     }
 

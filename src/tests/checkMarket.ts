@@ -665,9 +665,23 @@ async function run() {
             await listingRepository.unclaimStale(stId);
             const stBack = await Listing.collection.findOne({ _id: st._id });
             assert.ok(stBack && stBack.hold === true && !("nudgedAt" in stBack) && !("staleSentAt" in stBack), "unclaimStale restores");
+            // unclaim on a row that is no longer a live stale claim changes nothing
+            const uc = await mk("uc", { source: "bot", hold: false, status: "sold", staleSentAt: L(2), nudgedAt: L(2) });
+            await listingRepository.unclaimStale(id(uc));
+            assert.strictEqual((await Listing.collection.findOne({ _id: uc._id }))!.hold, false, "unclaimStale skips a sold row");
+            const uc2 = await mk("uc2", { source: "bot", hold: false });
+            await listingRepository.unclaimStale(id(uc2));
+            assert.strictEqual((await Listing.collection.findOne({ _id: uc2._id }))!.hold, false, "unclaimStale skips a refreshed row (no staleSentAt)");
+            // holdNudge needs a live nudge claim; countHeld counts live rows only
+            const hn = await mk("hn");
+            await listingRepository.holdNudge(id(hn));
+            assert.ok(!("nudgeHeld" in (await Listing.collection.findOne({ _id: hn._id }))!), "holdNudge skips an unclaimed (refreshed) row");
+            const heldBefore = await listingRepository.countHeld();
+            await mk("hs", { hold: true, status: "sold" });
+            assert.strictEqual(await listingRepository.countHeld(), heldBefore, "countHeld ignores ended rows");
             console.log("[OK] claimStale once.");
 
-            const h = await mk("h1");
+            const h = await mk("h1", { nudgedAt: L(7) });
             await listingRepository.holdNudge(id(h));
             assert.ok(mine(await listingRepository.findHeldNudges()).some(r => id(r) === id(h)), "findHeldNudges");
             const rels = await Promise.all([listingRepository.claimHeldRelease(id(h)), listingRepository.claimHeldRelease(id(h))]);
@@ -705,6 +719,9 @@ async function run() {
             assert.deepStrictEqual(await postRepository.findByIds([]), [], "findByIds empty");
             assert.strictEqual(+(await postRepository.firstCreatedAt(pu))!, +L(1), "firstCreatedAt is the oldest");
             assert.strictEqual(await postRepository.firstCreatedAt(`${P}-nobody`), null, "firstCreatedAt none");
+            await PostModel.collection.insertOne({ userId: `${P}-nodate`, title: "t", status: "approved" } as never);
+            assert.strictEqual(await postRepository.firstCreatedAt(`${P}-nodate`), null, "a post with no date is not a first date");
+            await PostModel.collection.deleteMany({ userId: `${P}-nodate` });
             console.log("[OK] postRepository.findByIds, firstCreatedAt.");
 
             const cs = `${P}-cap`;
@@ -1156,6 +1173,37 @@ async function run() {
                 const ok = fakeApi();
                 await mkSvc(ok).svc.run([S1], at(HOUR));
                 assert.strictEqual(dms(ok).length, 1, "re-run sends");
+            }
+
+            // an error between claim and send unclaims every claimed row and counts as failed
+            {
+                const { f, svc } = await fresh();
+                const { a1, a2 } = await seedAll();
+                const real = postRepository.findByIds;
+                postRepository.findByIds = async () => { throw new Error("db down"); };
+                const realErr = console.error; console.error = () => {};
+                let r;
+                try { r = await svc.run([S1], T); } finally { postRepository.findByIds = real; console.error = realErr; }
+                assert.strictEqual(r.failed, 1);
+                assert.strictEqual(dms(f).length, 0, "no DM");
+                for (const x of [a1, a2]) {
+                    const raw = await raw1(x.listing);
+                    assert.ok(raw.hold === true && !("nudgedAt" in raw) && !("staleSentAt" in raw), "unclaimed after the error");
+                }
+                const ok = fakeApi();
+                await mkSvc(ok).svc.run([S1], at(HOUR));
+                assert.strictEqual(dms(ok).length, 1, "re-run sends");
+            }
+
+            // a claimed listing whose post is missing is unclaimed (ledger)
+            {
+                const { f, svc } = await fresh();
+                const { a1 } = await seedAll();
+                await PostModel.deleteOne({ _id: a1.post._id });
+                await svc.run([S1], T);
+                assert.ok(!String(rows(f, S1)[0].params.text).includes("Glock 17 alpha"), "missing post dropped from the DM");
+                const raw = await raw1(a1.listing);
+                assert.ok(raw.hold === true && !("staleSentAt" in raw), "missing post: unclaimed");
             }
 
             // concurrent runs

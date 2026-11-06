@@ -444,6 +444,15 @@ async function run() {
             assert.strictEqual(two.edits.length, 1);
             assert.deepStrictEqual(kbOf(two.edits[0]).flat().map((b) => b.callback_data), [`lc_r_${gb._id}`, `lc_s_${gb._id}`], "the other post's row stays");
 
+            // a DM with text: the outcome line is appended, the other listing's row stays
+            const gc = await lcGroup();
+            const gd = await lcGroup();
+            const withText = await press(`lc_r_${gc._id}`, { ...dm, text: "Still for sale?", replyMarkup: { inline_keyboard: [kb(gc._id).inline_keyboard[0], kb(gd._id).inline_keyboard[0]] } });
+            const textEdit = withText.of("editMessageText");
+            assert.strictEqual(textEdit.length, 1, "DM text edited");
+            assert.ok(String(textEdit[0].params.text).startsWith("Still for sale?") && String(textEdit[0].params.text).endsWith(tt("listingRefreshedToast")), "outcome line appended");
+            assert.deepStrictEqual(kbOf(textEdit[0]).flat().map((b) => b.callback_data), [`lc_r_${gd._id}`, `lc_s_${gd._id}`], "the other listing's row stays");
+
             // from a note: never editMessageText/ReplyMarkup (message_id is 0)
             const nb = await lcBot("expired");
             const fromNote = await press(`lc_s_${nb.listing._id}`, { userId: SELLER, chatId: config.approvedGroupId, chatType: "supergroup", ephemeralMessageId: 5551 });
@@ -542,6 +551,8 @@ async function run() {
             await expectCalls("/stalecheck dry run", () => h.sendText("/stalecheck", { userId: adminId }));
             await sleep(QUIET_MS);
             const msgs = sent();
+            const pid = (m: { result?: unknown }) => (m.result as { message_id: number }).message_id;
+            const previewId = pid(msgs[1]);
             assert.strictEqual(msgs.length, 2, "dry run is two messages");
             assert.deepStrictEqual(kb(msgs[1]), ["sc_go", "sc_no"], "confirm keyboard on the second");
             assert.ok(!kb(msgs[0]).length, "no keyboard on the report");
@@ -551,13 +562,13 @@ async function run() {
 
             // a non-admin pressing sc_go is refused
             h.calls.length = 0;
-            await h.pressButton("sc_go", { userId, chatId: adminId, messageId: 91 });
+            await h.pressButton("sc_go", { userId, chatId: adminId, messageId: previewId });
             await sleep(QUIET_MS);
             assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 3, "USER press refused");
 
             // confirm
             h.calls.length = 0;
-            await h.pressButton("sc_go", { userId: adminId, messageId: 91 });
+            await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
             assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "seller DMs sent");
             await sleep(QUIET_MS);
             assert.strictEqual((await Listing.countDocuments({ hold: false, nudgedAt: { $exists: true } })), 3, "all three claimed");
@@ -566,7 +577,7 @@ async function run() {
             const l1Raw = await Listing.findById(l1._id);
             assert.ok(l1Raw && l1Raw.hold === false);
             h.calls.length = 0;
-            await h.pressButton("sc_go", { userId: adminId, messageId: 91 });
+            await h.pressButton("sc_go", { userId: adminId, messageId: previewId });
             await sleep(QUIET_MS);
             const toast = h.calls.find((c) => c.method === "answerCallbackQuery");
             assert.strictEqual(toast?.params.text, t("staleButton"), "second press -> staleButton");
@@ -576,13 +587,40 @@ async function run() {
             await clean();
             await seedLegacy("100001", "Glock 17 alpha");
             await expectCalls("/stalecheck again", () => h.sendText("/stalecheck 100001", { userId: adminId }));
+            const againId = pid(sent()[1]);
             h.calls.length = 0;
-            await h.pressButton("sc_no", { userId: adminId, messageId: 92 });
+            await h.pressButton("sc_no", { userId: adminId, messageId: againId });
             await sleep(QUIET_MS);
             assert.ok(!sent().length, "sc_no sends nothing");
             assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "sc_no drops the keyboard");
             assert.ok(!(await adminSession()).includes("pendingStalecheck"), "sc_no clears pending");
             assert.strictEqual(await Listing.countDocuments({ hold: true }), 1, "nothing claimed");
+            await clean();
+
+            // two dry runs: the first one's Send button is dead, the second one's sends only its own sellers
+            await seedLegacy("100001", "Glock 17 alpha");
+            await seedLegacy("100002", "Scope gamma");
+            await expectCalls("pilot dry run", () => h.sendText("/stalecheck 100001", { userId: adminId }));
+            const pilotId = pid(sent()[1]);
+            await expectCalls("full dry run", () => h.sendText("/stalecheck", { userId: adminId }));
+            const fullId = pid(sent()[1]);
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: pilotId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length, "Send on the superseded dry run sends nothing");
+            assert.strictEqual(h.calls.find((c) => c.method === "answerCallbackQuery")?.params.text, t("staleButton"), "superseded press -> staleButton");
+            assert.ok(h.calls.some((c) => c.method === "editMessageReplyMarkup"), "superseded keyboard dropped");
+            assert.strictEqual(await Listing.countDocuments({ hold: true }), 2, "nothing claimed by the stale button");
+            assert.ok((await adminSession()).includes("pendingStalecheck"), "newer pending state kept");
+            // a bad arg sends nothing and keeps pending
+            h.calls.length = 0;
+            await h.pressButton("sc_xx", { userId: adminId, messageId: fullId });
+            await sleep(QUIET_MS);
+            assert.ok(!sent().length && (await Listing.countDocuments({ hold: true })) === 2, "bad arg sends nothing");
+            h.calls.length = 0;
+            await h.pressButton("sc_go", { userId: adminId, messageId: fullId });
+            assert.ok(await waitFor(() => sent().filter((c) => ["100001", "100002"].includes(String(c.params.chat_id))).length === 2), "the newer dry run sends its own sellers");
+            await sleep(QUIET_MS);
             await clean();
         }
 

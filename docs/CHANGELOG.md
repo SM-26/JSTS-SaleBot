@@ -6,15 +6,16 @@ All notable changes to this project will be documented in this file.
 ## Version History
 3.2.0 - Listing lifecycle (slice 3 of "the market", #104).
   - Added:
-    - **Nudge.** With `nudges: true`, a listing not refreshed for 7 days gets a DM to its seller (Refresh, Sold, Manage; a group listing also gets Remove). A seller the bot cannot DM is held: the nudge arrives as a private note after their next sale-topic message.
+    - **Nudge.** With `nudges: true`, a listing not refreshed for 7 days gets a DM to its seller (Refresh and Sold; a group listing also gets Remove). A seller the bot cannot DM is held: the nudge arrives as a private note (with Manage) after their next sale-topic message. Held nudges need capture on (`captureMode` not `off`). Bump lifts `hold`, so it shrinks the `/stalecheck` count.
     - **Expiry.** A live listing not refreshed for 30 days expires. This runs whatever `nudges` says (legacy `hold` listings are skipped). An approved bot post stays `approved` when its listing expires; the group message is not touched.
     - **Relist.** `/myposts` shows the seller's expired bot listings with a Relist button. Callbacks `lc_<r|s|x>_<listingId>` (refresh/relist, sold, remove) are frozen. A seller can still never remove an approved bot post: it ends only by Sold, expiry or take-down.
-    - **Trust line** on new group cards (how long the seller has been in the market, or a "new seller" mark under 30 days).
+    - **Trust line** on new group cards (sales count plus the date the seller started; nothing extra for a new seller).
     - **`/stalecheck`** (admin, DM only): asks the sellers of the legacy listings that are on hold whether each is still for sale (`sc_go` to send after a dry run, `sc_no` to cancel; the buttons in the seller's DM use `lc_`). `/stalecheck <userId ...>` limits it to those sellers. Unanswered listings expire 7 days after the DM, a blocked seller's expire at once.
     - Tests: `/test` gained "Age my test listing 7 days" / "30 days" and "Stale-check dry run (to me only)" (test bot only); `check-callbacks`, `check-cards` and `check-market` cover the new formats and flows; `src/tests/syntheticLifecycle.ts` (manual, TEST bot only, sends two real DMs to the owner).
   - Notes:
     - Data: additive only. `listings.nudgeHeld` and `listings.staleSentAt` are new optional fields; `posts` and `users` are unchanged. Rolling back to 3.1.0 is safe: the old image ignores the fields and the `lc_`/`sc_` buttons do nothing.
     - **Rollout order** (owner gates, nothing automatic): (1) deploy with `nudges: false`: legacy listings stay on hold and nothing is sent; expiry runs for non-hold listings. (2) Run `/stalecheck` on the test bot, read the dry run, finalize the text, then "Stale-check dry run (to me only)". (3) On prod, `/stalecheck <pilot ids>`, wait for answers, then `/stalecheck` for the rest. (4) `/config nudges true` only on the owner's go-ahead; at most 25 nudges go out per tick, so the first batch spreads over several ticks.
+    - Do not deploy during a `/stalecheck` send. Before deploying, this read-only query should return 0: `db.listings.countDocuments({status:"live",hold:false,refreshedAt:{$lte:new Date(Date.now()-30*864e5)}})`.
     - Take the `mongodump` from `docs/BACKUP.md` first. Deploys need the owner's go-ahead.
 
 3.1.0 - Opt-in capture notes (slice 2 of "the market", #104).

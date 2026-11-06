@@ -90,21 +90,29 @@ export class StaleCheckService {
             const c = await listingRepository.claimStale(String(l._id), now);
             if (c) claimed.push(c);
         }
-        const posts = new Map((await postRepository.findByIds(claimed.flatMap(l => l.postId ? [l.postId] : []))).map(p => [String(p._id), p]));
         const kept: Array<{ listing: IListing; post: IPost }> = [];
-        for (const l of claimed) {
-            const post = l.postId ? posts.get(l.postId) : undefined;
-            if (post?.status === "approved") kept.push({ listing: l, post });
-            else if (post?.status === "sold") await listingRepository.markSold(String(l._id), now, "system");
-            else await listingRepository.unclaimStale(String(l._id));
+        let text: string;
+        let keyboard: InlineKeyboardButton[][];
+        try {
+            const posts = new Map((await postRepository.findByIds(claimed.flatMap(l => l.postId ? [l.postId] : []))).map(p => [String(p._id), p]));
+            for (const l of claimed) {
+                const post = l.postId ? posts.get(l.postId) : undefined;
+                if (post?.status === "approved") kept.push({ listing: l, post });
+                else if (post?.status === "sold") await listingRepository.markSold(String(l._id), now, "system");
+                else await listingRepository.unclaimStale(String(l._id));
+            }
+            if (!kept.length) return;
+            const user = await userRepository.findByUserId(sellerId);
+            ({ text, keyboard } = renderStaleDm({
+                firstName: user?.firstName ?? "",
+                items: kept.map(k => itemOf(k.listing, k.post)),
+                locale: localeService.resolveUserLocale(user),
+            }));
+        } catch (err) {
+            // unclaim is guarded to live rows that still carry staleSentAt, so sold or refreshed ones stay as they are
+            for (const l of claimed) await listingRepository.unclaimStale(String(l._id)).catch(() => undefined);
+            throw err;
         }
-        if (!kept.length) return;
-        const user = await userRepository.findByUserId(sellerId);
-        const { text, keyboard } = renderStaleDm({
-            firstName: user?.firstName ?? "",
-            items: kept.map(k => itemOf(k.listing, k.post)),
-            locale: localeService.resolveUserLocale(user),
-        });
         try {
             await this.api.sendMessage({ chat_id: Number(sellerId), text, reply_markup: { inline_keyboard: keyboard } });
             report.sellersSent++;
@@ -151,7 +159,7 @@ export class StaleCheckService {
             locale: localeService.resolveUserLocale(user),
         });
         const labels = dm.keyboard.map(row => row.map(b => b.text).join("  |  "));
-        await this.api.sendMessage({
+        const preview = await this.api.sendMessage({
             chat_id: chatId,
             text: [dm.text, ...labels].join("\n\n"),
             reply_markup: { inline_keyboard: [[
@@ -159,7 +167,7 @@ export class StaleCheckService {
                 { text: t("staleCancelButton"), callback_data: "sc_no" },
             ]] },
         });
-        ctx.getSession<UserSession>().data.pendingStalecheck = { sellerIds: plan.sellers.map(s => s.sellerId), at: Date.now() };
+        ctx.getSession<UserSession>().data.pendingStalecheck = { sellerIds: plan.sellers.map(s => s.sellerId), at: Date.now(), promptMessageId: preview.message_id };
     }
 
     // sc_go / sc_no. The send loop runs detached and never touches the session.
@@ -174,11 +182,18 @@ export class StaleCheckService {
 
         const data = ctx.getSession<UserSession>().data;
         const pending = data.pendingStalecheck;
-        delete data.pendingStalecheck;
-        await this.api.editMessageReplyMarkup({ chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } })
+        const dropKeyboard = () => this.api.editMessageReplyMarkup({ chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } })
             .catch((err: unknown) => {
                 if (!isApiError(err, 400, "message is not modified")) console.warn("[WARN - StaleCheckService] editMessageReplyMarkup failed:", (err as Error).message);
             });
+        // only the newest dry run's own buttons count; anything else drops its keyboard and keeps the pending state
+        if ((arg !== "go" && arg !== "no") || (pending && pending.promptMessageId !== msg.message_id)) {
+            await dropKeyboard();
+            await toast("staleButton");
+            return;
+        }
+        delete data.pendingStalecheck;
+        await dropKeyboard();
         if (arg === "no") { await this.api.answerCallbackQuery({ callback_query_id: query.id }); return; }
         if (!pending || Date.now() - pending.at > PENDING_MAX_AGE_MS) { await toast("staleButton"); return; }
 

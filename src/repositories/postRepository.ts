@@ -102,7 +102,7 @@ class PostRepository {
     }
 
     async firstCreatedAt(userId: string): Promise<Date | null> {
-        const p = await Post.findOne({ userId }).sort({ createdAt: 1 }).select("createdAt").exec();
+        const p = await Post.findOne({ userId, createdAt: { $exists: true } }).sort({ createdAt: 1 }).select("createdAt").exec();
         return p?.createdAt ?? null;
     }
 

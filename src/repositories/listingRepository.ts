@@ -228,7 +228,7 @@ class ListingRepository {
     }
 
     async holdNudge(id: string): Promise<void> {
-        await Listing.updateOne({ _id: id }, { $set: { nudgeHeld: true } }).exec();
+        await Listing.updateOne({ _id: id, nudgedAt: { $exists: true } }, { $set: { nudgeHeld: true } }).exec();
     }
 
     findHeldNudges(): Promise<IListing[]> {
@@ -287,7 +287,7 @@ class ListingRepository {
     }
 
     async unclaimStale(id: string): Promise<void> {
-        await Listing.updateOne({ _id: id }, { $set: { hold: true }, $unset: { nudgedAt: "", staleSentAt: "" } }).exec();
+        await Listing.updateOne({ _id: id, status: "live", staleSentAt: { $exists: true } }, { $set: { hold: true }, $unset: { nudgedAt: "", staleSentAt: "" } }).exec();
     }
 
     // For /test cases only: moves a listing's clock without going through refresh.
@@ -297,7 +297,7 @@ class ListingRepository {
 
     // Legacy listings waiting for the owner's release.
     countHeld(): Promise<number> {
-        return Listing.countDocuments({ hold: true }).exec();
+        return Listing.countDocuments({ hold: true, status: "live" }).exec();
     }
 
     // Listings created since `since` (all time when omitted), grouped by status.

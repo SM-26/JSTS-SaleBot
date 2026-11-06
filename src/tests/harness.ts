@@ -48,6 +48,8 @@ export interface PressButtonOptions {
     ephemeralMessageId?: number;
     /** The pressed message's keyboard. */
     replyMarkup?: { inline_keyboard: Record<string, unknown>[][] };
+    /** The pressed message's text. */
+    text?: string;
 }
 
 export const BOT_USERNAME = "JSTS_testing_bot";
@@ -149,7 +151,7 @@ export function createHarness(options: HarnessOptions = {}) {
     const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>
         message({ photo: [{ file_id: fileId, file_unique_id: fileId, width: 10, height: 10 }] }, options);
 
-    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false, ephemeralMessageId, replyMarkup }: PressButtonOptions = {}) => {
+    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false, ephemeralMessageId, replyMarkup, text }: PressButtonOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             callback_query: {
@@ -163,6 +165,7 @@ export function createHarness(options: HarnessOptions = {}) {
                         ...(ephemeralMessageId === undefined ? {} : { ephemeral_message_id: ephemeralMessageId }),
                         date: Math.floor(Date.now() / 1000),
                         chat: { id: chat, type: chatType },
+                        ...(text ? { text } : {}),
                         ...(replyMarkup ? { reply_markup: replyMarkup } : {})
                     }
                 })
