@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Bot, createSession } from "node-telegram-bot-api";
 import type { Update } from "node-telegram-bot-api";
 import { MongoSessionStore, SESSION_TTL_SECONDS } from "../repositories/sessionStore";
+import { idle } from "./harness";
 
 // Guards the Mongo-backed session store: the contract (read/write/touch/delete/
 // init, expiry) and, through the real node-telegram-bot-api session middleware, the two things
@@ -59,6 +60,13 @@ async function run() {
 
     console.log("[INFO] Checking Mongo session store...");
     await mongoose.connect(MONGO_URI);
+
+    // idle() must wait for a read still opening its pool connection: connect() leaves one, so the second of a pair opens its own.
+    let pingsDone = 0;
+    for (let n = 0; n < 2; n++) void mongoose.connection.db!.command({ ping: 1 }).then(() => { pingsDone++; });
+    await idle();
+    assert.strictEqual(pingsDone, 2, "idle() returned while a read was waiting for a pool connection");
+
     const coll = mongoose.connection.db!.collection<{ _id: string; value: string; expiresAt: Date | null; updatedAt: Date }>(
         "bot_sessions",
     );

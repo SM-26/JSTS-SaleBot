@@ -1,4 +1,5 @@
 import { Bot } from "node-telegram-bot-api";
+import mongoose from "mongoose";
 import type { Update } from "node-telegram-bot-api/types";
 
 export interface RecordedCall {
@@ -54,6 +55,46 @@ export interface PressButtonOptions {
 
 export const BOT_USERNAME = "JSTS_testing_bot";
 
+// --- idle(): proof that the bot has finished its work, instead of a fixed sleep ---------------------------
+// Everything the bot does after handleUpdate returns is a fake-Telegram call, a MongoDB command or a timer.
+// The first two are counted here (every harness shares the counters); timers the code schedules on purpose
+// (QUICK_ALBUM_DELAY_MS, ...) are NOT covered: a test waits for those explicitly.
+let inflight = 0; // outstanding handleUpdate chains + fake-fetch calls + MongoDB commands
+let epoch = 0; // bumped whenever any of them starts, so a quiet stretch can be told from a busy one
+const begin = () => { inflight++; epoch++; };
+const end = () => { inflight--; };
+
+// Count MongoDB commands through the driver's own command monitoring (switched on when a check connects).
+// The wrapped connect only adds `monitorCommands`; it changes nothing the bot or the check can see.
+const realConnect = mongoose.connect.bind(mongoose) as (uri: string, options?: mongoose.ConnectOptions) => Promise<typeof mongoose>;
+(mongoose as { connect: unknown }).connect = async (uri: string, options?: mongoose.ConnectOptions) => {
+    const result = await realConnect(uri, { monitorCommands: true, ...options });
+    const client = mongoose.connection.getClient();
+    client.on("commandStarted", begin);
+    client.on("commandSucceeded", end);
+    client.on("commandFailed", end);
+    // A command waiting for a pool connection (maybe a new one, a real handshake) has not started yet: count that wait too.
+    client.on("connectionCheckOutStarted", begin);
+    client.on("connectionCheckedOut", end);
+    client.on("connectionCheckOutFailed", end);
+    return result;
+};
+
+/**
+ * Resolves once nothing is outstanding (no update being handled, no fake Telegram call, no MongoDB command)
+ * for three event-loop turns in a row. A turn lets every microtask continuation run, so a follow-up call that a
+ * finished one triggers has started by then. Throws if the bot never goes quiet.
+ */
+export async function idle(timeoutMs = 10_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (let quiet = 0; quiet < 3;) {
+        const before = epoch;
+        await new Promise((resolve) => setImmediate(resolve));
+        quiet = inflight === 0 && epoch === before ? quiet + 1 : 0;
+        if (Date.now() > deadline) throw new Error(`idle(): still ${inflight} operation(s) outstanding after ${timeoutMs} ms`);
+    }
+}
+
 /** v2 sends form-encoded bodies; nested values are JSON strings. */
 async function decodeBody(body: RequestInit["body"]): Promise<Record<string, unknown>> {
     const params: Record<string, unknown> = {};
@@ -78,6 +119,15 @@ export function createHarness(options: HarnessOptions = {}) {
     let nextUpdateId = 1;
 
     const fakeFetch: typeof fetch = async (input, init) => {
+        begin();
+        try {
+            return await fakeTelegram(input, init);
+        } finally {
+            end();
+        }
+    };
+
+    const fakeTelegram: typeof fetch = async (input, init) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const method = url.split("/").pop()!.split("?")[0];
         const params = await decodeBody(init?.body);
@@ -114,8 +164,14 @@ export function createHarness(options: HarnessOptions = {}) {
 
     const bot = new Bot("123:TEST", { fetch: fakeFetch });
 
-    const send = (update: Record<string, unknown>) =>
-        bot.handleUpdate({ update_id: nextUpdateId++, ...update } as Update);
+    const send = async (update: Record<string, unknown>) => {
+        begin();
+        try {
+            await bot.handleUpdate({ update_id: nextUpdateId++, ...update } as Update);
+        } finally {
+            end();
+        }
+    };
 
     const buildMessage = (content: Record<string, unknown>, o: SendTextOptions, id: number) => {
         const { chatId, userId = 42, chatType = "private", replyToMessageId } = o;

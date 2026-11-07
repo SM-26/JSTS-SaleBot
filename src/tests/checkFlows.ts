@@ -10,7 +10,7 @@ import { seedCapture } from "./fixtures";
 import { takeDownDeleteChecks } from "./takeDownDeleteChecks";
 import { quickListingChecks } from "./quickListingChecks";
 import { priceChangeChecks } from "./priceChangeChecks";
-import { createHarness, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
+import { createHarness, idle, BOT_USERNAME, RecordedCall, HarnessOptions } from "./harness";
 import type { BotConfig } from "../types";
 import type { CatchupItem } from "../services/catchupScan";
 
@@ -22,7 +22,7 @@ const MONGO_URI = process.env.MONGO_URI;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // Fire-and-forget API calls inside handlers land a tick after the chain returns.
-const settle = () => sleep(40);
+const settle = () => idle();
 
 type Keyboard = { inline_keyboard: { text: string; callback_data: string }[][] };
 const text = (c: RecordedCall) => String(c.params.text);

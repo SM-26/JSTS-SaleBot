@@ -36,6 +36,8 @@
 
 Before opening a PR: `pnpm run lint`, `pnpm run build`, `pnpm test`. Never run the bot, or a check, against the production token or database.
 
+`pnpm test` runs the checks in parallel (`src/tests/runAll.ts`), each Mongo script on its own database derived from `MONGO_URI`. In a check, wait for the bot with `idle()` from `src/tests/harness.ts` (proof that no update, fake Telegram call or MongoDB command is outstanding), never with a fixed `sleep`. Details in [Testing](docs/Testing.md).
+
 ---
 
 ## Agent Guidelines

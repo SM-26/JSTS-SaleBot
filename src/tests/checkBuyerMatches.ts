@@ -19,7 +19,7 @@ import type { GroupListingService } from "../services/groupListingService";
 import { isSearchable, matchListings, parseQuery } from "../services/matchService";
 import { processOneClosed, type ClassifiedEvent } from "../services/shadowService";
 import { seedCapture } from "./fixtures";
-import { BOT_USERNAME, createHarness, type HarnessOptions } from "./harness";
+import { BOT_USERNAME, createHarness, idle, type HarnessOptions } from "./harness";
 
 // Buyer query parsing and matching (slice 4). The pure part always runs; the
 // Mongo part (later tasks) prints [SKIP] without MONGO_URI.
@@ -299,18 +299,17 @@ async function checkSavedSearchDm() {
     const [u1, u2, u3] = [base, base + 1, base + 2];
     const WANT = "מחפש glock 17";
     const rows = (u: number) => SavedSearch.find({ userId: String(u) }).sort({ createdAt: 1 });
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const sent = () => h.calls.filter((c) => c.method === "sendMessage");
     const lastText = () => String(sent().at(-1)?.params.text);
     const say = async (text: string, o: { userId: number; replyToMessageId?: number }) => {
         h.calls.length = 0;
         await h.sendText(text, o);
-        await sleep(150);
+        await idle();
     };
     const press = async (data: string, userId: number, messageId = 7) => {
         h.calls.length = 0;
         await h.pressButton(data, { userId, messageId });
-        await sleep(150);
+        await idle();
         return h.calls.filter((c) => c.method === "answerCallbackQuery");
     };
     const t = (key: string) => localeService.t("en", key);
