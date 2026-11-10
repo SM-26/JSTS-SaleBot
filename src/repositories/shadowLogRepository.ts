@@ -6,7 +6,8 @@ export type ShadowStats = {
     byTier: Record<Tier, number>;
     wouldList: number;
     merges: number;
-    labeled: number;
+    labeled: number; // sale + not sale: gone rows count for neither precision nor the gate
+    gone: number;
     sale: number;
     notSale: number;
 };
@@ -26,7 +27,7 @@ class ShadowLogRepository {
     }
 
     // Only while unlabeled: the first label wins.
-    setLabel(id: string, label: "sale" | "not_sale", by: string, now: Date): Promise<IShadowLog | null> {
+    setLabel(id: string, label: "sale" | "not_sale" | "gone", by: string, now: Date): Promise<IShadowLog | null> {
         return ShadowLog.findOneAndUpdate(
             { _id: id, label: { $exists: false } },
             { $set: { label, labeledBy: by, labeledAt: now } },
@@ -76,8 +77,8 @@ class ShadowLogRepository {
     }
 
     async stats(since: Date): Promise<ShadowStats> {
-        const out: ShadowStats = { byTier: { strict: 0, ask: 0, wtb: 0, none: 0 }, wouldList: 0, merges: 0, labeled: 0, sale: 0, notSale: 0 };
-        const rows = await ShadowLog.aggregate<{ _id: Tier; n: number; wouldList: number; merges: number; labeled: number; sale: number; notSale: number }>([
+        const out: ShadowStats = { byTier: { strict: 0, ask: 0, wtb: 0, none: 0 }, wouldList: 0, merges: 0, labeled: 0, gone: 0, sale: 0, notSale: 0 };
+        const rows = await ShadowLog.aggregate<{ _id: Tier; n: number; wouldList: number; merges: number; labeled: number; gone: number; sale: number; notSale: number }>([
             { $match: { at: { $gte: since } } },
             {
                 $group: {
@@ -85,7 +86,8 @@ class ShadowLogRepository {
                     n: { $sum: 1 },
                     wouldList: { $sum: { $cond: ["$wouldList", 1, 0] } },
                     merges: { $sum: { $cond: [{ $ifNull: ["$mergeWith", false] }, 1, 0] } },
-                    labeled: { $sum: { $cond: [{ $ifNull: ["$label", false] }, 1, 0] } },
+                    labeled: { $sum: { $cond: [{ $in: ["$label", ["sale", "not_sale"]] }, 1, 0] } },
+                    gone: { $sum: { $cond: [{ $eq: ["$label", "gone"] }, 1, 0] } },
                     sale: { $sum: { $cond: [{ $eq: ["$label", "sale"] }, 1, 0] } },
                     notSale: { $sum: { $cond: [{ $eq: ["$label", "not_sale"] }, 1, 0] } },
                 },
@@ -96,6 +98,7 @@ class ShadowLogRepository {
             out.wouldList += r.wouldList;
             out.merges += r.merges;
             out.labeled += r.labeled;
+            out.gone += r.gone;
             out.sale += r.sale;
             out.notSale += r.notSale;
         }

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+3.4.1 - Classifier price fixes and a dead-link label, from the first 28 prod labels (24 sale, 4 not sale: all 4 were sales with a wrong price).
+  - Notes:
+    - Data change (additive): `shadow_log.label` can be `gone`. No config key, no new collection, no new update type. Rollback: `BOT_TAG=3.4.0`. Gone rows stay out of `/label` (they have a label), and 3.4.0's `/stats` counts them in its labeled n but in neither sale nor not sale, so its precision is unchanged.
+    - Rows logged before 3.4.1 keep their old tier and price; only new posts are classified with the new rules.
+  - Added:
+    - **`/label`: 🔗 Dead link** (`lb_<id>_g`), for a row whose group post was deleted. The row is labeled `gone`: it is never offered again, and it counts for neither precision nor the gate's n. `/stats` shows the dead-link count under the label line. New string `labelGone` and a new `statsBody` line (en/he/ru, drafts).
+  - Fixed:
+    - **Several prices ask the seller.** A post with two or more different prices (a bundle with a price per item) is now `ask`, never `strict`, so automatic capture would not list it at the first item's price. One stated total for everything keeps it `strict` at that total: `הכל`/`הכול`/`ביחד`/`יחד`/`סה״כ` right before the number, exactly one such total, and no smaller than any other price. Not counted as a second price: a struck-through price (a strikethrough entity, in captures and group-post edits, or combining strokes like `9̶0̶0̶`) and a price right after `במקום`, `היה`, `הייתה`, `קניתי` or `שילמתי`. Rules `several-prices` and `price-for-all` are logged.
+    - **Price priority.** The price is, in order: a number after `מחיר`/`מבקש`/`מבקשת` (or a total), a line that is only the price, a price with ₪/ש״ח/שקל, then `בNNN`; first in the text within each. A price in passing ("אפשר להזמין ב 2 שקל") no longer beats `מחיר 450₪` or a price on its own line. `מבקש`/`מבקשת` are price cues (rule `price-cue`).
+    - A number and its currency must be on the same line, and `900₪ 750₪` is two prices (it was read as one).
+    - The same parse feeds capture notes, group listings and the one-message draft.
+
 3.4.0 - `/faq` as a widget (Bot API 10.4), node-telegram-bot-api 2.4.0, and fixes.
   - Notes:
     - No config key, no data change, no new update type. Nothing to switch on: the widget replaces the text FAQ in private chats at once. Rollback: `BOT_TAG=3.3.0`. `/faq` is then text again; the 📄 Text version button on widgets already sent gets no answer (3.3.0 tries to edit the widget), and sending `/faq` again works.

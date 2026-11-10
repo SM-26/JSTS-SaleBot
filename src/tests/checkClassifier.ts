@@ -1,6 +1,6 @@
 import assert from "assert";
 import { parseQuery } from "../services/matchService";
-import { classify, normalize, textHash, tokenOverlap, tokens, Parsed, Tier } from "../services/classifier";
+import { classify, normalize, partEntities, textHash, tokenOverlap, tokens, Parsed, Tier } from "../services/classifier";
 
 // [name, text, hasMedia, expected tier, expected parsed fields (only the listed keys are compared)]
 const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
@@ -13,7 +13,19 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["ask bare price", "1300 מרכז", true, "ask", { title: undefined, priceValue: 1300 }],
     ["ask no photo", "למכירה כוונת 300₪", false, "ask"],
     ["no photo no sale word", "כוונת 300₪", false, "none"],
-    ["bundle", "למכירה\nM4 900₪\nגלוק 600₪", true, "strict", { isBundle: true }],
+    ["bundle: several prices ask the seller", "למכירה\nM4 900₪\nגלוק 600₪", true, "ask", { isBundle: true, priceValue: 900 }],
+    ["one total for everything stays strict", "למכירה\nM4 900₪\nגלוק 600₪\nהכל ב-1400", true, "strict", { isBundle: true, priceValue: 1400 }],
+    ["total with ₪ and סה״כ", "למכירה M4 ומשקפת\nM4 900₪, משקפת 300₪\nסה״כ 1,100₪", true, "strict", { priceValue: 1100 }],
+    ["a 'total' below an item price is no total", "למכירה\nM4 900₪\nגלוק 600₪\nסה״כ 2 פריטים", true, "ask"],
+    ["shipping is a second price: ask", "למכירה M4 900₪\nמשלוח 30₪", true, "ask", { priceValue: 900 }],
+    ["price in passing loses to מחיר", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\nמחיר 380₪", true, "ask", { priceValue: 380, title: "למכירה וסט טקטי במצב טוב" }],
+    ["price in passing loses to a price line", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\n380₪", true, "ask", { priceValue: 380 }],
+    ["מבקש is a price cue", "למכירה M4 במצב מעולה\nכולל 3 מחסניות\nמבקש 4800", true, "strict", { priceValue: 4800, price: "מבקש 4800" }],
+    ["מבקשת with ש״ח", "מוכרת כוונת אדומה כמו חדשה\nמבקשת 1,200 ש\"ח", true, "strict", { priceValue: 1200 }],
+    ["מבקש beats a ב price", "למכירה M4 עם משקפת ב-6500 לפני שנה\nמבקש 4800", true, "ask", { priceValue: 4800 }],
+    ["purchase price is an old price", "למכירה M4\nקניתי ב-6500\nמבקש 4800", true, "strict", { priceValue: 4800, isBundle: false }],
+    ["old price after במקום", "למכירה M4 750₪ במקום 900₪", true, "strict", { priceValue: 750, isBundle: false }],
+    ["combining-stroke old price", "למכירה M4\n9̶0̶0̶₪ 750₪", true, "strict", { priceValue: 750, isBundle: false }],
     ["same price twice is no bundle", "למכירה M4 900₪\nאו 900 שח", true, "strict", { isBundle: false }],
     ["photo-only", "", true, "none"],
     ["chatter", "מישהו יודע מתי המשחק?", false, "none"],
@@ -70,7 +82,18 @@ for (const [name, text, media, tier, expected] of rows) {
     });
 }
 
-check("blocked rule id", () => assert.ok(classify("מוכר נשק 500₪", true).rules.includes("blocked-word")));
+check("struck old price (strikethrough entity) is no second price", () => {
+    const text = "למכירה M4\n900₪ 750₪";
+    const r = classify(text, true, [{ type: "strikethrough", offset: text.indexOf("900"), length: 4 }]);
+    assert.strictEqual(r.tier, "strict");
+    assert.strictEqual(r.parsed.priceValue, 750);
+    assert.strictEqual(classify(text, true).tier, "ask"); // without the entity: two prices
+});
+check("partEntities moves part offsets into the joined text", () => {
+    const e = partEntities([{ text: "למכירה M4" }, { text: "900₪ 750₪", entities: [{ type: "strikethrough", offset: 0, length: 4 }] }]);
+    assert.deepStrictEqual(e, [{ type: "strikethrough", offset: 10, length: 4 }]);
+});
+check("blocked rule id",() => assert.ok(classify("מוכר נשק 500₪", true).rules.includes("blocked-word")));
 check("long caption", () => {
     const r = classify("למכירה " + "א".repeat(4000) + " 500₪", true);
     assert.strictEqual(r.tier, "strict");

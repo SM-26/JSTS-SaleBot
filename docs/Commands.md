@@ -39,7 +39,7 @@ Commands are case-insensitive, and `/name@ourbot` also works. All of them work o
 | `/activeUsers` | Users with a draft in progress. |
 | `/broadcast` | Post to the sales group as the bot, by replying to a message or typing one. |
 | `/broadcastUsers` | DM every active user and every author of a pending or approved post. Text only; reports failures. |
-| `/label` | Label a random would-list row as sale or not sale, to measure the classifier. |
+| `/label` | Label a random would-list row as sale or not sale, to measure the classifier. 🔗 Dead link marks a row whose group post was deleted: it is not offered again and counts for neither precision nor the gate. |
 | `/stalecheck` | Dry run, then **Send**, asking legacy sellers if a listing is still for sale. `/stalecheck <userId ...>` limits it to those sellers. |
 | `/catchup` | Catch-up offers. See [Catch-up](Catch-up.md). |
 | `/test` | In-bot test cases. Seller-post cases refuse to run outside the test bot. |

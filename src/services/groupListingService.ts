@@ -284,7 +284,7 @@ export class GroupListingService {
                 if (removed) await this.syncNote(removed);
                 return;
             }
-            const { parsed } = classify(text, listing.media.length > 0);
+            const { parsed } = classify(text, listing.media.length > 0, (msg.text !== undefined ? msg.entities : msg.caption_entities) ?? []);
             const updated = await listingRepository.applyEdit(id, {
                 text,
                 isBundle: parsed.isBundle,
