@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 Unreleased
   - Fixed:
     - A held catch-up offer (and a held nudge) could stay held when the seller's last capture row got the same millisecond as the hold; `hasSettledSince` now includes that instant.
+    - 💸 Change price: the reply prompt no longer sticks. Telegram re-offers a force-reply prompt every time the chat opens until it is answered, so after `/cancel`, a timeout or any other end of the flow the bot kept offering to reply to an old prompt. Every message that ends the flow now clears it (`remove_keyboard`); the retry prompts still ask for a reply.
   - Docs:
     - The wiki is now where the docs are read. Pages live in `docs/` and `.github/workflows/wiki.yml` copies them on every merge to master. The long README became a front page plus one page per topic, and `Agents.md` keeps the rules and links to the rest.
     - `check-docs` in `pnpm test` fails on an undocumented command or config key, a broken page link or a missing source path.

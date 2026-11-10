@@ -460,7 +460,7 @@ export class MyPostsService {
         if (!session.pendingPriceCut) return false;
         delete session.pendingPriceCut;
         const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
-        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'priceChangeCancelled') });
+        await this.api.sendMessage({ chat_id: msg.chat.id, text: localeService.t(locale, 'priceChangeCancelled'), reply_markup: { remove_keyboard: true } });
         return true;
     }
 
@@ -476,7 +476,9 @@ export class MyPostsService {
         const say = (key: string, params?: Record<string, string | number | boolean>, force = false) => this.api.sendMessage({
             chat_id: msg.chat.id,
             text: t(key, params),
-            ...(force ? { reply_markup: { force_reply: true as const } } : {}),
+            // Telegram re-offers a force-reply prompt every time the chat opens until it is answered or cleared,
+            // so every message that ends the flow clears it.
+            reply_markup: force ? { force_reply: true as const } : { remove_keyboard: true as const },
         });
         const end = async (key: string) => { delete session.pendingPriceCut; await say(key); return true; };
 
