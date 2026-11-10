@@ -78,6 +78,7 @@
     "helpConfig": "/config - View and edit settings",
     "helpDonate": "/donate - Support the bot",
     "helpFaq": "/faq - Airsoft FAQ and information",
+    "faqTextVersion": "📄 Text version",
     "helpPromote": "/promote - Increase user role level",
     "helpDemote": "/demote - Decrease user role level",
     "demoteSuccess": "User <code>{userId}</code> demoted to level {level}.",

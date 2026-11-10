@@ -809,21 +809,41 @@ console.log("  [OK] (k21) the DM reply shows the meeting point and its button on
             console.log("  [OK] (k28) a quick description never repeats the title, price or location; nothing left means none.");
         }
 
-        // (k29) every FAQ message carries the padding: /faq, a press (edit) and start=faq_1
+        // (k29) /faq and start=faq_1 send the widget in a DM; a press on an old text FAQ edits it (with the padding);
+        // "text version" under a widget sends the text FAQ as a new message; a refused widget falls back to the text
         {
             const { h } = boot();
             const u = user();
             await h.sendText("/faq", { userId: u });
             await settle();
-            await h.pressButton("faq_1", { userId: u, messageId: 900 });
-            await settle();
             await h.sendText("/start faq_1", { userId: u });
             await settle();
+            const widgets = h.calls.filter((c) => c.method === "sendWidget");
+            assert.strictEqual(widgets.length, 2, "/faq and start=faq_1 each send a widget");
+            for (const w of widgets) {
+                assert.strictEqual(Number(w.params.chat_id), u);
+                assert.ok(String(w.params.html).includes(`<button data-i="0" class="on">`), "faq_1 opens the meeting-point topic");
+                assert.deepStrictEqual(rows(w), [["faq_root"]], "one text-version button");
+            }
+            assert.ok(!h.calls.some((c) => c.method === "sendMessage" && String(c.params.text ?? "").includes("<b>")), "no text FAQ next to a widget");
+            await h.pressButton("faq_1", { userId: u, messageId: 900 });
+            await settle();
+            await h.send({ callback_query: { id: "cbw", chat_instance: "ci", from: { id: u, is_bot: false, first_name: "Tester" }, data: "faq_root",
+                message: { message_id: 901, date: 0, chat: { id: u, type: "private" }, widget: { html: "<p>x</p>" } } } });
+            await settle();
             const msgs = h.calls.filter((c) => ["sendMessage", "editMessageText"].includes(c.method) && String(c.params.text ?? "").includes("<b>"));
-            assert.deepStrictEqual(msgs.map((c) => c.method), ["sendMessage", "editMessageText", "sendMessage"]);
+            assert.deepStrictEqual(msgs.map((c) => c.method), ["editMessageText", "sendMessage"], "old text FAQ is edited, a widget's text version is a new message");
+            assert.strictEqual(Number(msgs[0].params.message_id), 900);
             for (const m of msgs) assert.ok(text(m).endsWith(FAQ_PADDING), text(m));
             assert.strictEqual(FAQ_PADDING, "\n" + "\u2800".repeat(30));
-            console.log("  [OK] (k29) every FAQ message carries the width padding.");
+
+            const { h: h2 } = boot({ responses: { sendWidget: { ok: false, error_code: 400, description: "Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED" } } });
+            await h2.sendText("/faq", { userId: u });
+            await settle();
+            const fallback = h2.calls.filter((c) => c.method === "sendMessage" && String(c.params.text ?? "").includes("<b>"));
+            assert.strictEqual(fallback.length, 1, "a refused widget falls back to the text FAQ");
+            assert.ok(text(fallback[0]).endsWith(FAQ_PADDING));
+            console.log("  [OK] (k29) /faq and start=faq_1 send the widget, its text version and a refused widget fall back to the text FAQ.");
         }
 
         // (k32) the preview's description button asks for it and comes back to the preview with the new text

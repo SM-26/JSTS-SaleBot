@@ -14,7 +14,7 @@ Commands are case-insensitive, and `/name@ourbot` also works. All of them work o
 | `/myposts` | Your posts and group listings: bump, change price, sold, refresh, remove, relist. |
 | `/alerts` | `/alerts <text>` saves a search (needs `buyerMatches: on`). Alone, it lists, removes and renews them, in every mode. |
 | `/lang` | Choose your language. |
-| `/faq` | Airsoft FAQ. Only when `enableFaq` was on at startup. |
+| `/faq` | Airsoft FAQ, as a widget with a 📄 Text version button ([Localization](Localization.md#the-faq)). Only when `enableFaq` was on at startup. |
 | `/donate` | Donate Telegram Stars. Refused when `donationsEnabled` is off. |
 | `/help` | List the commands you can use. |
 

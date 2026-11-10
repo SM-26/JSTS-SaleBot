@@ -3,6 +3,7 @@ import type { Message, CallbackQuery, InlineKeyboardButton } from "node-telegram
 import { BotConfig } from "../types";
 import { localeService } from "./localeService";
 import userRepository from "../repositories/userRepository";
+import { buildFaqWidget } from "./faqWidget";
 
 // A button is as wide as its bubble: one line of invisible braille blanks (not whitespace, so Telegram keeps it) widens every FAQ message.
 export const FAQ_PADDING = "\n" + "\u2800".repeat(30);
@@ -44,16 +45,19 @@ export class FaqService {
 
         const targetNode = nodeId === "root" ? null : nodeId;
 
-        await this.renderNode(query.message.chat.id, locale, targetNode, query.message.message_id);
+        // A press under a widget (its "text version" button) can't edit the widget: send the text FAQ as a new message.
+        if ("widget" in query.message && query.message.widget) await this.renderNode(query.message.chat.id, locale, targetNode, undefined, true);
+        else await this.renderNode(query.message.chat.id, locale, targetNode, query.message.message_id);
         await this.api.answerCallbackQuery({ callback_query_id: query.id });
     }
 
-    private async renderNode(chatId: number, locale: string, nodeId: string | null, messageId?: number): Promise<void> {
+    private async renderNode(chatId: number, locale: string, nodeId: string | null, messageId?: number, asText = false): Promise<void> {
         const faqs = localeService.getFaqs(locale);
         if (!faqs || Object.keys(faqs).length === 0) {
             await this.api.sendMessage({ chat_id: chatId, text: localeService.t(locale, 'faqNotAvailable') });
             return;
         }
+        if (!messageId && !asText && chatId > 0 && await this.sendWidget(chatId, locale, faqs, nodeId)) return;
 
         const keys = Object.keys(faqs);
         const children = keys.filter(k => {
@@ -102,6 +106,22 @@ export class FaqService {
             });
         } else {
             await this.api.sendMessage({ chat_id: chatId, text, ...options });
+        }
+    }
+
+    // Widgets work only in private chats in production. Any failure falls back to the text FAQ.
+    private async sendWidget(chatId: number, locale: string, faqs: Record<string, string>, nodeId: string | null): Promise<boolean> {
+        try {
+            const title = localeService.t(locale, 'helpFaq').replace(/^\/faq\s*-\s*/, "");
+            await this.api.sendWidget({
+                chat_id: chatId,
+                html: buildFaqWidget(faqs, title, locale === "he", nodeId ?? undefined),
+                reply_markup: { inline_keyboard: [[{ text: localeService.t(locale, 'faqTextVersion'), callback_data: "faq_root" }]] },
+            });
+            return true;
+        } catch (err) {
+            console.error("[ERROR - FaqService.sendWidget]", (err as Error).message);
+            return false;
         }
     }
 }

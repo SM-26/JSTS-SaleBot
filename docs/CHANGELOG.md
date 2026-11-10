@@ -5,8 +5,13 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 Unreleased
+  - Added:
+    - **`/faq` as a widget** (Bot API 10.4, #133). In a private chat, `/faq` and the meeting-point link (`start=faq_1`) send one interactive card: a header, a tab per top-level topic, a card per question that opens on a tap (one at a time). Link answers are pills named after the site (Waze, Google Maps, WhatsApp). An Israeli phone number is a 📋 button that copies it, plus a WhatsApp link for a mobile number: widgets can't open the dialer. A 📄 Text version button under it sends today's text FAQ, which apps without widget support (Telegram X) can still use. If Telegram refuses the widget, the bot sends the text FAQ. The meeting-point link opens the Beit Dagan tab. Tested on Desktop 7.4.1 and Android 13.2.1, Hebrew and English.
+    - Widgets draw two right-to-left cases wrong: brackets aren't mirrored, and punctuation right after a number lands on the wrong side. Hebrew widget text gets a right-to-left mark around each bracket and after such punctuation, which fixes both and is invisible where the text is drawn right.
+    - FAQ content: Beit Dagan → location now also has the Google Maps link (`1.2.2`), and its title is "קישור למיקום" (en "Location link", ru "Ссылка на место" are drafts).
+    - New string `faqTextVersion` (en/he/ru, drafts).
   - Dependencies:
-    - Upgraded `node-telegram-bot-api` 2.3.0 → 2.4.0 (pinned exactly), which adds Telegram Bot API 10.4. Nothing the user sees changes. The bot uses none of the new 10.4 features yet (see #104), and it doesn't set `rateLimit`, so 2.4.0's rate-limiter fix doesn't apply. No code changes were needed.
+    - Upgraded `node-telegram-bot-api` 2.3.0 → 2.4.0 (pinned exactly), which adds Telegram Bot API 10.4. The bot doesn't set `rateLimit`, so 2.4.0's rate-limiter fix doesn't apply. No code changes were needed.
     - `pnpm-workspace.yaml` exempts exactly `node-telegram-bot-api@2.4.0` from pnpm's `minimumReleaseAge` (published 2026-11-09, under 24 hours before the upgrade; owner-approved). Remove it after 2026-11-10.
   - Fixed:
     - A held catch-up offer (and a held nudge) could stay held when the seller's last capture row got the same millisecond as the hold; `hasSettledSince` now includes that instant.

@@ -25,7 +25,7 @@ The checks need a `config.json` (`cp config.json.example config.json`).
 | `check-market` | Market collections, indexes, capture windows, sweeper, WTB ranking, shadow pipeline | yes |
 | `check-buyer` | Buyer notes, saved searches, alert sweep and send-once claim, `/label` matches | yes |
 | `check-tiers` | Tier selection, `/verify` permissions, tier layouts at publish and sold | yes |
-| `check-rich` | Rich-message builders, golden strings (`UPDATE_GOLDEN=1` to update, then review the diff) | no |
+| `check-rich` | Rich-message builders, golden strings (`UPDATE_GOLDEN=1` to update, then review the diff), the `/faq` widget (size limit, open tab, right-to-left marks, phone buttons) | no |
 | `check-docs` | This documentation: see below | no |
 
 The Mongo-gated checks print `[SKIP]` and pass when `MONGO_URI` is unset, so a green local run without it is not full coverage. Use a throwaway database, never production:
