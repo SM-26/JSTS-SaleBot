@@ -99,15 +99,15 @@ async function run() {
         assert.strictEqual(await greetingOf("/start garbage"), plainGreeting, "/start garbage answers the greeting");
         assert.strictEqual(await greetingOf("/start c_xyz"), plainGreeting, "/start c_xyz answers the greeting");
 
-        // start=faq_1 (the group post's meeting-point button) opens FAQ node 1; only that exact payload.
+        // start=faq_1 (the group post's meeting-point button) opens FAQ node 1 (the widget, on node 1's tab); only that exact payload.
         {
-            const node1 = localeService.getFaqs(config.lang)["1"];
-            assert.ok(node1, "the locale has FAQ node 1");
+            const faqs = localeService.getFaqs(config.lang);
+            assert.ok(faqs["1"], "the locale has FAQ node 1");
             await expectCalls("/start faq_1", () => h.sendText("/start faq_1", { userId }));
-            const sent = h.calls.find((c) => c.method === "sendMessage")!;
-            assert.ok(String(sent.params.text).includes(node1), "FAQ node 1 title is shown");
+            const sent = h.calls.find((c) => c.method === "sendWidget")!;
+            assert.ok(String(sent.params.html).includes(`<button data-i="0" class="on">`) && String(sent.params.html).includes(faqs["1.1"]), "node 1's tab is open, with its questions");
             const datas = (sent.params.reply_markup as { inline_keyboard: { callback_data?: string }[][] }).inline_keyboard.flat().map((b) => b.callback_data);
-            assert.ok(datas.includes("faq_1.1"), "node 1 keyboard has faq_1.1");
+            assert.deepStrictEqual(datas, ["faq_root"], "the text-version button");
             assert.strictEqual(await greetingOf("/start faq_2"), plainGreeting, "/start faq_2 answers the greeting");
             const faqSetting = controller.config.enableFaq;
             controller.config.enableFaq = false;

@@ -13,6 +13,7 @@ It is built with TypeScript, [node-telegram-bot-api](https://github.com/yagop/no
 - A guided post wizard with preview, blocked-word check and photo or video upload. A draft survives a bot restart.
 - Moderation with preset reject reasons, post-publish take-down and trusted sellers.
 - `/myposts` to bump, change the price or mark a post as sold.
+- An airsoft FAQ (`/faq`) as one interactive card in the bot chat, with a text version.
 - Saved searches and private notes that match buyers with listings.
 - Listings made from members' own group messages, with their consent.
 - English, Hebrew and Russian, chosen per user.

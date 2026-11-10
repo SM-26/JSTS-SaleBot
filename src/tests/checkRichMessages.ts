@@ -9,6 +9,8 @@ import { PostService } from "../services/postService";
 import type { PostData } from "../services/postService";
 import { localeService } from "../services/localeService";
 import { buildHelpMessage, buildBroadcastReportMessage, entitiesToRichText } from "../services/richMessages";
+import { buildFaqWidget, markRtl } from "../services/faqWidget";
+import { deflateSync } from "zlib";
 
 // Rich messages are built with RichMessageBuilder, but their wire JSON must stay
 // byte-identical to what the hand-built versions produced: posts already in Telegram
@@ -413,6 +415,34 @@ function checkTierLayouts(): number {
     return Object.keys(built).length;
 }
 
+// The /faq widget: every locale fits Telegram's limits, the topic picks the open tab, RTL brackets are marked.
+function checkFaqWidget(): number {
+    const locales = ["en", "he", "ru"];
+    for (const l of locales) {
+        const html = buildFaqWidget(localeService.getFaqs(l), localeService.t(l, "helpFaq"), l === "he");
+        assert.ok(Buffer.byteLength(html, "utf8") <= 32768, `${l}: widget HTML over 32768 bytes`);
+        const z = deflateSync(Buffer.from(html, "utf8"), { level: 9 }).length;
+        assert.ok(z <= 4096, `${l}: widget is ${z} bytes compressed, over Telegram's 4096`);
+        assert.ok(html.includes(`<button data-i="0" class="on">`), `${l}: first topic open by default`);
+        assert.ok(html.includes(`>Waze ↗</a>`) && html.includes(`>Google Maps ↗</a>`), `${l}: meeting-point map links`);
+    }
+    const second = buildFaqWidget(localeService.getFaqs("en"), "FAQ", false, "2.1");
+    assert.ok(second.includes(`<button data-i="1" class="on">`) && !second.includes(`<button data-i="0" class="on">`), "openTopic opens its top-level tab");
+    assert.strictEqual(markRtl("a (b) [c]"), "a \u200F(\u200Fb\u200F)\u200F \u200F[\u200Fc\u200F]\u200F");
+    assert.strictEqual(markRtl("\u05D2\u05D9\u05DC 13. \u05E2\u05D3 18: \u05DE\u05D7\u05D9\u05E8 1,400 \u05D0\u05D5 14.5, \u05E1\u05D5\u05E3 500."), "\u05D2\u05D9\u05DC 13.\u200F \u05E2\u05D3 18:\u200F \u05DE\u05D7\u05D9\u05E8 1,400 \u05D0\u05D5 14.5,\u200F \u05E1\u05D5\u05E3 500.\u200F",
+        "punctuation after a number is marked, decimals and thousands are not");
+    const he = buildFaqWidget(localeService.getFaqs("he"), "x", true);
+    const age = localeService.getFaqs("he")["1.1.1"];
+    assert.ok(age.includes("(") && age.includes("13.") && he.includes(markRtl(age)), "he: the answer text is drawn with its right-to-left marks");
+    assert.ok(!buildFaqWidget({ "1": "a (b)" }, "x", false).includes("\u200F"), "ltr text is left alone");
+    assert.ok(he.includes(`data-n="052-555-6635">\uD83D\uDCCB 052-555-6635</button><a class="l" href="https://wa.me/972525556635">WhatsApp \u2197</a>`), "he: a mobile number gets copy + WhatsApp");
+    const land = buildFaqWidget({ "1": "a", "1.1": "b", "1.1.1": "call 03-123-4567 or +972 52 721 1716, age 13 or 18" }, "x", false);
+    assert.ok(land.includes(`data-n="03-123-4567">`) && !land.includes("wa.me/97231234567"), "a landline gets copy only");
+    assert.ok(land.includes(`href="https://wa.me/972527211716"`) && !land.includes(`data-n="13"`), "+972 mobile gets WhatsApp; short numbers are left alone");
+    assert.ok(buildFaqWidget({ "1": "<b>&\"" }, "x", false).includes("&lt;b&gt;&amp;&quot;"), "text is escaped");
+    return locales.length;
+}
+
 function run() {
     console.log("[INFO] Checking rich message wire JSON against the hand-built reference...");
     const posts = checkPosts();
@@ -421,6 +451,7 @@ function run() {
     const reports = checkReport();
     const entities = checkEntities();
     const meetup = checkMeetup();
+    console.log(`[SUCCESS] FAQ widget fits and opens the right topic in ${checkFaqWidget()} locales.`);
     console.log(`[SUCCESS] ${checkTierLayouts()} tier layout goldens.`);
     console.log(`[SUCCESS] ${meetup} meetup / empty-field cases.`);
     console.log(`[SUCCESS] Rich messages identical to the reference (${posts} post, ${trusted} trust-line, ${help} help, ${reports} report cases; ${entities} entity cases).`);

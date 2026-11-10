@@ -79,6 +79,7 @@
     "helpConfig": "/config - Просмотр и редактирование настроек",
     "helpDonate": "/donate - Поддержать бота",
     "helpFaq": "/faq - Airsoft FAQ и информация",
+    "faqTextVersion": "📄 Текстовая версия",
     "helpHelp": "/help - Показать список команд",
     "helpLang": "/lang - Изменить предпочтения языка",
     "helpMyPosts": "/myposts - Просмотреть ваши посты",
