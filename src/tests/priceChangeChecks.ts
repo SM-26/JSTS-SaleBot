@@ -60,6 +60,10 @@ export async function priceChangeChecks(ctx: PriceChangeContext): Promise<void> 
         await settle();
     };
     const lastMessage = () => h.calls.filter((c) => c.method === "sendMessage").pop()!;
+    // every message that ends the flow clears the force-reply prompt (Telegram re-offers it on every chat open otherwise)
+    const markup = (c: RecordedCall) => c.params.reply_markup as { remove_keyboard?: boolean; force_reply?: boolean } | undefined;
+    const clears = (c: RecordedCall) => assert.deepStrictEqual(markup(c), { remove_keyboard: true }, `${text(c)}: clears the reply prompt`);
+    const keepsAsking = (c: RecordedCall) => assert.deepStrictEqual(markup(c), { force_reply: true }, `${text(c)}: keeps the reply prompt`);
     const dbPost = async (id: string): Promise<Record<string, unknown>> =>
         (await Post.collection.findOne({ _id: new mongoose.Types.ObjectId(id) } as never)) as Record<string, unknown>;
     const buttons = (c: RecordedCall) => (c.params.reply_markup as Markup).inline_keyboard.flat();
@@ -75,6 +79,7 @@ export async function priceChangeChecks(ctx: PriceChangeContext): Promise<void> 
     const listed = (await Listing.collection.findOne({ postId: atLimit }))!;
     assert.deepStrictEqual([listed.price, listed.priceValue], ["800", 800], "the listing price follows");
     assert.strictEqual(text(lastMessage()), T("priceChangeCut", { price: "800" }));
+    clears(lastMessage());
     await answer(p, "500"); // the flow ended: the same prompt is not an answer any more
     assert.strictEqual(groupPosts().length, 0, "no second cut from the same prompt");
 
@@ -84,6 +89,7 @@ export async function priceChangeChecks(ctx: PriceChangeContext): Promise<void> 
     await answer(p, "900");
     assert.strictEqual(groupPosts().length, 0);
     assert.strictEqual(text(lastMessage()), T("bumpLimitReached"));
+    clears(lastMessage());
     row = await dbPost(atLimit);
     assert.deepStrictEqual([row.price, row.previousPrice, row.dailyBumpCount], ["800", "1000", 2], "a refused raise changes nothing");
 
@@ -92,9 +98,11 @@ export async function priceChangeChecks(ctx: PriceChangeContext): Promise<void> 
     p = (await prompt(retryId))!;
     await answer(p, "1400");
     assert.strictEqual(text(lastMessage()), T("priceChangeSame", { price: "1,400" }));
+    keepsAsking(lastMessage());
     p = lastMessage();
     await answer(p, "cheap");
     assert.strictEqual(text(lastMessage()), T("priceChangeInvalid"));
+    keepsAsking(lastMessage());
     p = lastMessage();
     await answer(p, "1 200");
     assert.strictEqual(groupPosts().length, 1);
@@ -160,6 +168,7 @@ export async function priceChangeChecks(ctx: PriceChangeContext): Promise<void> 
     await two.sendText("/cancel", { userId: u });
     await settle();
     assert.strictEqual(text(two.calls.filter((c) => c.method === "sendMessage").pop()!), T("priceChangeCancelled"));
+    clears(two.calls.filter((c) => c.method === "sendMessage").pop()!);
     await answer(p, "200");
     assert.strictEqual((await dbPost(mine)).price, "250", "no change after /cancel");
 
