@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased
+  - Fixed:
+    - **Beit Dagan alone in the wizard.** With `quickListing` on, ticking 📍 בית דגן on the location step adds a ▶️ Continue button (`draft_loc_meetup_<userId>`, the existing `draftContinueButton` label), so a seller can pick the meeting point without typing a location. The location stays empty and the post shows just the meeting point. It also works from ✏️ Location on the preview. Untick it and the button goes. No new string, no config key, no data change. After a rollback, a press on that button gets the stale-button answer.
+
 3.4.1 - Classifier price fixes and a dead-link label, from the first 28 prod labels (24 sale, 4 not sale: all 4 were sales with a wrong price).
   - Notes:
     - Data change (additive): `shadow_log.label` can be `gone`. No config key, no new collection, no new update type. Rollback: `BOT_TAG=3.4.0`. Gone rows stay out of `/label` (they have a label), and 3.4.0's `/stats` counts them in its labeled n but in neither sale nor not sale, so its precision is unchanged.

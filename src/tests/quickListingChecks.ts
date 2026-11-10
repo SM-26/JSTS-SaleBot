@@ -192,7 +192,8 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             assert.strictEqual(buttons(prompt)[0].callback_data, `draft_meetup_${u}`);
             const id = messageId(prompt);
             await press(h, u, `draft_meetup_${u}`, id);
-            assert.deepStrictEqual(labels(calls(h, "editMessageReplyMarkup")[0]), [`✅ 📍 ${PLACE}`]);
+            assert.deepStrictEqual(labels(calls(h, "editMessageReplyMarkup")[0]), [`✅ 📍 ${PLACE}`, T("draftContinueButton")]);
+            assert.deepStrictEqual(rows(calls(h, "editMessageReplyMarkup")[0]), [["draft_meetup"], ["draft_loc_meetup"]]);
             let d = (await draftOf(u))!;
             assert.deepStrictEqual([d.step, d.promptMessageId, d.meetup], ["location", id, true]);
             await press(h, u, `draft_meetup_${u}`, id);
@@ -229,6 +230,51 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             const post = await confirm(h, u, preview);
             assert.strictEqual(post!.meetup, true);
             console.log("  [OK] (k4) the toggle flips on the prompt and on the preview, never writes false, and Confirm keeps meetup.");
+        }
+
+        // (k4b) Beit Dagan alone: Continue appears only while the toggle is on and skips the typed location
+        {
+            const { h } = boot();
+            const u = user();
+            const prompt = await toLocation(h, u);
+            const id = messageId(prompt);
+            await press(h, u, `draft_loc_meetup_${u}`, id);
+            assert.deepStrictEqual(toasts(h), [T("staleButton")], "Continue with the toggle off is stale");
+            assert.strictEqual((await draftOf(u))!.step, "location");
+
+            await press(h, u, `draft_meetup_${u}`, id);
+            await press(h, u, `draft_loc_meetup_${u}`, id);
+            assert.deepStrictEqual(keyboard(calls(h, "editMessageReplyMarkup")[0]), [], "the prompt's buttons go");
+            assert.ok(text(calls(h, "sendMessage")[0]).includes(T("enterMedia")), "the media prompt follows");
+            let d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.location, d.meetup], ["media", "", true]);
+
+            for (const p of ["p1", "p2"]) await h.sendPhoto(p, { userId: u });
+            h.calls.length = 0;
+            await h.pressButton(`done_media_${u}`, { userId: u, messageId: d.promptMessageId });
+            await settle();
+            const preview = calls(h, "sendRichMessage")[0];
+            const rich = JSON.stringify(preview.params.rich_message);
+            assert.ok(rich.includes(PLACE) && !rich.includes(`${PLACE} · `) && !rich.includes(` · ${PLACE}`), "the preview shows just the meeting point");
+
+            // from the preview: Edit location, then Beit Dagan alone again clears the typed one
+            await press(h, u, `draft_edit_location_${u}`, messageId(preview));
+            await h.sendText("Tel Aviv", { userId: u });
+            await settle();
+            d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.location], ["confirm", "Tel Aviv"]);
+            await press(h, u, `draft_edit_location_${u}`, d.promptMessageId);
+            const editPrompt = calls(h, "sendMessage")[0];
+            assert.deepStrictEqual(rows(editPrompt), [["draft_meetup"], ["draft_loc_meetup"]], "meetup is on, so Continue shows");
+            await press(h, u, `draft_loc_meetup_${u}`, messageId(editPrompt));
+            const back = calls(h, "sendRichMessage")[0];
+            assert.ok(back, "back to the preview");
+            d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.location, d.meetup, d.promptMessageId], ["confirm", "", true, messageId(back)]);
+
+            const post = await confirm(h, u, back);
+            assert.deepStrictEqual([post!.location, post!.meetup], ["", true]);
+            console.log("  [OK] (k4b) Beit Dagan alone: Continue only while ticked, skips the location, and works from Edit location.");
         }
 
         // (k5) typing the meeting point sets meetup; key off with a live preview
