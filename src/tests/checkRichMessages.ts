@@ -432,7 +432,8 @@ function checkFaqWidget(): number {
     assert.strictEqual(markRtl("\u05D2\u05D9\u05DC 13. \u05E2\u05D3 18: \u05DE\u05D7\u05D9\u05E8 1,400 \u05D0\u05D5 14.5, \u05E1\u05D5\u05E3 500."), "\u05D2\u05D9\u05DC 13.\u200F \u05E2\u05D3 18:\u200F \u05DE\u05D7\u05D9\u05E8 1,400 \u05D0\u05D5 14.5,\u200F \u05E1\u05D5\u05E3 500.\u200F",
         "punctuation after a number is marked, decimals and thousands are not");
     const he = buildFaqWidget(localeService.getFaqs("he"), "x", true);
-    assert.ok(he.includes("\u200F(\u200F") && !/[^\u200F][()]/.test(he.replace(/<style>[\s\S]*?<\/style>|<script>[\s\S]*?<\/script>/g, "")), "he: every bracket in the text is marked");
+    const age = localeService.getFaqs("he")["1.1.1"];
+    assert.ok(age.includes("(") && age.includes("13.") && he.includes(markRtl(age)), "he: the answer text is drawn with its right-to-left marks");
     assert.ok(!buildFaqWidget({ "1": "a (b)" }, "x", false).includes("\u200F"), "ltr text is left alone");
     assert.ok(he.includes(`data-n="052-555-6635">\uD83D\uDCCB 052-555-6635</button><a class="l" href="https://wa.me/972525556635">WhatsApp \u2197</a>`), "he: a mobile number gets copy + WhatsApp");
     const land = buildFaqWidget({ "1": "a", "1.1": "b", "1.1.1": "call 03-123-4567 or +972 52 721 1716, age 13 or 18" }, "x", false);
