@@ -117,6 +117,8 @@ const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     ["faq_1", { kind: "faq", id: "1" }], ["faq_2", null], ["faq_", null],
     [`s_${ID}`, { kind: "s", id: ID }],
     ["s_", null], ["s_xyz", null],
+    [`f_${ID}`, { kind: "f", id: ID }],
+    ["f_", null], ["f_xyz", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
 ];
 for (const [args, expected] of PAYLOADS) {

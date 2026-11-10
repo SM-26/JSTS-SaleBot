@@ -332,7 +332,7 @@ export class WizardService {
                 media: capture.media.map(m => ({ fileId: m.fileId, type: m.type })),
             };
             if (step === "confirm") {
-                const draft = await draftRepository.startFromCapture({ ...input, promptMessageId: 0 });
+                const draft = await draftRepository.startPrefilled({ ...input, promptMessageId: 0 });
                 try {
                     await this.previewOrFix(draft, from);
                 } catch (err) {
@@ -342,7 +342,47 @@ export class WizardService {
                 return true;
             }
             const promptMessageId = await this.sendStep({ userId, chatId: msg.chat.id, locale, step, captureId }, from);
-            await draftRepository.startFromCapture({ ...input, promptMessageId });
+            await draftRepository.startPrefilled({ ...input, promptMessageId });
+            return true;
+        });
+    }
+
+    /**
+     * /start f_<postId> ("Fix and resend" on a reject notice): the rejected post back as a draft on the preview,
+     * where the edit buttons fix it and Confirm sends it as a new post. The rejected post stays as it is.
+     * Needs quickListing (the edit buttons); off, it is the plain wizard. Never overwrites a live draft.
+     */
+    startFromRejected(msg: Message, postId: string): Promise<boolean> {
+        return this.safe("startFromRejected", msg.chat.id, async () => {
+            if (!this.quickOn()) return this.handleNewPost(msg);
+            const from = msg.from!;
+            const userId = String(from.id);
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+            const say = async (key: string): Promise<boolean> => {
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, key) });
+                return true;
+            };
+
+            const post = await postRepository.findById(postId);
+            // A foreign id answers like a missing one.
+            if (!post || post.userId !== userId || post.status !== "rejected") return say("captureExpired");
+            const existing = await draftRepository.findByUserId(userId);
+            if (existing && !existing.awaitText && !isDraftExpired(existing, this.config.timeOut)) return say("captureDraftBusy");
+
+            console.info("[INFO - WizardService.startFromRejected]", { userId, postId });
+            const draft = await draftRepository.startPrefilled({
+                userId, chatId: msg.chat.id, locale, step: "confirm", promptMessageId: 0,
+                title: post.title || undefined, description: post.description || undefined,
+                descriptionEntities: post.descriptionEntities?.length ? post.descriptionEntities : undefined,
+                price: post.price || undefined, location: post.location || undefined, meetup: post.meetup || undefined,
+                media: post.media.map(m => ({ fileId: m.fileId, type: m.type })),
+            });
+            try {
+                await this.previewOrFix(draft, from); // a blocked word that got it rejected is asked for again
+            } catch (err) {
+                await draftRepository.delete(userId); // no half-started draft
+                throw err;
+            }
             return true;
         });
     }
@@ -446,11 +486,16 @@ export class WizardService {
         await this.api.sendMessage({ chat_id: draft.chatId, text: `${card.text}\n${t("dmSellHint")}`, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
     }
 
-    /** /start sell: with quickListing on and no live draft, say how to post in one message. */
+    /**
+     * /start sell, the "Fix and resend" link on reject notices sent before f_<postId>: with quickListing on and
+     * no live draft, the seller's newest rejected post to fix, else how to post in one message.
+     */
     handleSell(msg: Message): Promise<boolean> {
         return this.safe("handleSell", msg.chat.id, async () => {
             const draft = await draftRepository.findByUserId(String(msg.from!.id));
             if (!this.quickOn() || (draft && !draft.awaitText && !isDraftExpired(draft, this.config.timeOut))) return this.handleNewPost(msg);
+            const rejected = await postRepository.findLatestRejected(String(msg.from!.id));
+            if (rejected) return this.startFromRejected(msg, String(rejected._id));
             const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
             await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickSellHint") });
             return true;

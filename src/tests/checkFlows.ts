@@ -1099,7 +1099,7 @@ async function run() {
             assert.strictEqual(text(dms[0]), TEN("postRejectedWithReason") + TEN("rejectPreset2"));
             type UrlKeyboard = { inline_keyboard: { text: string; url?: string }[][] };
             const rows = (c: RecordedCall) => (c.params.reply_markup as UrlKeyboard).inline_keyboard;
-            assert.deepStrictEqual(rows(dms[0]), [[{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }]]);
+            assert.deepStrictEqual(rows(dms[0]), [[{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=f_${postId}` }]]);
             const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === messageId(prompt))!;
             assert.ok(text(edit).includes(T("statusRejected")) && text(edit).includes(T("rejectPreset2")), text(edit));
             assert.deepStrictEqual(answers(h), [T("adminRejected")]);
@@ -1114,7 +1114,7 @@ async function run() {
                 await rrPress(h, mod, `rr_${p2}_1`, messageId(prompt2));
                 await settle();
                 assert.deepStrictEqual(rows(toAuthorDMs(h)[0]), [
-                    [{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }],
+                    [{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=f_${p2}` }],
                     [{ text: TEN("rejectRulesButton"), url: rules }],
                 ]);
             } finally {

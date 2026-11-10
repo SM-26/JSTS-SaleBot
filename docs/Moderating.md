@@ -8,7 +8,7 @@ A new seller's post arrives in the moderation topic with **Approve** and **Rejec
 
 **Reject** posts a prompt with four preset reasons. Press one, or **reply to that prompt** with your own text. A message that is not a reply to the prompt is ignored, and the bot reminds you to reply, so a reason can't land on the wrong post. `/cancel` in the group forgets your open prompts.
 
-The author is told exactly once, with **Fix and resend** and, if `rulesUrl` is set, the group rules link. Prompts are stored in the database, so a restart doesn't lose them.
+The author is told exactly once, with **Fix and resend** and, if `rulesUrl` is set, the group rules link. With `quickListing` on, Fix and resend opens the rejected post in the bot again, on the preview with its edit buttons; sending it makes a new post for review, and the rejected one stays. With it off, it starts an empty wizard. Prompts are stored in the database, so a restart doesn't lose them.
 
 ## Trusted sellers: review after publishing
 

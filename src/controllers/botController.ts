@@ -161,6 +161,7 @@ export class BotController {
         // Deep links from capture notes; slice 6 adds k_ here.
         const payload = parseStartPayload(args);
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "f") { await this.wizardService.startFromRejected(msg, payload.id); return; }
         if (payload?.kind === "faq" && this.config.enableFaq !== false) { await this.faqService.showNode(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         if (payload?.kind === "k" && await this.catchupService.handleStart(msg, payload.id, new Date())) return;

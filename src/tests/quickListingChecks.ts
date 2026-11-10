@@ -644,6 +644,80 @@ export async function quickListingChecks(ctx: QuickListingContext): Promise<void
             console.log("  [OK] (k17) /start sell: the hint, or the Continue / Start over question.");
         }
 
+        // (k17b) Fix and resend: f_<postId> reopens the rejected post on the preview; an old sell link reopens the newest
+        {
+            const { h } = boot();
+            const u = user();
+            const seed = (title: string, extra: Record<string, unknown>) => Post.create({ userId: String(u), title, description: "d", price: "100", location: "Haifa", media: [{ fileId: "r0", type: "photo" }], status: "rejected", ...extra });
+            const older = await seed("Old bike", { createdAt: new Date(Date.now() - 60_000) });
+            const rejected = await seed("Red bike", {
+                description: "Fast", descriptionEntities: [{ type: "bold", offset: 0, length: 4 }], price: "1,200", location: "", meetup: true,
+                media: [{ fileId: "r1", type: "photo" }, { fileId: "r2", type: "photo" }], createdAt: new Date(),
+            });
+            postIds.push(String(older._id), String(rejected._id));
+            const id = String(rejected._id);
+
+            // someone else's link answers like a missing post
+            const other = user();
+            await h.sendText(`/start f_${id}`, { userId: other });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("captureExpired")]);
+            assert.strictEqual(await draftOf(other), null);
+
+            h.calls.length = 0;
+            await h.sendText(`/start f_${id}`, { userId: u });
+            await settle();
+            const preview = previews(h)[0];
+            assert.ok(preview, "straight to the preview");
+            assert.deepStrictEqual(rows(preview), [["confirm", "cancel"], ["draft_edit_title", "draft_edit_description"], ["draft_edit_price", "draft_edit_location"], ["draft_meetup"]]);
+            assert.deepStrictEqual(labels(preview).slice(-1), [`✅ 📍 ${PLACE}`]);
+            assert.ok(JSON.stringify(preview.params.rich_message).includes("Red bike"));
+            let d = (await draftOf(u))!;
+            assert.deepStrictEqual(
+                [d.step, d.title, d.description, d.price, d.location, d.meetup, d.media.map((m) => m.fileId), d.descriptionEntities?.length, d.captureId, d.promptMessageId],
+                ["confirm", "Red bike", "Fast", "1,200", undefined, true, ["r1", "r2"], 1, undefined, messageId(preview)]
+            );
+
+            // a live draft is never overwritten
+            h.calls.length = 0;
+            await h.sendText(`/start f_${String(older._id)}`, { userId: u });
+            await settle();
+            assert.deepStrictEqual(sent(h).map(text), [T("captureDraftBusy")]);
+            assert.strictEqual((await draftOf(u))!.title, "Red bike");
+
+            // fix the price, Confirm: a new post for moderation, the rejected one stays
+            await press(h, u, `draft_edit_price_${u}`, messageId(preview));
+            h.calls.length = 0;
+            await h.sendText("900", { userId: u });
+            await settle();
+            const fixed = previews(h)[0];
+            d = (await draftOf(u))!;
+            assert.deepStrictEqual([d.step, d.price, d.promptMessageId], ["confirm", "900", messageId(fixed)]);
+            await press(h, u, buttons(fixed).find((b) => b.callback_data.startsWith("confirm_"))!.callback_data, messageId(fixed));
+            const resent = await Post.findOne({ userId: String(u), status: { $ne: "rejected" } });
+            assert.ok(resent, "a new post");
+            postIds.push(String(resent._id));
+            assert.deepStrictEqual([resent.status, resent.title, resent.price, resent.meetup, resent.media.map((m) => m.fileId)], ["pending", "Red bike", "900", true, ["r1", "r2"]]);
+            assert.strictEqual((await Post.findById(id))!.status, "rejected");
+
+            // a reject notice from before f_ (start=sell) opens the newest rejected post
+            h.calls.length = 0;
+            await h.sendText("/start sell", { userId: u });
+            await settle();
+            assert.strictEqual(previews(h).length, 1);
+            assert.strictEqual((await draftOf(u))!.title, "Red bike");
+            await h.sendText("/cancel", { userId: u });
+
+            // key off: no edit buttons to fix with, so the plain wizard
+            cfg.quickListing = false;
+            await h.sendText(`/start f_${id}`, { userId: u });
+            await settle();
+            assert.strictEqual((await draftOf(u))!.step, "title");
+            await h.sendText("/cancel", { userId: u });
+            cfg.quickListing = true;
+            console.log("  [OK] (k17b) Fix and resend reopens the rejected post on the preview, never over a live draft; sell opens the newest.");
+        }
+
         // (k18) key off: an album with a caption is nothing, /start sell is the title prompt
         {
             cfg.quickListing = false;

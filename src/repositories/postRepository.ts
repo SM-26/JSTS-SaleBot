@@ -10,6 +10,11 @@ class PostRepository {
         return Post.find({ userId }).sort({ createdAt: -1 });
     }
 
+    // The seller's newest rejected post: what an old "Fix and resend" button (start=sell) reopens.
+    findLatestRejected(userId: string) {
+        return Post.findOne({ userId, status: "rejected" }).sort({ createdAt: -1 }).exec();
+    }
+
     findById(postId: string) {
         return Post.findById(postId);
     }
