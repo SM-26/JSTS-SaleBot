@@ -4,7 +4,7 @@
 
 JSTS Sale Bot (say "Just Sale Bot") is a Telegram marketplace bot. Members create sale posts in a private chat with the bot. New sellers' posts go through a moderation group first; trusted sellers publish at once and are reviewed afterwards.
 
-It is built with TypeScript, [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) and MongoDB, and is a JS version of [GoSaleBot](https://github.com/SM-26/GoSaleBot/).
+It is built with TypeScript, [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) 2.4.0 (Bot API 10.4) and MongoDB, and is a JS version of [GoSaleBot](https://github.com/SM-26/GoSaleBot/).
 
 > ⚠️ Posts are Telegram Rich Messages, which Telegram X shows as "Unsupported message". Use an official Telegram app.
 

@@ -10,7 +10,7 @@
 
 **Stack:**
 - Runtime: Node.js + TypeScript
-- Telegram library: `node-telegram-bot-api` **v2.3.0** (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
+- Telegram library: `node-telegram-bot-api` **v2.4.0** (Bot API 10.4) (middleware chain with `Context`, an `Api` taking params objects, `createSession`; imports come from `node-telegram-bot-api`, `node-telegram-bot-api/types` and `node-telegram-bot-api/node`)
 - Database: MongoDB via `mongoose` (collections `posts`, `users`, `drafts`, `bot_sessions`, and the market's `listings`, `captures`, `shadow_log`, `members`, `saved_searches`, `alert_log`)
 - Linting: ESLint + `typescript-eslint`
 - Infrastructure: Docker + Docker Compose (bot + MongoDB; mongo-express on demand in prod and test, see [Running](docs/Running.md))
