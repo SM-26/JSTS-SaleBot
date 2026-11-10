@@ -151,9 +151,10 @@ function findPrices(text: string, res: Array<[RegExp, Kind]>): PriceMatch[] {
     return merged.filter(m => !OLD_BEFORE.test(text.slice(Math.max(0, m.index - 12), m.index)));
 }
 
-// 1 a cue word or a total, 2 a line that is only the price, 3 a currency, 4 "בNNN"; a price in passing in a sentence loses to all but 4
+// 1 a cue word, a total or "למכירה ב-NNN", 2 a line that is only the price, 3 a currency, 4 "בNNN"; a price in passing in a sentence loses to all but 4
 function rank(text: string, m: PriceMatch): number {
     if (m.kinds.includes("cue") || m.kinds.includes("total")) return 1;
+    if (m.kinds.includes("b") && /למכירה\s*[:\-–]?\s*$/u.test(text.slice(Math.max(0, m.index - 12), m.index))) return 1;
     const from = text.lastIndexOf("\n", m.index - 1) + 1;
     const end = text.indexOf("\n", m.index);
     const to = end < 0 ? text.length : end;

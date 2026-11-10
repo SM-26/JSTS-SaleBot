@@ -17,6 +17,8 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["one total for everything stays strict", "למכירה\nM4 900₪\nגלוק 600₪\nהכל ב-1400", true, "strict", { isBundle: true, priceValue: 1400 }],
     ["total with ₪ and סה״כ", "למכירה M4 ומשקפת\nM4 900₪, משקפת 300₪\nסה״כ 1,100₪", true, "strict", { priceValue: 1100 }],
     ["a 'total' below an item price is no total", "למכירה\nM4 900₪\nגלוק 600₪\nסה״כ 2 פריטים", true, "ask"],
+    ["למכירה ב-NNN outranks a currency price", "M4 במצב מעולה למכירה ב3500\nמשקפת 200 שקל", true, "ask", { priceValue: 3500 }],
+    ["למכירה: ב-NNN outranks a currency price", "למכירה: ב-3500 M4 במצב מעולה\nמשקפת 200 שקל", true, "ask", { priceValue: 3500 }],
     ["shipping is a second price: ask", "למכירה M4 900₪\nמשלוח 30₪", true, "ask", { priceValue: 900 }],
     ["price in passing loses to מחיר", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\nמחיר 380₪", true, "ask", { priceValue: 380, title: "למכירה וסט טקטי במצב טוב" }],
     ["price in passing loses to a price line", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\n380₪", true, "ask", { priceValue: 380 }],
