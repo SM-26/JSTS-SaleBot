@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 Unreleased
+  - Dependencies:
+    - Upgraded `node-telegram-bot-api` 2.3.0 → 2.4.0 (pinned exactly), which adds Telegram Bot API 10.4. Nothing the user sees changes. The bot uses none of the new 10.4 features yet (see #104), and it doesn't set `rateLimit`, so 2.4.0's rate-limiter fix doesn't apply. No code changes were needed.
+    - `pnpm-workspace.yaml` exempts exactly `node-telegram-bot-api@2.4.0` from pnpm's `minimumReleaseAge` (published 2026-11-09, under 24 hours before the upgrade; owner-approved). Remove it after 2026-11-10.
   - Fixed:
     - A held catch-up offer (and a held nudge) could stay held when the seller's last capture row got the same millisecond as the hold; `hasSettledSince` now includes that instant.
     - 💸 Change price: the reply prompt no longer sticks. Telegram re-offers a force-reply prompt every time the chat opens until it is answered, so after `/cancel`, a timeout or any other end of the flow the bot kept offering to reply to an old prompt. Every message that ends the flow now clears it (`remove_keyboard`); the retry prompts still ask for a reply.
