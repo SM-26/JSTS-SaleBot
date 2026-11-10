@@ -185,7 +185,7 @@
     "captureAddButton": "✅ Добавить",
     "captureCompleteButton": "✅ Дополнить в боте",
     "captureEditButton": "✏️ Изменить",
-    "captureNoteTrade": "Похоже на обмен. Измените данные в боте, чтобы добавить.",
+    "captureNoteTrade": "Похоже на обмен. Измените данные в боте и добавьте на рынок.",
     "captureNotNowButton": "Не сейчас",
     "captureNeverButton": "Больше не спрашивать",
     "captureNeverNote": "Хорошо, больше не спрошу. Чтобы изменить это, откройте /myposts в боте.",
