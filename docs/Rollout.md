@@ -16,7 +16,7 @@ Before `optin`, have a second account (not the poster, not an admin) confirm in 
 
 Kill switch: `/config captureMode shadow`. Notes stop at once and existing listings stay manageable.
 
-To measure first: `/label` and `/stats` show the classifier's precision.
+To measure first: `/label` and `/stats` show the classifier's precision. A sale post is `strict` (automatic capture would list it) or `ask` (the note asks the seller). A post with two or more different prices is `ask`, unless one stated total covers everything (`הכל ב-1500`, `סה״כ 1,100₪`, no smaller than any item price); a struck-through or old price (`במקום`, `היה`, `קניתי`) does not count. The hybrid gate on `/stats` needs at least 100 labeled rows at 97% precision or better; dead-link rows count for neither.
 
 ## Buyers: `buyerMatches`
 

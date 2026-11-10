@@ -63,6 +63,8 @@ export class ShadowAdminService {
                     { text: localeService.t(locale, "labelSale"), callback_data: `lb_${id}_s` },
                     { text: localeService.t(locale, "labelNotSale"), callback_data: `lb_${id}_n` },
                     { text: localeService.t(locale, "labelSkip"), callback_data: `lb_${id}_k` },
+                ], [
+                    { text: localeService.t(locale, "labelGone"), callback_data: `lb_${id}_g` },
                 ]],
             },
         };
@@ -109,14 +111,14 @@ export class ShadowAdminService {
                 await this.api.answerCallbackQuery({ callback_query_id: query.id, text: localeService.t(locale, "notAdmin") });
                 return;
             }
-            const m = /^([0-9a-f]{24})_([snkudm])$/.exec(arg);
+            const m = /^([0-9a-f]{24})_([snkgudm])$/.exec(arg);
             if (!m) {
                 await this.api.answerCallbackQuery({ callback_query_id: query.id });
                 return;
             }
             // ponytail: Skip only avoids the row just shown; it can come back later. Add a skipped list if that gets annoying.
             if (m[2] === "u" || m[2] === "d") await shadowLogRepository.setMatchLabel(m[1], m[2] === "u" ? "useful" : "not_useful", String(query.from.id), new Date());
-            else if (m[2] === "s" || m[2] === "n") await shadowLogRepository.setLabel(m[1], m[2] === "s" ? "sale" : "not_sale", String(query.from.id), new Date());
+            else if ("sng".includes(m[2])) await shadowLogRepository.setLabel(m[1], m[2] === "s" ? "sale" : m[2] === "n" ? "not_sale" : "gone", String(query.from.id), new Date());
             await this.api.answerCallbackQuery({ callback_query_id: query.id });
             if (!query.message) return;
             const skipped = m[2] === "k" || m[2] === "m" ? m[1] : undefined;
@@ -151,6 +153,7 @@ export class ShadowAdminService {
                 status7: statuses(l7), status30: statuses(l30),
                 held,
                 n7: s7.labeled, n30: s30.labeled,
+                gone7: s7.gone, gone30: s30.gone,
                 prec7: pct(s7.sale, s7.sale + s7.notSale, 1), prec30: pct(s30.sale, s30.sale + s30.notSale, 1),
                 gate7: gate(s7), gate30: gate(s30),
             });

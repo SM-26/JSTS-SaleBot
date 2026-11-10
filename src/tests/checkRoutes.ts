@@ -162,7 +162,7 @@ async function run() {
             assert.ok(String(labelCall.params.text).endsWith("\nstrict · 100"), "/label shows the tier and the price number, no text");
             assert.ok(!String(labelCall.params.text).includes("Bike"), "/label shows no title");
             const keyboard = (labelCall.params.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard.flat();
-            assert.deepStrictEqual(keyboard.map((b) => b.callback_data), [`lb_${shadow._id}_s`, `lb_${shadow._id}_n`, `lb_${shadow._id}_k`]);
+            assert.deepStrictEqual(keyboard.map((b) => b.callback_data), [`lb_${shadow._id}_s`, `lb_${shadow._id}_n`, `lb_${shadow._id}_k`, `lb_${shadow._id}_g`]);
             h.calls.length = 0;
             await h.pressButton(`lb_${shadow._id}_s`, { userId: modId, messageId: 61 });
             assert.strictEqual((await ShadowLog.findById(shadow._id))?.label, undefined, "a moderator cannot label");
@@ -190,10 +190,18 @@ async function run() {
             await ShadowLog.deleteOne({ _id: rowB._id });
             const last = await skip(rowA);
             assert.strictEqual(last.text, localeService.t(config.lang, "labelEmpty"), "Skip with no other row shows labelEmpty");
+            // Dead link: the row is labeled gone and never comes back, though nothing excludes it now
+            h.calls.length = 0;
+            await h.pressButton(`lb_${rowA._id}_g`, { userId: adminId, messageId: 62 });
+            assert.ok(await waitFor(() => h.calls.some((c) => c.method === "editMessageText")));
+            assert.strictEqual((await ShadowLog.findById(rowA._id))?.label, "gone");
+            assert.strictEqual(h.calls.find((c) => c.method === "editMessageText")!.params.text, localeService.t(config.lang, "labelEmpty"), "a gone row is not offered again");
             h.calls.length = 0;
             await h.sendText("/stats", { userId: modId });
             assert.ok(await waitFor(() => h.calls.some((c) => c.method === "sendMessage")));
             assert.ok(/\d+\.\d%/.test(lastText()), "/stats shows precision with one decimal");
+            const goneLabel = localeService.t(config.lang, "statsBody").split("{gone7}")[0].split("\n").pop()!;
+            assert.ok(Number(lastText().split(goneLabel)[1]?.split(" ")[0]) >= 1, "/stats shows the gone count");
 
             // Opt-in rate: last 7 days, first-ask notes only. The line shows when captureMode is optin or a note exists.
             const { default: captureRepository } = await import("../repositories/captureRepository");

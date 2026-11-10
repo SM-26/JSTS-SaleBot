@@ -3,7 +3,7 @@ import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
 import type { BotConfig } from "../types";
-import { classify, textHash, tokenOverlap, tokens, type ClassifyResult } from "./classifier";
+import { classify, partEntities, textHash, tokenOverlap, tokens, type ClassifyResult } from "./classifier";
 import { rankMatches } from "./matchService";
 
 const REPOST_MS = 30 * 24 * 3600_000;
@@ -20,7 +20,7 @@ export async function processOneClosed(config: BotConfig, now: Date, onClassifie
     const cap = await captureRepository.claimClosed();
     if (!cap) return false;
 
-    const result = classify(cap.text, cap.media.length > 0);
+    const result = classify(cap.text, cap.media.length > 0, partEntities(cap.parts));
     const { tier, rules, parsed } = result;
 
     // only a sale post (strict or ask) can repeat the seller's listing

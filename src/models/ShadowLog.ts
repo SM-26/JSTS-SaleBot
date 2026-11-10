@@ -16,7 +16,7 @@ export interface ShadowLogRow {
     mergeWith?: string;
     matches?: string[];
     parsedPriceValue?: number;
-    label?: "sale" | "not_sale";
+    label?: "sale" | "not_sale" | "gone"; // gone: the group post was deleted, so it cannot be labeled
     labeledBy?: string;
     labeledAt?: Date;
     matchLabel?: "useful" | "not_useful";
@@ -38,7 +38,7 @@ const shadowLogSchema = new Schema<IShadowLog>({
     mergeWith: { type: String },
     matches: { type: [String], default: undefined },
     parsedPriceValue: { type: Number },
-    label: { type: String, enum: ["sale", "not_sale"] },
+    label: { type: String, enum: ["sale", "not_sale", "gone"] },
     labeledBy: { type: String },
     labeledAt: { type: Date },
     matchLabel: { type: String, enum: ["useful", "not_useful"] },

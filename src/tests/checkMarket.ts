@@ -315,6 +315,12 @@ async function run() {
         const stats = await shadowLogRepository.stats(new Date(t0.getTime() - SEC));
         assert.ok(stats.byTier.strict >= 1 && stats.wouldList >= 1 && stats.labeled >= 1 && stats.sale >= 1);
         assert.strictEqual(typeof stats.byTier.none, "number");
+        // gone (the group post was deleted): never offered again, and outside precision and the gate's n
+        const goneRow = await shadowLogRepository.insert({ chatId: CHAT, messageIds: [2], senderId: `${RUN}-x`, at: t0, tier: "strict", rules: ["r"], wouldList: true });
+        assert.strictEqual((await shadowLogRepository.setLabel(String(goneRow._id), "gone", "mod1", at(1)))?.label, "gone");
+        const afterGone = await shadowLogRepository.stats(new Date(t0.getTime() - SEC));
+        assert.deepStrictEqual([afterGone.labeled, afterGone.sale, afterGone.notSale, afterGone.gone], [stats.labeled, stats.sale, stats.notSale, stats.gone + 1]);
+        for (let i = 0; i < 20; i++) assert.notStrictEqual(String((await shadowLogRepository.sampleUnlabeled())?._id), String(goneRow._id), "a gone row is never sampled");
         assert.strictEqual((await shadowLogRepository.lastRows(1)).length, 1);
         console.log("[OK] shadow log.");
 

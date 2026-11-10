@@ -95,24 +95,48 @@ export function cleanTitleLine(line: string, location?: string): string {
 const NUM = "\\d{1,3}(?:,\\d{3})+|\\d+";
 const NUM2 = "\\d{1,3}(?:,\\d{3})+|\\d{2,}"; // ב / bare prices need 2+ digits
 const CUR = '(?:₪|ש["״\'׳]?ח(?!\\p{L})|שקל(?:ים)?(?!\\p{L}))';
-const explicitRes = [
-    new RegExp(`(?<![\\d,.])(?:${NUM})\\s*${CUR}`, "gu"),
-    new RegExp(`₪\\s*(?:${NUM})(?!\\d)`, "gu"),
-    new RegExp(`מחיר\\s*:?\\s*(?:${NUM})(?!\\d)`, "gu"),
-    new RegExp(`(?<![\\p{L}\\d])ב-?(?:${NUM2})(?!\\d)`, "gu"),
+// what a match is: a cue word (מחיר / מבקש), a currency, a ב prefix, a total for everything ("הכל ב-1500") or a bare number
+type Kind = "cue" | "currency" | "b" | "total" | "bare";
+const explicitRes: Array<[RegExp, Kind]> = [
+    // a number and its currency share a line; "900₪ 750₪" is two prices, not "₪ 750" glued to 900
+    [new RegExp(`(?<![\\d,.])(?:${NUM})[^\\S\\n]*${CUR}`, "gu"), "currency"],
+    [new RegExp(`(?<!\\d[^\\S\\n]*)₪[^\\S\\n]*(?:${NUM})(?!\\d)`, "gu"), "currency"],
+    [new RegExp(`(?:מחיר|מבקשת|מבקש)\\s*[:\\-–]?\\s*(?:ב-?\\s*)?(?:${NUM})(?!\\d)`, "gu"), "cue"],
+    [new RegExp(`(?<![\\p{L}\\d])ב-?(?:${NUM2})(?!\\d)`, "gu"), "b"],
+    [new RegExp(`(?<!\\p{L})(?:הכל|הכול|ביחד|יחד|סה["״'׳]?כ)\\s*(?:ביחד\\s*)?[:\\-–]?\\s*(?:ב-?\\s*)?(?:${NUM})(?!\\d)`, "gu"), "total"],
 ];
+const RULE: Record<Kind, string> = { cue: "price-cue", currency: "price-currency", b: "price-b-prefix", total: "price-total", bare: "price-bare" };
 const bareRe = /(?<![\d,.])(?:\d{1,3}(?:,\d{3})+|\d{2,6})(?!\d|\.\d)/gu; // "14.5" is a size, not a price
+// an old price: "750₪ במקום 900₪", "היה 900₪", "קניתי ב-6000"
+const OLD_BEFORE = /(?:במקום|היה|הייתה|היתה|קניתי|שילמתי)\s*:?\s*$/u;
 
-interface PriceMatch { str: string; value: number; index: number; rule: string }
+interface PriceMatch { str: string; value: number; index: number; kinds: Kind[] }
 
-function findPrices(text: string, res: RegExp[], rule: (i: number) => string): PriceMatch[] {
+/** Telegram entities of each part, moved to their offset in the joined text (parts joined by "\n", as captures are). */
+export function partEntities(parts: Array<{ text: string; entities?: Array<{ type: string; offset: number; length: number }> }>): Array<{ type: string; offset: number; length: number }> {
+    let at = 0;
+    return parts.flatMap(p => {
+        const out = (p.entities ?? []).map(e => ({ type: e.type, offset: e.offset + at, length: e.length }));
+        at += p.text.length + 1;
+        return out;
+    });
+}
+
+// Struck text is an old price, never a candidate: strikethrough entities and combining-stroke characters ("9̶0̶0̶") turn to "_" (same length, so indexes hold; not a space, so no regex joins across it).
+function maskStruck(text: string, entities: Array<{ type: string; offset: number; length: number }>): string {
+    let s = text.replace(/[^\s][\u0335\u0336]/gu, "__");
+    for (const e of entities) if (e.type === "strikethrough") s = s.slice(0, e.offset) + "_".repeat(Math.max(0, Math.min(e.length, s.length - e.offset))) + s.slice(e.offset + e.length);
+    return s;
+}
+
+function findPrices(text: string, res: Array<[RegExp, Kind]>): PriceMatch[] {
     const out: PriceMatch[] = [];
-    res.forEach((re, i) => {
+    for (const [re, kind] of res) {
         for (const m of text.matchAll(re)) {
             const digits = /\d{1,3}(?:,\d{3})+|\d+/.exec(m[0].replace(/^ב-?/, ""));
-            if (digits && !unitRe.test(text.slice((m.index ?? 0) + m[0].length))) out.push({ str: m[0], value: Number(digits[0].replace(/,/g, "")), index: m.index ?? 0, rule: rule(i) });
+            if (digits && !unitRe.test(text.slice((m.index ?? 0) + m[0].length))) out.push({ str: m[0], value: Number(digits[0].replace(/,/g, "")), index: m.index ?? 0, kinds: [kind] });
         }
-    });
+    }
     out.sort((x, y) => x.index - y.index);
     // overlapping matches ("מחיר 900" + "900₪") are one price: keep the union span
     const merged: PriceMatch[] = [];
@@ -121,16 +145,26 @@ function findPrices(text: string, res: RegExp[], rule: (i: number) => string): P
         if (last && m.index < last.index + last.str.length) {
             const end = Math.max(last.index + last.str.length, m.index + m.str.length);
             last.str = text.slice(last.index, end);
-        } else merged.push({ ...m });
+            last.kinds.push(...m.kinds);
+        } else merged.push({ ...m, kinds: [...m.kinds] });
     }
-    return merged;
+    return merged.filter(m => !OLD_BEFORE.test(text.slice(Math.max(0, m.index - 12), m.index)));
+}
+
+// 1 a cue word, a total or "למכירה ב-NNN", 2 a line that is only the price, 3 a currency, 4 "בNNN"; a price in passing in a sentence loses to all but 4
+function rank(text: string, m: PriceMatch): number {
+    if (m.kinds.includes("cue") || m.kinds.includes("total")) return 1;
+    if (m.kinds.includes("b") && /למכירה\s*[:\-–]?\s*$/u.test(text.slice(Math.max(0, m.index - 12), m.index))) return 1;
+    const from = text.lastIndexOf("\n", m.index - 1) + 1;
+    const end = text.indexOf("\n", m.index);
+    const to = end < 0 ? text.length : end;
+    if (!normalize(text.slice(from, m.index) + " " + text.slice(m.index + m.str.length, to))) return 2;
+    return m.kinds.includes("currency") ? 3 : 4;
 }
 
 export const phoneRe = /(?<![\d,.])(?:0\d{1,2}-?\d{7}|\d{9,10})(?!\d)/gu;
 
-function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed {
-    // ponytail: bare numbers are noisy ("glock 17 ... 900"), so the largest wins
-    const price = explicit.length ? explicit[0] : bare.reduce<PriceMatch | undefined>((best, m) => (!best || m.value > best.value ? m : best), undefined);
+function parse(text: string, price: PriceMatch | undefined, explicit: PriceMatch[]): Parsed {
     const lines = text.split("\n");
     const ti = titleLineIndex(text);
     const first = lines[ti] ?? "";
@@ -168,11 +202,21 @@ function parse(text: string, explicit: PriceMatch[], bare: PriceMatch[]): Parsed
     };
 }
 
-export function classify(text: string, hasMedia: boolean): ClassifyResult {
-    const explicit = findPrices(text, explicitRes, i => (i === 3 ? "price-b-prefix" : "price-currency"));
+/** `entities`: the text's Telegram entities, when known; struck prices are old ones and do not count. */
+export function classify(text: string, hasMedia: boolean, entities: Array<{ type: string; offset: number; length: number }> = []): ClassifyResult {
+    const masked = maskStruck(text, entities);
+    const explicit = findPrices(masked, explicitRes);
     const phones = [...text.matchAll(phoneRe)].map(m => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
-    const bare = explicit.length ? [] : findPrices(text, [bareRe], () => "price-bare").filter(b => !phones.some(([from, to]) => b.index >= from && b.index < to));
-    const parsed = parse(text, explicit, bare);
+    const bare = explicit.length ? [] : findPrices(masked, [[bareRe, "bare"]]).filter(b => !phones.some(([from, to]) => b.index >= from && b.index < to));
+    // several prices for different items: only one stated total for everything (no smaller than any item) still names the price
+    const several = new Set(explicit.map(p => p.value)).size >= 2;
+    const totals = explicit.filter(p => p.kinds.includes("total"));
+    const total = several && totals.length === 1 && explicit.every(p => p.value <= totals[0].value) ? totals[0] : undefined;
+    // ponytail: bare numbers are noisy ("glock 17 ... 900"), so the largest wins
+    const price = total ?? (explicit.length
+        ? explicit.map(m => ({ m, r: rank(masked, m) })).sort((x, y) => x.r - y.r || x.m.index - y.m.index)[0].m
+        : bare.reduce<PriceMatch | undefined>((best, m) => (!best || m.value > best.value ? m : best), undefined));
+    const parsed = parse(text, price, explicit);
 
     const norm = normalize(text);
     // an opener counts only in the first 3 words of the first non-empty line (emoji and punctuation drop out in normalize)
@@ -185,13 +229,14 @@ export function classify(text: string, hasMedia: boolean): ClassifyResult {
     if (blocked) rules.push("blocked-word");
     if (wtb) rules.push("wtb-opener");
     if (hasMedia) rules.push("has-media");
-    for (const rule of new Set([...explicit, ...bare].map(p => p.rule))) rules.push(rule);
+    for (const rule of new Set([...explicit, ...bare].flatMap(p => p.kinds.map(k => RULE[k])))) rules.push(rule);
+    if (several) rules.push(total ? "price-for-all" : "several-prices");
     if (sale) rules.push("sale-word");
 
     let tier: Tier = "none";
     if (blocked) tier = "none";
     else if (wtb) tier = "wtb";
-    else if (hasMedia && explicit.length && sale) tier = "strict";
+    else if (hasMedia && explicit.length && sale) tier = several && !total ? "ask" : "strict";
     // ponytail: media + any price-like number asks, explicit or bare; a lone "5₪" photo still asks
     else if ((hasMedia && (explicit.length || bare.length)) || (sale && explicit.length)) tier = "ask";
     return { tier, rules, parsed };
