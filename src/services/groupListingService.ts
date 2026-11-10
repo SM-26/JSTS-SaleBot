@@ -6,7 +6,6 @@ import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import type { CatchupItem } from "./catchupScan";
@@ -15,6 +14,7 @@ import { groupMessageLink } from "./deepLinks";
 import type { LifecycleService } from "./lifecycleService";
 import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import { groupCardKeyboard } from "./takeDownService";
 
 export type AddResult =
@@ -150,7 +150,7 @@ export class GroupListingService {
 
         try {
             const from = String(query.from.id);
-            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            locale = await memberLocale(from, query.from.language_code);
             const parsed = parseListingArg(arg);
             if (!parsed) return await answer("staleButton");
             const listing = await listingRepository.findById(parsed.listingId);

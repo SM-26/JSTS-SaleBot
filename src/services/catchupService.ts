@@ -2,7 +2,6 @@ import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord } from "./blockedWords";
 import { parseCatchupFile, type CatchupFile, type CatchupItem } from "./catchupScan";
@@ -14,6 +13,7 @@ import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildCatchupList, buildCatchupNote, parseCatchupArg, type Translate } from "./listingCards";
 import { HELD_RELEASE_DELAY_MS } from "./lifecycleService";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 // R5: same window as REPOST_MS in shadowService; older posts would expire the moment they were listed
@@ -33,7 +33,7 @@ export class CatchupService {
     ) { }
 
     private async translatorFor(userId: string): Promise<Translate> {
-        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        const locale = await memberLocale(userId);
         return (key, params) => localeService.t(locale, key, params);
     }
 
@@ -199,7 +199,7 @@ export class CatchupService {
 
         try {
             const from = String(query.from.id);
-            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            locale = await memberLocale(from, query.from.language_code);
             const parsed = parseCatchupArg(arg);
             const member = parsed ? await memberRepository.findById(parsed.memberId) : null;
             if (!parsed || !member) return await answer("staleButton");

@@ -4,6 +4,8 @@ Every user-facing string lives in `src/locales/<lang>/common.json` (`en`, `he`, 
 
 `LocaleService` picks the language in this order: `preferredLocale` (from `/lang`), then `languageCode` (Telegram's hint), then `lang` from `config.json`. A missing key falls back to the key string with a warning.
 
+Private notes in the sale group, their button answers and the DMs that follow them reach members who may never have opened the bot, so they have no user row. For them, the next choice after the user row is the Telegram language of the update itself (a button press), then the one stored on `members.languageCode` from their latest sale-topic message, and only then `lang`.
+
 When adding a string, add it to **every** language and run `pnpm run check-locals`.
 
 ## Adding a language

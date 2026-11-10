@@ -36,7 +36,7 @@ export class CaptureService {
             const media: IMediaItem[] = msg.photo?.length
                 ? [{ fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" }]
                 : msg.video ? [{ fileId: msg.video.file_id, type: "video" }] : [];
-            await memberRepository.touch(senderId, now);
+            await memberRepository.touch(senderId, now, from.language_code);
             await captureRepository.appendMessage({
                 chatId: msg.chat.id,
                 senderId,

@@ -4,7 +4,6 @@ import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
 import postRepository from "../repositories/postRepository";
 import shadowLogRepository from "../repositories/shadowLogRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { isMeetupLocation } from "./meetup";
 import { findBlockedWord } from "./blockedWords";
@@ -13,6 +12,7 @@ import { isSearchable, parseQuery } from "./matchService";
 import { sendNote } from "./ephemeralNotes";
 import type { GroupListingService } from "./groupListingService";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import type { ClassifiedEvent } from "./shadowService";
 
 const NOTE_GAP_MS = 6 * 3600_000;
@@ -50,7 +50,7 @@ export class BuyerNoteService {
             const byId = new Map((await listingRepository.findByIds(matches ?? [])).map(l => [String(l._id), l]));
             const listings = (matches ?? []).map(id => byId.get(id)).filter((l): l is IListing => !!l && !findBlockedWord(l.title ?? ""));
 
-            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(capture.senderId));
+            const locale = await memberLocale(capture.senderId);
             const card = buildBuyerNote((key, params) => localeService.t(locale, key, params), await listingLines(listings, this.groupListings), String(capture._id), this.botUsername());
             if ((await sendNote(this.api, this.config, Number(capture.senderId), card)) === null) return;
             await memberRepository.setLastBuyerNote(capture.senderId, now);

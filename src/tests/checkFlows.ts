@@ -1810,6 +1810,39 @@ async function run() {
                 console.log("  [OK] (w1) a strict post gets one private note, without a thread id.");
             }
 
+            // (w1b) a member who never opened the bot gets notes and toasts in their app language; /lang still wins
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, SALE1, {}); // no language: the group's
+                await h.sendPhoto("f1", { ...GROUP, userId: u, caption: SALE2, languageCode: "ru" });
+                await settle();
+                await closeAndNote(ctrl);
+                assert.strictEqual((await memberRepository.findByUserId(String(u)))!.languageCode, "ru", "the member keeps the app language");
+                const cap = (await lastCapture(u))!;
+                const noteText = (locale: string) => localeService.t(locale, "captureNoteComplete", { title: cap.parsed!.title!, details: [cap.parsed!.price, cap.parsed!.location].filter(Boolean).join(" · ") });
+                const notes = ephemerals(h);
+                assert.strictEqual(notes.length, 1, "the two posts merge into one window");
+                assert.strictEqual(String(notes[0].params.text), noteText("ru"));
+                assert.notStrictEqual(noteText("ru"), noteText(cfg.lang), "the check can tell them apart");
+
+                h.calls.length = 0;
+                await h.pressButton(`mk_${cap._id}_a`, { userId: u, ...GROUP, languageCode: "ru" });
+                await settle();
+                assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === localeService.t("ru", "captureAddedToast")), "the toast too");
+
+                // a user row's own choice beats the app language
+                const u2 = user();
+                await User.create({ userId: String(u2), preferredLocale: "he" });
+                h.calls.length = 0;
+                await h.sendPhoto("f1", { ...GROUP, userId: u2, caption: SALE3, languageCode: "ru" });
+                await settle();
+                await closeAndNote(ctrl);
+                const cap2 = (await lastCapture(u2))!;
+                assert.strictEqual(String(ephemerals(h)[0].params.text), localeService.t("he", "captureNoteComplete", { title: cap2.parsed!.title!, details: [cap2.parsed!.price, cap2.parsed!.location].filter(Boolean).join(" · ") }));
+                console.log("  [OK] (w1b) a member with no user row gets the note and toast in their app language; /lang beats it.");
+            }
+
             // (w2) shadow mode records, sends nothing
             {
                 const { h, ctrl } = boot();

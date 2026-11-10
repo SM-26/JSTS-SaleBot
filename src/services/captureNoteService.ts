@@ -5,7 +5,6 @@ import type { ICapture } from "../models/Capture";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import { textHash, type Parsed } from "./classifier";
@@ -13,6 +12,7 @@ import { deleteNote, editNote, sendNote } from "./ephemeralNotes";
 import { isSameItem, type GroupListingService } from "./groupListingService";
 import { buildAskNote, buildManagementCard, buildNeverNote, parseCaptureArg, type Translate } from "./listingCards";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import type { ClassifiedEvent } from "./shadowService";
 
 const DAY_MS = 24 * 3600_000;
@@ -29,7 +29,7 @@ export class CaptureNoteService {
     ) { }
 
     private async translatorFor(userId: string): Promise<Translate> {
-        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        const locale = await memberLocale(userId);
         return (key, params) => localeService.t(locale, key, params);
     }
 
@@ -149,7 +149,7 @@ export class CaptureNoteService {
 
         try {
             const from = String(query.from.id);
-            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            locale = await memberLocale(from, query.from.language_code);
             const parsed = parseCaptureArg(arg);
             if (!parsed) return await answer("staleButton");
             const capture = await captureRepository.findById(parsed.captureId); // null: the capture row expired

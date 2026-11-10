@@ -2,11 +2,11 @@ import type { Api } from "node-telegram-bot-api";
 import type { CallbackQuery, Message } from "node-telegram-bot-api/types";
 import captureRepository from "../repositories/captureRepository";
 import savedSearchRepository from "../repositories/savedSearchRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig, UserSession } from "../types";
 import { buildAlertsList, describeSearch, parseAlertArg } from "./buyerCards";
 import type { Translate } from "./listingCards";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import { isSearchable, parseQuery } from "./matchService";
 
 const MAX_SEARCHES = 5;
@@ -25,7 +25,7 @@ export class SavedSearchService {
     }
 
     private async translatorFor(userId: string): Promise<Translate> {
-        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+        const locale = await memberLocale(userId);
         return (key, params) => localeService.t(locale, key, params);
     }
 
