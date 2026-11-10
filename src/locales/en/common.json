@@ -271,7 +271,7 @@
     "helpUnverify": "/unverify <user> - Remove the verified mark",
     "verifySuccess": "User <code>{userId}</code> is now a verified seller.",
     "unverifySuccess": "User <code>{userId}</code> is no longer marked as verified.",
-    "staleDmIntro": "Hi {firstName} 👋\nThis is the sales group bot. We are tidying up the market, and you have posts marked as active for over a month:",
+    "staleDmIntro": "Hi {firstName} 👋\nThis is the Airsoft Israel community bot. We are tidying up the market, and you have posts marked as active for over a month:",
     "staleDmItem": "{i}. {title} · {price} (from {date})",
     "staleDmOutro": "What is the status? One tap per post.\nThis is a one-time message. A post with no answer is removed from the market in 7 days. The message in the group stays as it is.",
     "lcItemResult": "{i} · {result}",
