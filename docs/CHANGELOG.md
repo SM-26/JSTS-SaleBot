@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased
+3.4.0 - `/faq` as a widget (Bot API 10.4), node-telegram-bot-api 2.4.0, and fixes.
+  - Notes:
+    - No config key, no data change, no new update type. Nothing to switch on: the widget replaces the text FAQ in private chats at once. Rollback: `BOT_TAG=3.3.0`. `/faq` is then text again; the 📄 Text version button on widgets already sent gets no answer (3.3.0 tries to edit the widget), and sending `/faq` again works.
   - Added:
     - **`/faq` as a widget** (Bot API 10.4, #133). In a private chat, `/faq` and the meeting-point link (`start=faq_1`) send one interactive card: a header, a tab per top-level topic, a card per question that opens on a tap (one at a time). Link answers are pills named after the site (Waze, Google Maps, WhatsApp). An Israeli phone number is a 📋 button that copies it, plus a WhatsApp link for a mobile number: widgets can't open the dialer. A 📄 Text version button under it sends today's text FAQ, which apps without widget support (Telegram X) can still use. If Telegram refuses the widget, the bot sends the text FAQ. The meeting-point link opens the Beit Dagan tab. Tested on Desktop 7.4.1 and Android 13.2.1, Hebrew and English.
     - Widgets draw two right-to-left cases wrong: brackets aren't mirrored, and punctuation right after a number lands on the wrong side. Hebrew widget text gets a right-to-left mark around each bracket and after such punctuation, which fixes both and is invisible where the text is drawn right.
