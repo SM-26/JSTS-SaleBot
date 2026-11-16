@@ -22,6 +22,12 @@ export type AddResult =
     | { kind: "already"; listing: IListing | null }
     | { kind: "gone" };
 
+// The seller on a moderators' card (HTML): their name linked to their profile, and @username when they have one.
+export function sellerMention(listing: Pick<IListing, "sellerId" | "sellerName" | "sellerUsername">): string {
+    const link = `<a href="tg://user?id=${listing.sellerId}">${escapeHtml(listing.sellerName?.trim() || listing.sellerId)}</a>`;
+    return listing.sellerUsername ? `${link} @${listing.sellerUsername}` : link;
+}
+
 const normTitle = (title?: string): string => (title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 // A repost refreshes a listing only for the same item: the same text, or the same title (the
@@ -66,6 +72,7 @@ export class GroupListingService {
                 messageIds: capture.messageIds,
                 sellerId: capture.senderId,
                 sellerName: capture.senderName,
+                ...(capture.senderUsername ? { sellerUsername: capture.senderUsername } : {}),
                 ...fields,
                 text: capture.text,
                 media: capture.media,
@@ -85,13 +92,14 @@ export class GroupListingService {
     }
 
     // A listing from a catch-up offer tap: the member's old message, in the approved group.
-    async addCatchupItem(member: { userId: string; name: string }, item: CatchupItem, now: Date): Promise<IListing> {
+    async addCatchupItem(member: { userId: string; name: string; username?: string }, item: CatchupItem, now: Date): Promise<IListing> {
         const firstForSeller = (await listingRepository.countBySeller(member.userId)) === 0;
         const listing = await listingRepository.createFromCatchup({
             chatId: this.config.approvedGroupId,
             messageId: item.messageId,
             sellerId: member.userId,
             sellerName: member.name,
+            ...(member.username ? { sellerUsername: member.username } : {}),
             item,
             isBundle: classify(item.text, false).parsed.isBundle,
         }, now);
@@ -110,11 +118,13 @@ export class GroupListingService {
                 chat_id: this.config.moderationGroupId,
                 ...(topic && topic !== 1 ? { message_thread_id: topic } : {}),
                 text: t("captureModCard", {
-                    name: listing.sellerName ?? "",
-                    title: listing.title ?? "",
-                    price: listing.price ?? "",
+                    name: sellerMention(listing),
+                    title: escapeHtml(listing.title ?? ""),
+                    price: escapeHtml(listing.price ?? ""),
                     link: await this.groupLink(listing.messageIds[0]),
                 }),
+                parse_mode: "HTML",
+                link_preview_options: { is_disabled: true },
                 reply_markup: { inline_keyboard: groupCardKeyboard(String(listing._id), t) },
             });
         } catch (err) {

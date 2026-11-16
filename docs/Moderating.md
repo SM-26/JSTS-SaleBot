@@ -20,7 +20,7 @@ Every published post card has **🚫 Take down** (when its listing exists). It r
 
 ## Group listings
 
-With `captureMode: optin`, a member can add their own group message to the market. A seller's first listing of any kind sends you a take-down card; the bot posts nothing public. The card offers:
+With `captureMode: optin`, a member can add their own group message to the market. A seller's first listing of any kind sends you a take-down card; the bot posts nothing public. The card names the seller with a link to their profile, and their @username if they have one. It offers:
 
 - **Take down:** ends the listing. The member's message stays.
 - **Take down and delete original post:** asks once more, then deletes the message and all its photos. Telegram lets a bot delete only messages under 48 hours old, and the card says how many were left.

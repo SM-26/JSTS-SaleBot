@@ -41,6 +41,7 @@ export class CaptureService {
                 chatId: msg.chat.id,
                 senderId,
                 senderName: [from.first_name, from.last_name].filter(Boolean).join(" "),
+                senderUsername: from.username || undefined,
                 messageId: msg.message_id,
                 text: msg.text ?? msg.caption,
                 entities: storedEntities(msg.text !== undefined ? msg.entities : msg.caption_entities),

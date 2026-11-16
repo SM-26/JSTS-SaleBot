@@ -38,6 +38,8 @@ export interface SendTextOptions {
     messageId?: number;
     /** The sender's Telegram app language (`from.language_code`). */
     languageCode?: string;
+    /** The sender's @username, without the @ (`from.username`). */
+    username?: string;
 }
 
 export interface PressButtonOptions {
@@ -184,7 +186,7 @@ export function createHarness(options: HarnessOptions = {}) {
             message_id: id,
             date: Math.floor(Date.now() / 1000),
             chat: { id: chat, type: chatType },
-            from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester", ...(o.languageCode ? { language_code: o.languageCode } : {}) },
+            from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester", ...(o.languageCode ? { language_code: o.languageCode } : {}), ...(o.username ? { username: o.username } : {}) },
             ...(o.messageThreadId === undefined ? {} : { message_thread_id: o.messageThreadId }),
             ...(o.isTopicMessage ? { is_topic_message: true } : {}),
             ...(o.mediaGroupId === undefined ? {} : { media_group_id: o.mediaGroupId }),

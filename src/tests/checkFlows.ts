@@ -1473,7 +1473,7 @@ async function run() {
         cfg.captureMode = "optin";
         {
             const SALE_TEXT = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             const NOTE_ID = 5100;
             let msgSeq = 1_000_000 + (Date.now() % 1_000_000);
@@ -1755,7 +1755,7 @@ async function run() {
             const SALE3 = "כוונת אדומה למכירה 300₪";
             const SALE4 = "אוזניות תקשורת למכירה 400₪ דרום";
             const BARE = "1300 מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             const OLD_NOTE = 5100;
             let msgSeq = 2_000_000 + (Date.now() % 1_000_000);
@@ -1815,7 +1815,7 @@ async function run() {
                 const { h, ctrl } = boot();
                 const u = user();
                 await post(h, u, SALE1, {}); // no language: the group's
-                await h.sendPhoto("f1", { ...GROUP, userId: u, caption: SALE2, languageCode: "ru" });
+                await h.sendPhoto("f1", { ...GROUP, userId: u, caption: SALE2, languageCode: "ru", username: "kitty_seller" });
                 await settle();
                 await closeAndNote(ctrl);
                 assert.strictEqual((await memberRepository.findByUserId(String(u)))!.languageCode, "ru", "the member keeps the app language");
@@ -1830,6 +1830,13 @@ async function run() {
                 await h.pressButton(`mk_${cap._id}_a`, { userId: u, ...GROUP, languageCode: "ru" });
                 await settle();
                 assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === localeService.t("ru", "captureAddedToast")), "the toast too");
+                // the moderators' first-listing card: the name links to the profile, with the @username (HTML)
+                const card = h.calls.find((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP)!;
+                assert.strictEqual(card.params.parse_mode, "HTML");
+                assert.ok(String(card.params.text).includes(`<a href="tg://user?id=${u}">Tester</a> @kitty_seller`), String(card.params.text));
+                const { sellerMention } = await import("../services/groupListingService");
+                assert.strictEqual(sellerMention({ sellerId: "7", sellerName: "<b>&", sellerUsername: undefined }), `<a href="tg://user?id=7">&lt;b&gt;&amp;</a>`, "escaped, no @ without a username");
+                assert.strictEqual(sellerMention({ sellerId: "7", sellerName: " ", sellerUsername: undefined }), `<a href="tg://user?id=7">7</a>`, "a blank name shows the id");
 
                 // a user row's own choice beats the app language
                 const u2 = user();
@@ -2122,7 +2129,7 @@ async function run() {
                 assert.deepStrictEqual(
                     [Number(e[0].params.chat_id), Number(e[0].params.receiver_user_id), Number(e[0].params.ephemeral_message_id)],
                     [APPROVED_GROUP, a, NOTE_ID]);
-                assert.ok(String(e[0].params.text).includes("גלוק 17 למכירה"));
+                assert.ok(String(e[0].params.text).includes("גלוק 17 ·"), "the parsed title, without למכירה");
                 const r = rows(e[0]);
                 assert.deepStrictEqual(r.flat().slice(0, 3).map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
                 assert.strictEqual(r[1][1].url, `https://t.me/${BOT_USERNAME}?start=l_${id}`);
@@ -2278,7 +2285,7 @@ async function run() {
             const { tick } = await import("../services/shadowService");
             const SALE = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
             const BARE = "1300 מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const NOTE_ID = 5300;
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             let msgSeq = 4_000_000 + (Date.now() % 1_000_000);
@@ -2567,7 +2574,7 @@ async function run() {
             const GA = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
             const GA_CHEAPER = "גלוק 17 למכירה\nבמצב מעולה\n1,100₪ מרכז";
             const G19 = "גלוק 19 למכירה\nבמצב מעולה\n1,300₪ מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const NOTE_ID = 5400;
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             let msgSeq = 9_000_000 + (Date.now() % 1_000_000);

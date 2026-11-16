@@ -248,7 +248,7 @@ export class CatchupService {
                 if (recent.some(l => (l.textHash === hash || tokenOverlap(tk, tokens(l.text ?? "")) >= 0.8) && isSameItem(l, item.text, parsedItem))) {
                     await answer("captureAlreadyAdded");
                 } else {
-                    await this.groupListings.addCatchupItem({ userId: from, name: [query.from.first_name, query.from.last_name].filter(Boolean).join(" ") }, item, now);
+                    await this.groupListings.addCatchupItem({ userId: from, name: [query.from.first_name, query.from.last_name].filter(Boolean).join(" "), username: query.from.username }, item, now);
                     await answer("captureAddedToast");
                 }
             } catch (err) {

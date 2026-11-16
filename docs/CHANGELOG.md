@@ -6,8 +6,11 @@ All notable changes to this project will be documented in this file.
 ## Version History
 Unreleased
   - Notes:
+    - Data change (additive): optional `captures.senderUsername` and `listings.sellerUsername` (the seller's @username, when they have one).
     - Data change (additive): optional `members.languageCode`, the Telegram app language of the member's latest sale-topic message (set only when Telegram sends one). No config key, no new collection, no new update type. Rollback: the field is ignored.
   - Changed:
+    - **Titles drop "למכירה".** The word says nothing about the item, so it's removed wherever it stands in a parsed title ("למכירה hello kitty 1911 …" → "hello kitty 1911 …", "גלוק 17 למכירה" → "גלוק 17"), in capture notes, group listings and the one-message draft. Other openers (`לטרייד`, `להחלפה`) are still dropped only when a `:` or `-` follows them. Rows already logged keep their old title.
+    - **The first-listing card names the seller properly.** The moderators' take-down card links the seller's name to their Telegram profile and adds their @username when they have one, so a seller with a blank or "-" name can still be found. The card is sent as HTML now (the title and price are escaped).
     - **Private notes follow the member's language, not the group's.** A member who never opened the bot has no user row, so notes, their button toasts and the DMs that follow them used `lang` from `config.json`. Now the order is the user row (`/lang`, then Telegram's hint), then the Telegram language of the press, then `members.languageCode`, then `lang`. Covers capture notes, refresh notes, buyer notes, catch-up offers, nudges and saved-search messages (`memberLocale`).
     - Hebrew text approved by the owner: `captureNoteTrade` (the trade post note) is now "נראה שזו החלפה/טרייד. אפשר לערוך את הפרטים בבוט ולהוסיף לשוק." (en/ru follow it, drafts). `captureEditButton` "✏️ עריכה" is approved as it is. The stale-check DM is approved, with the community named in `staleDmIntro`: "כאן הבוט של קהילת איירסופט ישראל." (en/ru follow it, drafts). The catch-up offer (`catchupOfferNote`, `catchupPickButton`, `catchupNoThanksButton`, `catchupListTitle`, `catchupAllDone`) and the 7-day reminder (`nudgeAsk`, `nudgeStillButton`) are approved as they are.
   - Fixed:
