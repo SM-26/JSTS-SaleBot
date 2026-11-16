@@ -173,7 +173,7 @@
     "takeDownNotice": "A moderator took down your post \"{title}\".",
     "statusTakenDown": "🚫 Taken down",
     "takeDownDeleteButton": "🗑 Take down and delete original post",
-    "takeDownDeleteWarn": "⚠️ This also deletes the member's post and all its photos from the group. It cannot be undone.",
+    "takeDownDeleteWarn": "⚠️ This also deletes the member's post and all its photos from the group. It cannot be undone. Please confirm.",
     "takeDownDeleteConfirmButton": "🗑 Yes, delete it",
     "takeDownDeleteCancelButton": "Cancel",
     "statusTakenDownDeleted": "🗑 Taken down, original post deleted",

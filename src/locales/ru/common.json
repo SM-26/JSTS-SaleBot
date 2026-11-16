@@ -173,7 +173,7 @@
     "takeDownNotice": "Модератор снял ваш пост «{title}».",
     "statusTakenDown": "🚫 Снято",
     "takeDownDeleteButton": "🗑 Снять и удалить исходный пост",
-    "takeDownDeleteWarn": "⚠️ Это также удалит пост участника и все его фото из группы. Отменить нельзя.",
+    "takeDownDeleteWarn": "⚠️ Это также удалит пост участника и все его фото из группы. Отменить нельзя. Пожалуйста, подтвердите.",
     "takeDownDeleteConfirmButton": "🗑 Да, удалить",
     "takeDownDeleteCancelButton": "Отмена",
     "statusTakenDownDeleted": "🗑 Снято, исходный пост удалён",

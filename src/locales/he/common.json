@@ -173,7 +173,7 @@
     "takeDownNotice": "מנהל הסיר את הפוסט \"{title}\" שלך.",
     "statusTakenDown": "🚫 הוסר",
     "takeDownDeleteButton": "🗑 הסר מהשוק ומחק את הפוסט המקורי",
-    "takeDownDeleteWarn": "⚠️ זה גם ימחק מהקבוצה את הפוסט של החבר ואת כל התמונות שלו. אי אפשר לבטל.",
+    "takeDownDeleteWarn": "⚠️ זה גם ימחק מהקבוצה את הפוסט של החבר ואת כל התמונות שלו. אי אפשר לבטל. נא לאשר",
     "takeDownDeleteConfirmButton": "🗑 כן, למחוק",
     "takeDownDeleteCancelButton": "ביטול",
     "statusTakenDownDeleted": "🗑 הוסר, הפוסט המקורי נמחק",
