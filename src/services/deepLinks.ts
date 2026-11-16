@@ -7,6 +7,9 @@ export function parseStartPayload(args: string): StartPayload | null {
     return m ? { kind: m[1] as "c" | "l" | "k" | "s" | "f", id: m[2] } : null;
 }
 
+/** /start myposts: the "Don't ask again" note's button opens /myposts. */
+export const MYPOSTS_PAYLOAD = "myposts";
+
 export const deepLink = (botUsername: string, payload: string): string => `https://t.me/${botUsername}?start=${payload}`;
 
 // Same shapes as ShadowAdminService.linkTo: public @username, else the /c/ form.

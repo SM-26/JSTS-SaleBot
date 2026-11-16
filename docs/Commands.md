@@ -11,7 +11,7 @@ Commands are case-insensitive, and `/name@ourbot` also works. All of them work o
 | `/start` | Welcome greeting. Also handles deep links, such as `/start sell`. |
 | `/newPost` | Start a sale post. With a draft in progress it offers Continue or Start over. |
 | `/cancel` | Drop your draft. In the moderation group: forget your pending reject prompts. |
-| `/myposts` | Your posts and group listings: bump, change price, sold, refresh, remove, relist. |
+| `/myposts` | Your posts and group listings: bump, change price, sold, remove, relist. |
 | `/alerts` | `/alerts <text>` saves a search (needs `buyerMatches: on`). Alone, it lists, removes and renews them, in every mode. |
 | `/lang` | Choose your language. |
 | `/faq` | Airsoft FAQ, as a widget with a 📄 Text version button ([Localization](Localization.md#the-faq)). Only when `enableFaq` was on at startup. |

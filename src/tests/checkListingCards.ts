@@ -150,8 +150,9 @@ for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRe
     const c = buildNeverNote(t, BOT);
     all.push(c);
     assert(c.text.startsWith("captureNeverNote"));
+    assert.strictEqual(c.html, true);
     assert.strictEqual(c.keyboard.length, 1);
-    assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}`]);
+    assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}?start=myposts`], "the button opens /myposts in the bot");
 }
 
 // meeting point on buyer cards

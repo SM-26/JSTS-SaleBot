@@ -2199,8 +2199,20 @@ async function run() {
                 assert.strictEqual((await Capture.findById(cap._id))!.state, "declined");
                 const e = edits(h);
                 assert.strictEqual(e.length, 1);
-                assert.strictEqual(String(e[0].params.text), T6("captureNeverNote"));
-                assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}`]);
+                // "/myposts" is code (a tap must not send it to the group), and the button opens /myposts in the bot
+                assert.strictEqual(e[0].params.parse_mode, "HTML");
+                assert.ok(String(e[0].params.text).includes("<code>/myposts</code>"), String(e[0].params.text));
+                assert.strictEqual(String(e[0].params.text).replace(/<\/?code>/g, ""), T6("captureNeverNote"));
+                assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}?start=myposts`]);
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: a });
+                await settle();
+                const direct = h.calls.filter((c) => c.method !== "getMe").map((c) => [c.method, String(c.params.text ?? "")]);
+                h.calls.length = 0;
+                await h.sendText("/start myposts", { userId: a });
+                await settle();
+                assert.deepStrictEqual(h.calls.filter((c) => c.method !== "getMe").map((c) => [c.method, String(c.params.text ?? "")]), direct, "start=myposts is /myposts");
+                assert.ok(direct.length > 0);
                 h.calls.length = 0;
                 await h.sendPhoto("f1", { ...GROUP, userId: a, caption: SALE2 });
                 await settle();
@@ -2848,9 +2860,9 @@ async function run() {
                 assert.strictEqual(lines[0], T("myPostsGroupTitle"));
                 assert.ok(/^1\. <a href="[^"]+">Alpha<\/a> · 100₪$/.test(lines[1]), lines[1]);
                 assert.ok(/^2\. <a href="[^"]+">Beta<\/a> · 100₪$/.test(lines[2]), lines[2]);
-                assert.strictEqual(lines[3], [T("listingSoldButton"), T("listingRefreshButton"), T("listingRemoveButton")].join(" · "), "the legend under the list");
                 assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEndedOne")));
-                assert.ok(text(section).endsWith(T("myPostsAskOn")));
+                const legend = [T("listingSoldButton"), T("listingRefreshButton"), T("listingRemoveButton")].join(" · ");
+                assert.ok(text(section).endsWith(`${T("myPostsAskOn")}\n${legend}`), "the legend is the last line, under the asking setting");
                 const [a, b] = [String(A._id), String(B._id)];
                 assert.deepStrictEqual(buttons(section), [[`ls_${a}_s_l`, `ls_${a}_f_l`, `ls_${a}_r_l`], [`ls_${b}_s_l`, `ls_${b}_f_l`, `ls_${b}_r_l`], ["mk_set_never"]]);
                 console.log("  [OK] (z2) /myposts lists bot posts, then the group section.");
@@ -2887,7 +2899,7 @@ async function run() {
                 assert.strictEqual((await Member.findOne({ userId: String(u) }))!.askMode, "never");
                 let edit = callsTo(h, "editMessageText");
                 assert.strictEqual(edit.length, 1);
-                assert.ok(text(edit[0]).endsWith(T("myPostsAskOff")));
+                assert.ok(text(edit[0]).includes(`${T("myPostsAskOff")}\n`), "the setting, then the legend");
                 assert.deepStrictEqual(buttons(edit[0]).at(-1), ["mk_set_ask"]);
                 h.calls.length = 0;
                 await h.pressButton("mk_set_ask", { userId: u, messageId: 78 });

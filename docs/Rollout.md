@@ -37,7 +37,7 @@ Off, the wizard behaves as before. Blocked words and moderation apply the same e
 ## Lifecycle: `nudges` and `/stalecheck`
 
 - A listing **expires after 30 days whatever the setting**. An approved bot post stays `approved` and its group message is untouched; `/myposts` offers Relist.
-- `nudges: true` also sends a DM at 7 days without a refresh. If the DM can't be delivered, the nudge waits for the seller's next sale-topic message, which needs capture on.
+- `nudges: true` also sends a DM at 7 days without a bump. If the DM can't be delivered, the nudge waits for the seller's next sale-topic message, which needs capture on.
 - `/stalecheck` asks sellers of legacy (held) listings whether each is still for sale. Nothing goes out before **Send**, and unanswered listings expire 7 days later. **Bump** lifts a hold.
 
 Nothing goes to a member unless `nudges` is on or an admin confirmed `/stalecheck`.

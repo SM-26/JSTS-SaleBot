@@ -31,7 +31,7 @@ import { GroupListingService } from "../services/groupListingService";
 import { LifecycleService } from "../services/lifecycleService";
 import { StaleCheckService } from "../services/staleCheckService";
 import type { SweeperJob } from "../services/sweeper";
-import { parseStartPayload } from "../services/deepLinks";
+import { MYPOSTS_PAYLOAD, parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -585,6 +585,7 @@ export class BotController {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
             if (args === "sell") return this.wizardService.handleSell(msg);
+            if (args === MYPOSTS_PAYLOAD) return this.myPostsService.showPosts(msg);
             return this.HandleStart(msg, args, ctx);
         }));
         bot.use(cmd("newpost", (msg) => {

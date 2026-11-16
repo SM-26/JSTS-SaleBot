@@ -37,7 +37,7 @@ What each switch sends, and in which order to turn them on, is in [Rollout](Roll
 | `captureMode` | enum | `off` | `off`, `shadow` (record and classify, send nothing) or `optin` (also send private capture notes). `config.json.example` ships `shadow` |
 | `buyerMatches` | enum | `off` | `off`, `shadow` (log what a "wanted" message would match) or `on` (also send buyer notes and alerts). `config.json.example` ships `shadow` |
 | `quickListing` | boolean | `false` | A captioned photo, video or album in DM starts a draft. Adds field-edit buttons and the Beit Dagan toggle to previews, and handles `/start sell` |
-| `nudges` | boolean | `false` | Send the 7-day refresh nudge. Expiry at 30 days runs regardless |
+| `nudges` | boolean | `false` | Send the 7-day bump nudge. Expiry at 30 days runs regardless |
 | `tierLayouts` | boolean | `false` | Post layouts by seller tier. Off, every post uses the regular layout |
 | `topSellerPercent` | number | `60` | Top seller: minimum percent of ended listings sold |
 | `topSellerMinEnded` | number | `3` | Top seller: minimum ended listings |
