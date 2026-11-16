@@ -228,7 +228,7 @@
     "helpCatchup": "/catchup - ייבוא ושליחת הצעות השלמה",
     "buyerNoteTitle": "🔎 מצאתי בשוק {n} פריטים שמתאימים:",
     "buyerNoteEmpty": "עדיין אין בשוק משהו שמתאים",
-    "buyerNoteAlertButton": "🔔 התראה על חדשים ↗",
+    "buyerNoteAlertButton": "🔔 התראה על חדשים",
     "alertTitle": "🔔 חדש בשוק, מתאים ל\"{query}\"",
     "alertSaved": "שמרתי התראה: {query}. כדי לשנות אותה, השיבו להודעה הזו.",
     "alertNotSearchable": "אני צריך שם של דגם כדי לחפש. השיבו להודעה הזו עם הדגם ואנסה שוב.",

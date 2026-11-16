@@ -228,7 +228,7 @@
     "helpCatchup": "/catchup - Import and send catch-up offers",
     "buyerNoteTitle": "🔎 Found {n} matching items on the market:",
     "buyerNoteEmpty": "Nothing on the market matches yet",
-    "buyerNoteAlertButton": "🔔 Alert me about new ones ↗",
+    "buyerNoteAlertButton": "🔔 Alert me about new ones",
     "alertTitle": "🔔 New on the market, matches \"{query}\"",
     "alertSaved": "Alert saved: {query}. To change it, reply to this message.",
     "alertNotSearchable": "I need a model name to search for. Reply to this message with it and I will try again.",
