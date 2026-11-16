@@ -11,6 +11,7 @@ export interface IListing extends Document {
     messageIds: number[];
     sellerId: string;
     sellerName?: string;
+    sellerUsername?: string;
     title?: string;
     price?: string;
     priceValue?: number;
@@ -45,6 +46,7 @@ const listingSchema = new Schema<IListing>({
     messageIds: { type: [Number], default: [] },
     sellerId: { type: String, required: true },
     sellerName: { type: String },
+    sellerUsername: { type: String },
     title: { type: String },
     price: { type: String },
     priceValue: { type: Number },

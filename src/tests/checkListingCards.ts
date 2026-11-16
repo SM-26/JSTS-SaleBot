@@ -36,6 +36,7 @@ const urls = (c: Card): Array<string | undefined> => c.keyboard.flat().map((b) =
     const n = buildCatchupNote(t, { memberId: ID, count: 3 }, BOT);
     all.push(n);
     assert.strictEqual(n.text, 'catchupOfferNote{"n":3}');
+    assert.strictEqual(buildCatchupNote(t, { memberId: ID, count: 1 }, BOT).text, 'catchupOfferNoteOne{"n":1}', "one item: the singular text");
     assert.deepStrictEqual(n.keyboard.map((r) => r.length), [1, 1]);
     assert.deepStrictEqual(urls(n), [`https://t.me/${BOT}?start=k_${ID}`, undefined]);
     assert.deepStrictEqual(datas(n), [undefined, `ck_${ID}_x`]);
@@ -150,8 +151,9 @@ for (const [status, key] of [["sold", "listingSoldNote"], ["removed", "listingRe
     const c = buildNeverNote(t, BOT);
     all.push(c);
     assert(c.text.startsWith("captureNeverNote"));
+    assert.strictEqual(c.html, true);
     assert.strictEqual(c.keyboard.length, 1);
-    assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}`]);
+    assert.deepStrictEqual(urls(c), [`https://t.me/${BOT}?start=myposts`], "the button opens /myposts in the bot");
 }
 
 // meeting point on buyer cards

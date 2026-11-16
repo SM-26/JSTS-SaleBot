@@ -117,6 +117,8 @@ const PAYLOADS: Array<[string, { kind: string; id: string } | null]> = [
     ["faq_1", { kind: "faq", id: "1" }], ["faq_2", null], ["faq_", null],
     [`s_${ID}`, { kind: "s", id: ID }],
     ["s_", null], ["s_xyz", null],
+    [`f_${ID}`, { kind: "f", id: ID }],
+    ["f_", null], ["f_xyz", null],
     ["c_", null], ["c_xyz", null], [`x_${ID}`, null], ["sell", null], ["garbage", null], ["", null],
 ];
 for (const [args, expected] of PAYLOADS) {
@@ -130,7 +132,7 @@ console.log("  [SUCCESS] start payloads and links.");
 
 // --- wizard field-edit buttons (quickListing) ---------------------------------------
 const UID = "7200000001";
-for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_description_${UID}`, "editDescription"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"]]) {
+for (const [data, action] of [[`draft_edit_title_${UID}`, "editTitle"], [`draft_edit_description_${UID}`, "editDescription"], [`draft_edit_price_${UID}`, "editPrice"], [`draft_edit_location_${UID}`, "editLocation"], [`draft_meetup_${UID}`, "meetup"], [`draft_loc_meetup_${UID}`, "meetupOnly"]]) {
     assert.deepStrictEqual(parseWizardCallback(data), { action, userId: UID }, data);
     assert.ok(Buffer.byteLength(data) <= 64, data);
     assert.strictEqual(routeCallback(data), null, data);

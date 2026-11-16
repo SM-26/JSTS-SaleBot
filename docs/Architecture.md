@@ -30,7 +30,7 @@ Node.js and TypeScript, `node-telegram-bot-api` v2 (a middleware chain with `Con
 | Capture and classifier | `src/services/captureService.ts`, `src/services/shadowService.ts`, `src/services/classifier.ts` |
 | Capture notes and group listings | `src/services/captureNoteService.ts`, `src/services/groupListingService.ts` |
 | Buyer notes and alerts | `src/services/buyerNoteService.ts`, `src/services/savedSearchService.ts`, `src/services/alertService.ts` |
-| Refresh, nudge and expiry | `src/services/lifecycleService.ts`, `src/services/staleCheckService.ts` |
+| Bump (a listing's refresh), nudge and expiry | `src/services/lifecycleService.ts`, `src/services/staleCheckService.ts` |
 | Catch-up | `src/services/catchupService.ts`, `src/services/catchupScan.ts` |
 | Interval jobs | `src/services/sweeper.ts` |
 | Private notes (ephemeral API) | `src/services/ephemeralNotes.ts` |
@@ -65,7 +65,7 @@ User sends /newPost (or, with config.quickListing, a photo/video/album with a ca
       → Mark as "sold"  → updates approved group message with sold tag
       → Bump post       → re-posts with updated timestamp (subject to dailyBumpLimit); the button is Telegram's disabled type at the limit
       → Change price    → `lp_` prompt (session `pendingPriceCut`, reply-to); a cut re-posts without using a bump and sets `previousPrice` (struck through on tier layouts), a raise is a counted bump and clears it
-  → LifecycleService (listings, not posts): 7 days without refresh → nudge DM (only with config.nudges);
+  → LifecycleService (listings, not posts): 7 days without a bump → nudge DM (only with config.nudges);
       30 days → listing "expired" (always; the approved bot post stays "approved", its group message is untouched);
       /myposts offers Relist on an expired bot listing; the admin's /stalecheck asks legacy (hold) sellers once
 ```

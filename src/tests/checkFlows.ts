@@ -1099,7 +1099,7 @@ async function run() {
             assert.strictEqual(text(dms[0]), TEN("postRejectedWithReason") + TEN("rejectPreset2"));
             type UrlKeyboard = { inline_keyboard: { text: string; url?: string }[][] };
             const rows = (c: RecordedCall) => (c.params.reply_markup as UrlKeyboard).inline_keyboard;
-            assert.deepStrictEqual(rows(dms[0]), [[{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }]]);
+            assert.deepStrictEqual(rows(dms[0]), [[{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=f_${postId}` }]]);
             const edit = h.calls.find((c) => c.method === "editMessageText" && Number(c.params.message_id) === messageId(prompt))!;
             assert.ok(text(edit).includes(T("statusRejected")) && text(edit).includes(T("rejectPreset2")), text(edit));
             assert.deepStrictEqual(answers(h), [T("adminRejected")]);
@@ -1114,7 +1114,7 @@ async function run() {
                 await rrPress(h, mod, `rr_${p2}_1`, messageId(prompt2));
                 await settle();
                 assert.deepStrictEqual(rows(toAuthorDMs(h)[0]), [
-                    [{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=sell` }],
+                    [{ text: TEN("rejectFixButton"), url: `https://t.me/${BOT_USERNAME}?start=f_${p2}` }],
                     [{ text: TEN("rejectRulesButton"), url: rules }],
                 ]);
             } finally {
@@ -1473,7 +1473,7 @@ async function run() {
         cfg.captureMode = "optin";
         {
             const SALE_TEXT = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             const NOTE_ID = 5100;
             let msgSeq = 1_000_000 + (Date.now() % 1_000_000);
@@ -1755,7 +1755,7 @@ async function run() {
             const SALE3 = "כוונת אדומה למכירה 300₪";
             const SALE4 = "אוזניות תקשורת למכירה 400₪ דרום";
             const BARE = "1300 מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             const OLD_NOTE = 5100;
             let msgSeq = 2_000_000 + (Date.now() % 1_000_000);
@@ -1808,6 +1808,46 @@ async function run() {
                 assert.strictEqual(cap.note?.ephemeralMessageId, ephemeralId(sent[0]));
                 assert.strictEqual(cap.note?.kind, "ask");
                 console.log("  [OK] (w1) a strict post gets one private note, without a thread id.");
+            }
+
+            // (w1b) a member who never opened the bot gets notes and toasts in their app language; /lang still wins
+            {
+                const { h, ctrl } = boot();
+                const u = user();
+                await post(h, u, SALE1, {}); // no language: the group's
+                await h.sendPhoto("f1", { ...GROUP, userId: u, caption: SALE2, languageCode: "ru", username: "kitty_seller" });
+                await settle();
+                await closeAndNote(ctrl);
+                assert.strictEqual((await memberRepository.findByUserId(String(u)))!.languageCode, "ru", "the member keeps the app language");
+                const cap = (await lastCapture(u))!;
+                const noteText = (locale: string) => localeService.t(locale, "captureNoteComplete", { title: cap.parsed!.title!, details: [cap.parsed!.price, cap.parsed!.location].filter(Boolean).join(" · ") });
+                const notes = ephemerals(h);
+                assert.strictEqual(notes.length, 1, "the two posts merge into one window");
+                assert.strictEqual(String(notes[0].params.text), noteText("ru"));
+                assert.notStrictEqual(noteText("ru"), noteText(cfg.lang), "the check can tell them apart");
+
+                h.calls.length = 0;
+                await h.pressButton(`mk_${cap._id}_a`, { userId: u, ...GROUP, languageCode: "ru" });
+                await settle();
+                assert.ok(h.calls.some((c) => c.method === "answerCallbackQuery" && c.params.text === localeService.t("ru", "captureAddedToast")), "the toast too");
+                // the moderators' first-listing card: the name links to the profile, with the @username (HTML)
+                const card = h.calls.find((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP)!;
+                assert.strictEqual(card.params.parse_mode, "HTML");
+                assert.ok(String(card.params.text).includes(`<a href="tg://user?id=${u}">Tester</a> @kitty_seller`), String(card.params.text));
+                const { sellerMention } = await import("../services/groupListingService");
+                assert.strictEqual(sellerMention({ sellerId: "7", sellerName: "<b>&", sellerUsername: undefined }), `<a href="tg://user?id=7">&lt;b&gt;&amp;</a>`, "escaped, no @ without a username");
+                assert.strictEqual(sellerMention({ sellerId: "7", sellerName: " ", sellerUsername: undefined }), `<a href="tg://user?id=7">7</a>`, "a blank name shows the id");
+
+                // a user row's own choice beats the app language
+                const u2 = user();
+                await User.create({ userId: String(u2), preferredLocale: "he" });
+                h.calls.length = 0;
+                await h.sendPhoto("f1", { ...GROUP, userId: u2, caption: SALE3, languageCode: "ru" });
+                await settle();
+                await closeAndNote(ctrl);
+                const cap2 = (await lastCapture(u2))!;
+                assert.strictEqual(String(ephemerals(h)[0].params.text), localeService.t("he", "captureNoteComplete", { title: cap2.parsed!.title!, details: [cap2.parsed!.price, cap2.parsed!.location].filter(Boolean).join(" · ") }));
+                console.log("  [OK] (w1b) a member with no user row gets the note and toast in their app language; /lang beats it.");
             }
 
             // (w2) shadow mode records, sends nothing
@@ -2089,7 +2129,7 @@ async function run() {
                 assert.deepStrictEqual(
                     [Number(e[0].params.chat_id), Number(e[0].params.receiver_user_id), Number(e[0].params.ephemeral_message_id)],
                     [APPROVED_GROUP, a, NOTE_ID]);
-                assert.ok(String(e[0].params.text).includes("גלוק 17 למכירה"));
+                assert.ok(String(e[0].params.text).includes("גלוק 17 ·"), "the parsed title, without למכירה");
                 const r = rows(e[0]);
                 assert.deepStrictEqual(r.flat().slice(0, 3).map((b) => b.callback_data), [`ls_${id}_s_n`, `ls_${id}_f_n`, `ls_${id}_r_n`]);
                 assert.strictEqual(r[1][1].url, `https://t.me/${BOT_USERNAME}?start=l_${id}`);
@@ -2159,8 +2199,20 @@ async function run() {
                 assert.strictEqual((await Capture.findById(cap._id))!.state, "declined");
                 const e = edits(h);
                 assert.strictEqual(e.length, 1);
-                assert.strictEqual(String(e[0].params.text), T6("captureNeverNote"));
-                assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}`]);
+                // "/myposts" is code (a tap must not send it to the group), and the button opens /myposts in the bot
+                assert.strictEqual(e[0].params.parse_mode, "HTML");
+                assert.ok(String(e[0].params.text).includes("<code>\u200E/myposts</code>"), "code, and the slash stays in front in a right-to-left line");
+                assert.strictEqual(String(e[0].params.text).replace(/<\/?code>|\u200E/g, ""), T6("captureNeverNote"));
+                assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}?start=myposts`]);
+                h.calls.length = 0;
+                await h.sendText("/myposts", { userId: a });
+                await settle();
+                const direct = h.calls.filter((c) => c.method !== "getMe").map((c) => [c.method, String(c.params.text ?? "")]);
+                h.calls.length = 0;
+                await h.sendText("/start myposts", { userId: a });
+                await settle();
+                assert.deepStrictEqual(h.calls.filter((c) => c.method !== "getMe").map((c) => [c.method, String(c.params.text ?? "")]), direct, "start=myposts is /myposts");
+                assert.ok(direct.length > 0);
                 h.calls.length = 0;
                 await h.sendPhoto("f1", { ...GROUP, userId: a, caption: SALE2 });
                 await settle();
@@ -2245,7 +2297,7 @@ async function run() {
             const { tick } = await import("../services/shadowService");
             const SALE = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
             const BARE = "1300 מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const NOTE_ID = 5300;
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             let msgSeq = 4_000_000 + (Date.now() % 1_000_000);
@@ -2534,7 +2586,7 @@ async function run() {
             const GA = "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז";
             const GA_CHEAPER = "גלוק 17 למכירה\nבמצב מעולה\n1,100₪ מרכז";
             const G19 = "גלוק 19 למכירה\nבמצב מעולה\n1,300₪ מרכז";
-            const FIELDS = { title: "גלוק 17 למכירה", price: "1,300₪" };
+            const FIELDS = { title: "גלוק 17", price: "1,300₪" };
             const NOTE_ID = 5400;
             const GROUP = { chatId: APPROVED_GROUP, chatType: "supergroup" as const };
             let msgSeq = 9_000_000 + (Date.now() % 1_000_000);
@@ -2808,8 +2860,9 @@ async function run() {
                 assert.strictEqual(lines[0], T("myPostsGroupTitle"));
                 assert.ok(/^1\. <a href="[^"]+">Alpha<\/a> · 100₪$/.test(lines[1]), lines[1]);
                 assert.ok(/^2\. <a href="[^"]+">Beta<\/a> · 100₪$/.test(lines[2]), lines[2]);
-                assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
-                assert.ok(text(section).endsWith(T("myPostsAskOn")));
+                assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEndedOne")));
+                const legend = [T("listingSoldButton"), T("listingRefreshButton"), T("listingRemoveButton")].join(" · ");
+                assert.ok(text(section).endsWith(`${T("myPostsAskOn")}\n${legend}`), "the legend is the last line, under the asking setting");
                 const [a, b] = [String(A._id), String(B._id)];
                 assert.deepStrictEqual(buttons(section), [[`ls_${a}_s_l`, `ls_${a}_f_l`, `ls_${a}_r_l`], [`ls_${b}_s_l`, `ls_${b}_f_l`, `ls_${b}_r_l`], ["mk_set_never"]]);
                 console.log("  [OK] (z2) /myposts lists bot posts, then the group section.");
@@ -2830,7 +2883,7 @@ async function run() {
                 assert.strictEqual(Number(edit[0].params.message_id), 77);
                 assert.strictEqual(edit[0].params.parse_mode, "HTML");
                 assert.ok(!text(edit[0]).includes("Alpha") && text(edit[0]).includes("Beta"));
-                assert.ok(text(edit[0]).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
+                assert.ok(text(edit[0]).includes(localeService.t(cfg.lang, "myPostsGroupEndedOne")));
                 assert.ok(!buttons(edit[0]).flat().some((d) => d?.startsWith(`ls_${A._id}`)));
                 console.log("  [OK] (z3) a section button acts and the message is re-rendered.");
             }
@@ -2846,7 +2899,7 @@ async function run() {
                 assert.strictEqual((await Member.findOne({ userId: String(u) }))!.askMode, "never");
                 let edit = callsTo(h, "editMessageText");
                 assert.strictEqual(edit.length, 1);
-                assert.ok(text(edit[0]).endsWith(T("myPostsAskOff")));
+                assert.ok(text(edit[0]).includes(`${T("myPostsAskOff")}\n`), "the setting, then the legend");
                 assert.deepStrictEqual(buttons(edit[0]).at(-1), ["mk_set_ask"]);
                 h.calls.length = 0;
                 await h.pressButton("mk_set_ask", { userId: u, messageId: 78 });
@@ -3069,6 +3122,9 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     assert.deepStrictEqual(answers(h), [T("captureAddedToast")]);
                     const edit = h.calls.find((c) => c.method === "editMessageText")!;
                     assert.deepStrictEqual(keyboard(edit).map((b) => b.callback_data), [`ck_${id}_22`, `ck_${id}_23`], "the DM lists what is left");
+                    const groupNoteId = (await memberOf(u))!.catchup!.note!.ephemeralMessageId;
+                    const noteDeletes = () => h.calls.filter((c) => c.method === "deleteEphemeralMessage");
+                    assert.strictEqual(noteDeletes().length, 0, "items are left: the group note stays");
                     const cards = () => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
                     assert.strictEqual(cards().length, 1, "a td_ card for the first listing");
                     assert.ok(keyboard(cards()[0])[0].callback_data.startsWith("td_"));
@@ -3080,6 +3136,8 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await Promise.all([h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 }), h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 })]);
                     await settle();
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), messageIds: 23 }), 1, "a double press makes one listing");
+                    assert.deepStrictEqual(noteDeletes().map((c) => [Number(c.params.chat_id), Number(c.params.receiver_user_id), Number(c.params.ephemeral_message_id)]),
+                        [[APPROVED_GROUP, u, groupNoteId]], "the last item added: the group note is deleted, once");
                     h.calls.length = 0;
                     await h.pressButton(`ck_${id}_23`, { userId: user(), messageId: 55 });
                     await settle();

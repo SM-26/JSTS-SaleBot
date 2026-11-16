@@ -31,7 +31,7 @@ import { GroupListingService } from "../services/groupListingService";
 import { LifecycleService } from "../services/lifecycleService";
 import { StaleCheckService } from "../services/staleCheckService";
 import type { SweeperJob } from "../services/sweeper";
-import { parseStartPayload } from "../services/deepLinks";
+import { MYPOSTS_PAYLOAD, parseStartPayload } from "../services/deepLinks";
 import { BroadcastUsersService } from "../services/broadcastUsersService";
 import { buildHelpMessage, buildBroadcastReportMessage } from "../services/richMessages";
 import { localeService } from "../services/localeService";
@@ -161,6 +161,7 @@ export class BotController {
         // Deep links from capture notes; slice 6 adds k_ here.
         const payload = parseStartPayload(args);
         if (payload?.kind === "c") { await this.wizardService.startFromCapture(msg, payload.id); return; }
+        if (payload?.kind === "f") { await this.wizardService.startFromRejected(msg, payload.id); return; }
         if (payload?.kind === "faq" && this.config.enableFaq !== false) { await this.faqService.showNode(msg, payload.id); return; }
         if (payload?.kind === "l") { await this.myPostsService.showListingCard(msg, payload.id); return; }
         if (payload?.kind === "k" && await this.catchupService.handleStart(msg, payload.id, new Date())) return;
@@ -584,6 +585,7 @@ export class BotController {
             if (!isPrivate(msg)) return;
             // The "Fix and resend" button on a reject notice deep-links here.
             if (args === "sell") return this.wizardService.handleSell(msg);
+            if (args === MYPOSTS_PAYLOAD) return this.myPostsService.showPosts(msg);
             return this.HandleStart(msg, args, ctx);
         }));
         bot.use(cmd("newpost", (msg) => {

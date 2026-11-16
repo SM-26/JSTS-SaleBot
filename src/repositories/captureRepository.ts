@@ -6,6 +6,7 @@ export type CaptureMessageInput = {
     chatId: number;
     senderId: string;
     senderName: string;
+    senderUsername?: string;
     messageId: number;
     text?: string;
     entities?: StoredEntity[];
@@ -64,6 +65,7 @@ class CaptureRepository {
                     chatId: input.chatId,
                     senderId: input.senderId,
                     senderName: input.senderName,
+                    ...(input.senderUsername ? { senderUsername: input.senderUsername } : {}),
                     messageIds: [input.messageId],
                     mediaGroupIds: input.mediaGroupId ? [input.mediaGroupId] : [],
                     parts: input.text ? [{ messageId: input.messageId, text: input.text, entities: input.entities?.length ? input.entities : undefined }] : [],
@@ -94,6 +96,7 @@ class CaptureRepository {
                     mediaGroupIds: input.mediaGroupId ? { $setUnion: ["$mediaGroupIds", { $literal: [input.mediaGroupId] }] } : "$mediaGroupIds",
                     parts: sortedParts({ $concatArrays: ["$parts", { $literal: part }] }),
                     senderName: { $literal: input.senderName },
+                    ...(input.senderUsername ? { senderUsername: { $literal: input.senderUsername } } : {}),
                     lastAt: { $max: ["$lastAt", now] }, // album items race: never move backwards
                 },
             },

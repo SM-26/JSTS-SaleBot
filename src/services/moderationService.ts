@@ -10,6 +10,7 @@ import { PublishService } from "./publishService";
 import type { IListing } from "../models/Listing";
 import { localeService } from "./localeService";
 import { sessionKey } from "../controllers/middleware";
+import { deepLink } from "./deepLinks";
 
 // Reply marker on the reject prompt; press marker on the Skip message. Each knows the other's id.
 type RejectReplyMarker = { postId: string; skipMsgId: number };
@@ -193,7 +194,7 @@ export class ModerationService {
             ? localeService.t(authorLocale, 'postRejectedWithReason') + authorReason
             : localeService.t(authorLocale, 'postRejected');
         let result: "notified" | "unreachable" = "notified";
-        await this.api.sendMessage({ chat_id: Number(post.userId), text, reply_markup: this.buildRejectNoticeKeyboard(authorLocale) })
+        await this.api.sendMessage({ chat_id: Number(post.userId), text, reply_markup: this.buildRejectNoticeKeyboard(authorLocale, postId) })
             .catch((err: Error) => {
                 result = "unreachable";
                 console.error("[ERROR - ModerationService.finishRejection] notifying the author failed:", err.message);
@@ -210,10 +211,10 @@ export class ModerationService {
         return result;
     }
 
-    // Row 1 sends the seller back into the wizard (/start sell), row 2 (if configured) to the group rules.
-    private buildRejectNoticeKeyboard(locale: string): InlineKeyboardMarkup {
+    // Row 1 reopens this post in the wizard to fix it (/start f_<postId>), row 2 (if configured) to the group rules.
+    private buildRejectNoticeKeyboard(locale: string, postId: string): InlineKeyboardMarkup {
         const rows: InlineKeyboardMarkup["inline_keyboard"] = [[
-            { text: localeService.t(locale, 'rejectFixButton'), url: `https://t.me/${this.getBotUsername()}?start=sell` },
+            { text: localeService.t(locale, 'rejectFixButton'), url: deepLink(this.getBotUsername(), `f_${postId}`) },
         ]];
         if (this.config.rulesUrl) rows.push([{ text: localeService.t(locale, 'rejectRulesButton'), url: this.config.rulesUrl }]);
         return { inline_keyboard: rows };

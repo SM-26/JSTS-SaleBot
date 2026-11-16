@@ -15,6 +15,7 @@ export type NewGroupListing = {
     messageIds: number[];
     sellerId: string;
     sellerName: string;
+    sellerUsername?: string;
     title: string;
     price: string;
     location?: string;
@@ -103,7 +104,7 @@ class ListingRepository {
     }
 
     // A past message found by the catch-up scan; the clock starts at its post date, so slice 3's expiry sees its real age.
-    createFromCatchup(input: { chatId: number; messageId: number; sellerId: string; sellerName: string; item: CatchupItem; isBundle: boolean }, now: Date): Promise<IListing> {
+    createFromCatchup(input: { chatId: number; messageId: number; sellerId: string; sellerName: string; sellerUsername?: string; item: CatchupItem; isBundle: boolean }, now: Date): Promise<IListing> {
         const { item } = input;
         const priceValue = priceValueOf(item.price);
         return Listing.create({
@@ -111,6 +112,7 @@ class ListingRepository {
             messageIds: item.messageIds ?? [input.messageId],
             sellerId: input.sellerId,
             sellerName: input.sellerName,
+            ...(input.sellerUsername ? { sellerUsername: input.sellerUsername } : {}),
             title: item.title,
             price: item.price,
             ...(item.location ? { location: item.location } : {}),

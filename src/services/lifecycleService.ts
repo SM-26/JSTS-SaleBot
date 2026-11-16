@@ -5,12 +5,12 @@ import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import postRepository from "../repositories/postRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { deleteNote, editNote, sendNote } from "./ephemeralNotes";
 import { buildEndedCard, buildManagementCard, nudgeKeyboard } from "./listingCards";
 import type { Card } from "./listingCards";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import { createBotListing } from "./marketService";
 import type { PostService } from "./postService";
 import type { SweeperJob } from "./sweeper";
@@ -116,7 +116,7 @@ export class LifecycleService {
     async syncNote(listing: IListing, refreshed = false): Promise<void> {
         if (!listing.note || listing.chatId === undefined) return;
         try {
-            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(listing.sellerId));
+            const locale = await memberLocale(listing.sellerId);
             const t = (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
             const card: Card = listing.status === "live"
                 ? buildManagementCard(t, listing, { surface: "n", botUsername: this.botUsername(), refreshed })
@@ -142,7 +142,7 @@ export class LifecycleService {
         };
         try {
             const from = String(query.from.id);
-            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            locale = await memberLocale(from, query.from.language_code);
             const m = /^([rsx])_([0-9a-f]{24})$/.exec(arg);
             if (!m) return await answer("staleButton");
             const [, action, listingId] = m;
@@ -195,7 +195,7 @@ export class LifecycleService {
     }
 
     private async translatorFor(sellerId: string) {
-        const locale = localeService.resolveUserLocale(await userRepository.findByUserId(sellerId));
+        const locale = await memberLocale(sellerId);
         return (key: string, params?: Record<string, string | number | boolean>) => localeService.t(locale, key, params);
     }
 

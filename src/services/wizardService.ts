@@ -24,7 +24,7 @@ import { listingLines } from "./buyerNoteService";
 import listingRepository from "../repositories/listingRepository";
 
 type TextStep = "title" | "description" | "price" | "location";
-type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editDescription" | "editPrice" | "editLocation" | "meetup";
+type WizardAction = "done" | "confirm" | "cancel" | "continue" | "restart" | "editTitle" | "editDescription" | "editPrice" | "editLocation" | "meetup" | "meetupOnly";
 type EditAction = "editTitle" | "editDescription" | "editPrice" | "editLocation";
 const EDIT_FIELD: Record<EditAction, TextStep> = { editTitle: "title", editDescription: "description", editPrice: "price", editLocation: "location" };
 
@@ -56,9 +56,10 @@ const CALLBACKS: { prefix: string; action: WizardAction }[] = [
     { prefix: "draft_edit_price_", action: "editPrice" },
     { prefix: "draft_edit_location_", action: "editLocation" },
     { prefix: "draft_meetup_", action: "meetup" },
+    { prefix: "draft_loc_meetup_", action: "meetupOnly" },
 ];
 // The step a press must find the draft in; continue/restart work on any step.
-const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm", editTitle: "confirm", editPrice: "confirm", editLocation: "confirm" };
+const REQUIRED_STEP: Partial<Record<WizardAction, DraftStep>> = { done: "media", confirm: "confirm", cancel: "confirm", editTitle: "confirm", editPrice: "confirm", editLocation: "confirm", meetupOnly: "location" };
 
 const FIELD_LABEL_ONLY = /^(?:מחיר|מיקום|איפה|אזור|איזור|price|location|цена|место)\s*[:\-–]?$/iu;
 
@@ -171,6 +172,13 @@ export class WizardService {
         return { text: on ? `✅ ${label}` : label, callback_data: `draft_meetup_${userId}` };
     }
 
+    // The location prompt's buttons: the toggle, and once it is on, Continue with no typed location.
+    private locationKeyboard(locale: string, userId: string, on: boolean | undefined): InlineKeyboardMarkup["inline_keyboard"] {
+        const rows = [[this.meetupButton(locale, userId, on)]];
+        if (on) rows.push([{ text: this.t(locale, "draftContinueButton"), callback_data: `draft_loc_meetup_${userId}` }]);
+        return rows;
+    }
+
     private previewParts(draft: IDraft, from: TelegramUser) {
         const stamp = Date.now();
         const inline_keyboard: InlineKeyboardMarkup["inline_keyboard"] = [[
@@ -219,7 +227,7 @@ export class WizardService {
         const markup: InlineKeyboardMarkup | undefined = draft.step === "media"
             ? { inline_keyboard: [[{ text: this.t(draft.locale, "doneMediaButton"), callback_data: `done_media_${draft.userId}` }]] }
             : draft.step === "location" && this.quickOn()
-                ? { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, draft.meetup)]] }
+                ? { inline_keyboard: this.locationKeyboard(draft.locale, draft.userId, draft.meetup) }
                 : undefined;
         // A capture draft skips most steps, and a field edit is one step: a "n of 5" indicator would lie.
         const indicator = draft.captureId || draft.quick || opts.indicator === false ? undefined : { locale: draft.locale, index, total: TOTAL_STEPS };
@@ -324,7 +332,7 @@ export class WizardService {
                 media: capture.media.map(m => ({ fileId: m.fileId, type: m.type })),
             };
             if (step === "confirm") {
-                const draft = await draftRepository.startFromCapture({ ...input, promptMessageId: 0 });
+                const draft = await draftRepository.startPrefilled({ ...input, promptMessageId: 0 });
                 try {
                     await this.previewOrFix(draft, from);
                 } catch (err) {
@@ -334,7 +342,47 @@ export class WizardService {
                 return true;
             }
             const promptMessageId = await this.sendStep({ userId, chatId: msg.chat.id, locale, step, captureId }, from);
-            await draftRepository.startFromCapture({ ...input, promptMessageId });
+            await draftRepository.startPrefilled({ ...input, promptMessageId });
+            return true;
+        });
+    }
+
+    /**
+     * /start f_<postId> ("Fix and resend" on a reject notice): the rejected post back as a draft on the preview,
+     * where the edit buttons fix it and Confirm sends it as a new post. The rejected post stays as it is.
+     * Needs quickListing (the edit buttons); off, it is the plain wizard. Never overwrites a live draft.
+     */
+    startFromRejected(msg: Message, postId: string): Promise<boolean> {
+        return this.safe("startFromRejected", msg.chat.id, async () => {
+            if (!this.quickOn()) return this.handleNewPost(msg);
+            const from = msg.from!;
+            const userId = String(from.id);
+            const locale = localeService.resolveUserLocale(await userRepository.findByUserId(userId));
+            const say = async (key: string): Promise<boolean> => {
+                await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, key) });
+                return true;
+            };
+
+            const post = await postRepository.findById(postId);
+            // A foreign id answers like a missing one.
+            if (!post || post.userId !== userId || post.status !== "rejected") return say("captureExpired");
+            const existing = await draftRepository.findByUserId(userId);
+            if (existing && !existing.awaitText && !isDraftExpired(existing, this.config.timeOut)) return say("captureDraftBusy");
+
+            console.info("[INFO - WizardService.startFromRejected]", { userId, postId });
+            const draft = await draftRepository.startPrefilled({
+                userId, chatId: msg.chat.id, locale, step: "confirm", promptMessageId: 0,
+                title: post.title || undefined, description: post.description || undefined,
+                descriptionEntities: post.descriptionEntities?.length ? post.descriptionEntities : undefined,
+                price: post.price || undefined, location: post.location || undefined, meetup: post.meetup || undefined,
+                media: post.media.map(m => ({ fileId: m.fileId, type: m.type })),
+            });
+            try {
+                await this.previewOrFix(draft, from); // a blocked word that got it rejected is asked for again
+            } catch (err) {
+                await draftRepository.delete(userId); // no half-started draft
+                throw err;
+            }
             return true;
         });
     }
@@ -438,11 +486,16 @@ export class WizardService {
         await this.api.sendMessage({ chat_id: draft.chatId, text: `${card.text}\n${t("dmSellHint")}`, parse_mode: "HTML", ...(card.keyboard.length ? { reply_markup: { inline_keyboard: card.keyboard } } : {}) });
     }
 
-    /** /start sell: with quickListing on and no live draft, say how to post in one message. */
+    /**
+     * /start sell, the "Fix and resend" link on reject notices sent before f_<postId>: with quickListing on and
+     * no live draft, the seller's newest rejected post to fix, else how to post in one message.
+     */
     handleSell(msg: Message): Promise<boolean> {
         return this.safe("handleSell", msg.chat.id, async () => {
             const draft = await draftRepository.findByUserId(String(msg.from!.id));
             if (!this.quickOn() || (draft && !draft.awaitText && !isDraftExpired(draft, this.config.timeOut))) return this.handleNewPost(msg);
+            const rejected = await postRepository.findLatestRejected(String(msg.from!.id));
+            if (rejected) return this.startFromRejected(msg, String(rejected._id));
             const locale = localeService.resolveUserLocale(await userRepository.findByUserId(String(msg.from!.id)));
             await this.api.sendMessage({ chat_id: msg.chat.id, text: this.t(locale, "quickSellHint") });
             return true;
@@ -528,30 +581,34 @@ export class WizardService {
                 return true;
             }
 
-            if (draft.fixing) {
-                const fields: DraftFields = { [draft.step]: msg.text };
-                if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
-                const updated = await draftRepository.update(draft.userId, fields);
-                if (updated) await this.previewOrFix(updated, msg.from);
-                return true;
-            }
-
-            // A capture or quick draft only asks for what is missing (title, price, and for a quick
-            // draft the media minimum); the rest came with the post or the caption.
-            if (draft.captureId || draft.quick) {
-                const updated = await draftRepository.update(draft.userId, { [draft.step]: msg.text });
-                if (updated) await this.advance(updated, msg.from);
-                return true;
-            }
-
-            const next = NEXT_STEP[draft.step];
-            const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next, meetup: draft.meetup }, msg.from);
-            const fields: DraftFields = { step: next, promptMessageId: messageId };
-            fields[draft.step] = msg.text;
-            if (draft.step === "description") fields.descriptionEntities = msg.entities?.length ? msg.entities.map(storedEntity) : undefined;
-            await draftRepository.update(draft.userId, fields);
+            await this.answerStep(draft, draft.step, msg.text, msg.entities, msg.from);
             return true;
         });
+    }
+
+    // Stores a text step's answer and moves on: back to the preview after an edit, to what is
+    // still missing for a capture or quick draft, else to the next step.
+    private async answerStep(draft: IDraft, step: TextStep, answer: string, entities: Message["entities"], from: TelegramUser): Promise<void> {
+        const fields: DraftFields = { [step]: answer };
+        if (step === "description") fields.descriptionEntities = entities?.length ? entities.map(storedEntity) : undefined;
+
+        if (draft.fixing) {
+            const updated = await draftRepository.update(draft.userId, fields);
+            if (updated) await this.previewOrFix(updated, from);
+            return;
+        }
+
+        // A capture or quick draft only asks for what is missing (title, price, and for a quick
+        // draft the media minimum); the rest came with the post or the caption.
+        if (draft.captureId || draft.quick) {
+            const updated = await draftRepository.update(draft.userId, { [step]: answer });
+            if (updated) await this.advance(updated, from);
+            return;
+        }
+
+        const next = NEXT_STEP[step];
+        const messageId = await this.sendStep({ userId: draft.userId, chatId: draft.chatId, locale: draft.locale, step: next, meetup: draft.meetup }, from);
+        await draftRepository.update(draft.userId, { ...fields, step: next, promptMessageId: messageId });
     }
 
     /**
@@ -628,9 +685,17 @@ export class WizardService {
                     if (updated.step === "confirm") {
                         await this.refreshPreview(updated, query.from);
                     } else {
-                        await this.api.editMessageReplyMarkup({ chat_id: draft.chatId, message_id: message.message_id, reply_markup: { inline_keyboard: [[this.meetupButton(draft.locale, draft.userId, updated.meetup)]] } })
+                        await this.api.editMessageReplyMarkup({ chat_id: draft.chatId, message_id: message.message_id, reply_markup: { inline_keyboard: this.locationKeyboard(draft.locale, draft.userId, updated.meetup) } })
                             .catch((err: unknown) => { if (!isApiError(err, 400, "message is not modified")) throw err; });
                     }
+                    return true;
+                }
+                case "meetupOnly": {
+                    // Beit Dagan alone: the location is left empty and the post shows just the meeting point.
+                    if (!draft.meetup) return false;
+                    await this.ack(query);
+                    await this.removeKeyboard(message.chat.id, message.message_id);
+                    await this.answerStep(draft, "location", "", undefined, query.from);
                     return true;
                 }
                 case "continue": {
@@ -661,7 +726,7 @@ export class WizardService {
     }
 
     private isQuickAction(action: WizardAction): boolean {
-        return action === "editTitle" || action === "editDescription" || action === "editPrice" || action === "editLocation" || action === "meetup";
+        return action === "editTitle" || action === "editDescription" || action === "editPrice" || action === "editLocation" || action === "meetup" || action === "meetupOnly";
     }
 
     // Save & send to moderation (the draft was already taken atomically).

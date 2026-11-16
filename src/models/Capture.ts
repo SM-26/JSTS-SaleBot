@@ -20,6 +20,8 @@ export interface ICapture extends Document {
     chatId: number;
     senderId: string;
     senderName: string;
+    // @username without the @, when the sender has one (the moderators' first-listing card shows it).
+    senderUsername?: string;
     messageIds: number[];
     mediaGroupIds: string[];
     parts: ICapturePart[];
@@ -52,6 +54,7 @@ const captureSchema = new Schema<ICapture>({
     chatId: { type: Number, required: true },
     senderId: { type: String, required: true },
     senderName: { type: String, required: true },
+    senderUsername: { type: String },
     messageIds: { type: [Number], default: [] },
     mediaGroupIds: { type: [String], default: [] },
     parts: { type: [partSchema], default: [] },

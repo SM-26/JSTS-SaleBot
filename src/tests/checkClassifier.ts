@@ -4,7 +4,7 @@ import { classify, normalize, partEntities, textHash, tokenOverlap, tokens, Pars
 
 // [name, text, hasMedia, expected tier, expected parsed fields (only the listed keys are compared)]
 const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
-    ["strict ₪", "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", true, "strict", { priceValue: 1300, location: "מרכז", title: "גלוק 17 למכירה" }],
+    ["strict ₪", "גלוק 17 למכירה\nבמצב מעולה\n1,300₪ מרכז", true, "strict", { priceValue: 1300, location: "מרכז", title: "גלוק 17" }],
     ["strict שח", 'M4 למכירה 900 ש"ח', true, "strict", { priceValue: 900 }],
     ["strict ב-", "מוכר וסט ב-250 כמו חדש", true, "strict", { priceValue: 250 }],
     ["wtb first line beats price", "מחפש M4 עד 800₪", true, "wtb"],
@@ -20,7 +20,7 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["למכירה ב-NNN outranks a currency price", "M4 במצב מעולה למכירה ב3500\nמשקפת 200 שקל", true, "ask", { priceValue: 3500 }],
     ["למכירה: ב-NNN outranks a currency price", "למכירה: ב-3500 M4 במצב מעולה\nמשקפת 200 שקל", true, "ask", { priceValue: 3500 }],
     ["shipping is a second price: ask", "למכירה M4 900₪\nמשלוח 30₪", true, "ask", { priceValue: 900 }],
-    ["price in passing loses to מחיר", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\nמחיר 380₪", true, "ask", { priceValue: 380, title: "למכירה וסט טקטי במצב טוב" }],
+    ["price in passing loses to מחיר", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\nמחיר 380₪", true, "ask", { priceValue: 380, title: "וסט טקטי במצב טוב" }],
     ["price in passing loses to a price line", "למכירה וסט טקטי במצב טוב\nחסר אבזם, אפשר להזמין ב 3 שקל מאתר סיני\n380₪", true, "ask", { priceValue: 380 }],
     ["מבקש is a price cue", "למכירה M4 במצב מעולה\nכולל 3 מחסניות\nמבקש 4800", true, "strict", { priceValue: 4800, price: "מבקש 4800" }],
     ["מבקשת with ש״ח", "מוכרת כוונת אדומה כמו חדשה\nמבקשת 1,200 ש\"ח", true, "strict", { priceValue: 1200 }],
@@ -33,8 +33,8 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["chatter", "מישהו יודע מתי המשחק?", false, "none"],
     ["blocked", "מוכר נשק 500₪", true, "none"],
     ["blocked false positive", "מתנה לנשק 500₪ למכירה", true, "none"],
-    ["price span mechir", "M4 למכירה מחיר 900₪", true, "strict", { title: "M4 למכירה", priceValue: 900, isBundle: false, price: "מחיר 900₪" }],
-    ["price span b-prefix", "M4 למכירה ב-250 ₪", true, "strict", { title: "M4 למכירה", priceValue: 250, price: "ב-250 ₪" }],
+    ["price span mechir", "M4 למכירה מחיר 900₪", true, "strict", { title: "M4", priceValue: 900, isBundle: false, price: "מחיר 900₪" }],
+    ["price span b-prefix", "M4 למכירה ב-250 ₪", true, "strict", { title: "M4", priceValue: 250, price: "ב-250 ₪" }],
     ["wtb word later in a sale line", "למכירה M4 לא צריך תיקונים 900₪", true, "strict"],
     ["wtb after greeting", "שלום, מחפש M4", false, "wtb"],
     ["wtb after blank line", "\nמחפש M4", false, "wtb"],
@@ -44,7 +44,7 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["phone number is not a price", "למכירה 0501234567", true, "none"],
     ["radio fixture, new in box", "מכשיר קשר\nבאופנג UV-5R\nחדש באריזה\n270 ₪ בית דגן", true, "strict", { priceValue: 270, location: "בית דגן", title: "מכשיר קשר" }],
     // issue #123
-    ["hello kitty: no location left in title, 2 is not the price", "למכירה hello kitty 1911 במצב מעולה, כולל 2 מחסניות. 1,200 ₪, אזור המרכז", true, "strict", { title: "למכירה hello kitty 1911 במצב מעולה, כולל 2 מחסניות", priceValue: 1200, location: "מרכז" }],
+    ["hello kitty: no location left in title, 2 is not the price", "למכירה hello kitty 1911 במצב מעולה, כולל 2 מחסניות. 1,200 ₪, אזור המרכז", true, "strict", { title: "hello kitty 1911 במצב מעולה, כולל 2 מחסניות", priceValue: 1200, location: "מרכז" }],
     ["trade, no price: a unit number is no price", "לטרייד: גלוק 19 (50 כדור) מחפש M4", true, "ask", { title: "גלוק 19 (50 כדור) מחפש M4", price: undefined, priceValue: undefined, trade: true }],
     ["trade word variants", "החלפה M4 בגלוק", true, "none", { trade: true }],
     ["trade with a real price is a normal post", "לטרייד או למכירה M4 1,500 ₪", true, "strict", { priceValue: 1500, trade: undefined }],
@@ -54,8 +54,8 @@ const rows: Array<[string, string, boolean, Tier, Partial<Parsed>?]> = [
     ["magazines are not a price", "למכירה M4 2 מחסניות 800", true, "ask", { priceValue: 800 }],
     ["watts are not a price", "למכירה AEG 350 וואט 600", true, "ask", { priceValue: 600 }],
     ["leading למכירה: is dropped", "למכירה: כוונת Holosun, 450₪", true, "strict", { title: "כוונת Holosun" }],
-    ["location with ה and אזור goes", "M4 למכירה 900₪ אזור המרכז", true, "strict", { title: "M4 למכירה", location: "מרכז" }],
-    ["long title cut at a word", "למכירה " + "מילה ".repeat(30) + "500₪", true, "strict", { title: "למכירה " + "מילה ".repeat(10).trim() }],
+    ["location with ה and אזור goes", "M4 למכירה 900₪ אזור המרכז", true, "strict", { title: "M4", location: "מרכז" }],
+    ["long title cut at a word", "למכירה " + "מילה ".repeat(30) + "500₪", true, "strict", { title: "מילה ".repeat(12).trim() }],
     // real posts
     ["lone opener line: next line is the title, area line is the location", "למכירה,\nColt m4 DD RIS 2 14.5”\nמחיר 3500 ₪\nאזור אש העין", true, "strict", { title: "Colt m4 DD RIS 2 14.5”", priceValue: 3500, location: "אש העין", description: "מחיר 3500 ₪" }],
     ["a size with a decimal is not a price", "למכירה\nבריח 14.5 מ", true, "none", { priceValue: undefined }],

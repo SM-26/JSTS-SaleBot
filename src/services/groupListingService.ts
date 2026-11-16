@@ -6,7 +6,6 @@ import type { IListing } from "../models/Listing";
 import captureRepository from "../repositories/captureRepository";
 import listingRepository from "../repositories/listingRepository";
 import memberRepository from "../repositories/memberRepository";
-import userRepository from "../repositories/userRepository";
 import type { BotConfig } from "../types";
 import { findBlockedWord, withLinkUrls } from "./blockedWords";
 import type { CatchupItem } from "./catchupScan";
@@ -15,12 +14,19 @@ import { groupMessageLink } from "./deepLinks";
 import type { LifecycleService } from "./lifecycleService";
 import { buildEndedCard, buildManagementCard, escapeHtml, listingActionData, parseListingArg, Card } from "./listingCards";
 import { localeService } from "./localeService";
+import { memberLocale } from "./memberLocale";
 import { groupCardKeyboard } from "./takeDownService";
 
 export type AddResult =
     | { kind: "added"; listing: IListing }
     | { kind: "already"; listing: IListing | null }
     | { kind: "gone" };
+
+// The seller on a moderators' card (HTML): their name linked to their profile, and @username when they have one.
+export function sellerMention(listing: Pick<IListing, "sellerId" | "sellerName" | "sellerUsername">): string {
+    const link = `<a href="tg://user?id=${listing.sellerId}">${escapeHtml(listing.sellerName?.trim() || listing.sellerId)}</a>`;
+    return listing.sellerUsername ? `${link} @${listing.sellerUsername}` : link;
+}
 
 const normTitle = (title?: string): string => (title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -66,6 +72,7 @@ export class GroupListingService {
                 messageIds: capture.messageIds,
                 sellerId: capture.senderId,
                 sellerName: capture.senderName,
+                ...(capture.senderUsername ? { sellerUsername: capture.senderUsername } : {}),
                 ...fields,
                 text: capture.text,
                 media: capture.media,
@@ -85,13 +92,14 @@ export class GroupListingService {
     }
 
     // A listing from a catch-up offer tap: the member's old message, in the approved group.
-    async addCatchupItem(member: { userId: string; name: string }, item: CatchupItem, now: Date): Promise<IListing> {
+    async addCatchupItem(member: { userId: string; name: string; username?: string }, item: CatchupItem, now: Date): Promise<IListing> {
         const firstForSeller = (await listingRepository.countBySeller(member.userId)) === 0;
         const listing = await listingRepository.createFromCatchup({
             chatId: this.config.approvedGroupId,
             messageId: item.messageId,
             sellerId: member.userId,
             sellerName: member.name,
+            ...(member.username ? { sellerUsername: member.username } : {}),
             item,
             isBundle: classify(item.text, false).parsed.isBundle,
         }, now);
@@ -110,11 +118,13 @@ export class GroupListingService {
                 chat_id: this.config.moderationGroupId,
                 ...(topic && topic !== 1 ? { message_thread_id: topic } : {}),
                 text: t("captureModCard", {
-                    name: listing.sellerName ?? "",
-                    title: listing.title ?? "",
-                    price: listing.price ?? "",
+                    name: sellerMention(listing),
+                    title: escapeHtml(listing.title ?? ""),
+                    price: escapeHtml(listing.price ?? ""),
                     link: await this.groupLink(listing.messageIds[0]),
                 }),
+                parse_mode: "HTML",
+                link_preview_options: { is_disabled: true },
                 reply_markup: { inline_keyboard: groupCardKeyboard(String(listing._id), t) },
             });
         } catch (err) {
@@ -150,7 +160,7 @@ export class GroupListingService {
 
         try {
             const from = String(query.from.id);
-            locale = localeService.resolveUserLocale(await userRepository.findByUserId(from));
+            locale = await memberLocale(from, query.from.language_code);
             const parsed = parseListingArg(arg);
             if (!parsed) return await answer("staleButton");
             const listing = await listingRepository.findById(parsed.listingId);
@@ -204,10 +214,12 @@ export class GroupListingService {
                 lines.push(`${i + 1}. <a href="${await this.groupLink(l.messageIds[0])}">${escapeHtml(l.title ?? "")}</a> · ${escapeHtml(l.price ?? "")}`);
             }
             if (active.length > shown.length) lines.push(`+${active.length - shown.length}`);
-            if (ended > 0) lines.push(t("myPostsGroupEnded", { n: ended }));
+            if (ended > 0) lines.push(t(ended === 1 ? "myPostsGroupEndedOne" : "myPostsGroupEnded", { n: ended }));
         }
         const never = (await memberRepository.findByUserId(userId))?.askMode === "never";
-        const text = [...lines, ...(lines.length ? [""] : []), t(never ? "myPostsAskOff" : "myPostsAskOn")].join("\n");
+        // Telegram buttons have no tooltips: the row's icons are spelled out once, last, from the card's own labels
+        const legend = shown.length ? [[t("listingSoldButton"), t("listingRefreshButton"), t("listingRemoveButton")].join(" · ")] : [];
+        const text = [...lines, ...(lines.length ? [""] : []), t(never ? "myPostsAskOff" : "myPostsAskOn"), ...legend].join("\n");
 
         const keyboard: InlineKeyboardButton[][] = shown.map((l, i) => {
             const id = String(l._id);

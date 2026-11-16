@@ -8,8 +8,13 @@ const CATCHUP_MS = 30 * 24 * 3600 * 1000;
 
 class MemberRepository {
     // Only $setOnInsert: seeing a member again must never reset askMode.
-    async touch(userId: string, now: Date): Promise<void> {
-        await Member.updateOne({ userId }, { $setOnInsert: { firstSeenAt: now, askMode: "ask" } }, { upsert: true }).exec();
+    // languageCode is the Telegram app language of this message; only a real one is stored.
+    async touch(userId: string, now: Date, languageCode?: string): Promise<void> {
+        await Member.updateOne(
+            { userId },
+            { $setOnInsert: { firstSeenAt: now, askMode: "ask" }, ...(languageCode ? { $set: { languageCode } } : {}) },
+            { upsert: true }
+        ).exec();
     }
 
     findByUserId(userId: string): Promise<IMember | null> {

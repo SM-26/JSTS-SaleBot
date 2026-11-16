@@ -36,6 +36,10 @@ export interface SendTextOptions {
     forwardOrigin?: Record<string, unknown>;
     /** Fixed message id, so an edit can target a message sent earlier. */
     messageId?: number;
+    /** The sender's Telegram app language (`from.language_code`). */
+    languageCode?: string;
+    /** The sender's @username, without the @ (`from.username`). */
+    username?: string;
 }
 
 export interface PressButtonOptions {
@@ -51,6 +55,8 @@ export interface PressButtonOptions {
     replyMarkup?: { inline_keyboard: Record<string, unknown>[][] };
     /** The pressed message's text. */
     text?: string;
+    /** The presser's Telegram app language (`from.language_code`). */
+    languageCode?: string;
 }
 
 export const BOT_USERNAME = "JSTS_testing_bot";
@@ -180,7 +186,7 @@ export function createHarness(options: HarnessOptions = {}) {
             message_id: id,
             date: Math.floor(Date.now() / 1000),
             chat: { id: chat, type: chatType },
-            from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester" },
+            from: { id: userId, is_bot: o.isBot ?? false, first_name: "Tester", ...(o.languageCode ? { language_code: o.languageCode } : {}), ...(o.username ? { username: o.username } : {}) },
             ...(o.messageThreadId === undefined ? {} : { message_thread_id: o.messageThreadId }),
             ...(o.isTopicMessage ? { is_topic_message: true } : {}),
             ...(o.mediaGroupId === undefined ? {} : { media_group_id: o.mediaGroupId }),
@@ -207,13 +213,13 @@ export function createHarness(options: HarnessOptions = {}) {
     const sendPhoto = (fileId: string, options: SendTextOptions = {}) =>
         message({ photo: [{ file_id: fileId, file_unique_id: fileId, width: 10, height: 10 }] }, options);
 
-    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false, ephemeralMessageId, replyMarkup, text }: PressButtonOptions = {}) => {
+    const pressButton = (data: string, { chatId, userId = 42, messageId = 7, chatType = "private", noMessage = false, ephemeralMessageId, replyMarkup, text, languageCode }: PressButtonOptions = {}) => {
         const chat = chatId ?? userId;
         return send({
             callback_query: {
                 id: `cb${nextUpdateId}`,
                 chat_instance: "ci",
-                from: { id: userId, is_bot: false, first_name: "Tester" },
+                from: { id: userId, is_bot: false, first_name: "Tester", ...(languageCode ? { language_code: languageCode } : {}) },
                 data,
                 ...(noMessage ? {} : {
                     message: {

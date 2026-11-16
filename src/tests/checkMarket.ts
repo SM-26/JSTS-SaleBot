@@ -586,16 +586,16 @@ async function run() {
 
         // draft from a capture, and a normal start over it drops captureId
         const du = `${RUN}-s2-draft`;
-        const d1 = await draftRepository.startFromCapture({
+        const d1 = await draftRepository.startPrefilled({
             userId: du, chatId: 5, locale: "en", step: "price", promptMessageId: 70, captureId: "c1", title: "T", media: [{ fileId: "m1", type: "photo" }],
         });
         assert.ok(d1.captureId === "c1" && d1.step === "price" && d1.title === "T" && d1.media.length === 1 && d1.promptMessageId === 70, "startFromCapture");
-        const d2 = await draftRepository.startFromCapture({ userId: du, chatId: 5, locale: "en", step: "title", promptMessageId: 71, captureId: "c2", media: [] });
-        assert.ok(d2.captureId === "c2" && d2.title === undefined && d2.media.length === 0, "startFromCapture replaces the draft");
+        const d2 = await draftRepository.startPrefilled({ userId: du, chatId: 5, locale: "en", step: "title", promptMessageId: 71, captureId: "c2", media: [] });
+        assert.ok(d2.captureId === "c2" && d2.title === undefined && d2.media.length === 0, "startPrefilled replaces the draft");
         const d3 = await draftRepository.start(du, 5, "en", 72);
         assert.ok(d3 && d3.captureId === undefined && d3.step === "title", "start over a capture draft leaves no captureId");
         assert.ok(!("captureId" in (await Draft.collection.findOne({ userId: du }))!), "captureId is gone from the document");
-        console.log("[OK] draft startFromCapture.");
+        console.log("[OK] draft startPrefilled.");
 
         await catchupMarketChecks(RUN, CHAT, odIds);
 

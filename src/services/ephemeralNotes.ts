@@ -48,6 +48,7 @@ export async function editNote(api: Api, chatId: number, receiverUserId: number,
             receiver_user_id: receiverUserId,
             ephemeral_message_id: ephemeralMessageId,
             text: card.text,
+            ...(card.html ? { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } } : {}),
             reply_markup: { inline_keyboard: card.keyboard },
         });
         return true;

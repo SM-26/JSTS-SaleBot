@@ -11,6 +11,8 @@ export interface IMember extends Document {
     askMode: "ask" | "never";
     lastNoteAt?: Date;
     lastBuyerNoteAt?: Date;
+    // Telegram app language from the member's latest sale-topic message: their private notes use it when they have no bot user row.
+    languageCode?: string;
     // Texts a note was sent for (newest last, at most 20, kept 30 days): a repost of one gets no new note. Name kept from when it only held declines.
     declined?: { hash: string; at: Date }[];
     pendingCatchup?: CatchupItem[];
@@ -24,6 +26,7 @@ const memberSchema = new Schema<IMember>({
     askMode: { type: String, enum: ["ask", "never"], default: "ask" },
     lastNoteAt: { type: Date },
     lastBuyerNoteAt: { type: Date },
+    languageCode: { type: String },
     declined: { type: [new Schema({ hash: String, at: Date }, { _id: false })], default: undefined },
     pendingCatchup: { type: [Schema.Types.Mixed], default: undefined },
     catchup: {

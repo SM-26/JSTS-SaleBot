@@ -2,7 +2,7 @@ import type { InlineKeyboardButton } from "node-telegram-bot-api/types";
 import type { IListing } from "../models/Listing";
 import type { Parsed } from "./classifier";
 import type { CatchupItem } from "./catchupScan";
-import { deepLink } from "./deepLinks";
+import { deepLink, MYPOSTS_PAYLOAD } from "./deepLinks";
 import { isMeetupLocation, meetupLocationText } from "./meetup";
 
 export type Translate = (key: string, params?: Record<string, string | number | boolean>) => string;
@@ -76,8 +76,14 @@ export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | 
     return { text, keyboard: [] };
 }
 
+// "/myposts" in the text is code, so a tap can't send it to the group; the button opens /myposts in the bot.
+// The left-to-right mark keeps the slash in front in a right-to-left line (else it reads "myposts/").
 export function buildNeverNote(t: Translate, botUsername: string): Card {
-    return { text: t("captureNeverNote"), keyboard: [[{ text: t("captureOpenBotButton"), url: `https://t.me/${botUsername}` }]] };
+    return {
+        text: escapeHtml(t("captureNeverNote")).replace("/myposts", "<code>\u200E/myposts</code>"),
+        html: true,
+        keyboard: [[{ text: t("captureOpenBotButton"), url: deepLink(botUsername, MYPOSTS_PAYLOAD) }]],
+    };
 }
 
 export const catchupActionData = (memberId: string, action: "x" | number): string => `ck_${memberId}_${action}`;
@@ -90,7 +96,7 @@ export function parseCatchupArg(arg: string): { memberId: string; action: "x" } 
 
 export function buildCatchupNote(t: Translate, o: { memberId: string; count: number }, botUsername: string): Card {
     return {
-        text: t("catchupOfferNote", { n: o.count }),
+        text: t(o.count === 1 ? "catchupOfferNoteOne" : "catchupOfferNote", { n: o.count }),
         keyboard: [
             [{ text: t("catchupPickButton"), url: deepLink(botUsername, `k_${o.memberId}`), style: "success" }],
             [{ text: t("catchupNoThanksButton"), callback_data: catchupActionData(o.memberId, "x") }],

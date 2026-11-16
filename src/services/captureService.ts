@@ -36,11 +36,12 @@ export class CaptureService {
             const media: IMediaItem[] = msg.photo?.length
                 ? [{ fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" }]
                 : msg.video ? [{ fileId: msg.video.file_id, type: "video" }] : [];
-            await memberRepository.touch(senderId, now);
+            await memberRepository.touch(senderId, now, from.language_code);
             await captureRepository.appendMessage({
                 chatId: msg.chat.id,
                 senderId,
                 senderName: [from.first_name, from.last_name].filter(Boolean).join(" "),
+                senderUsername: from.username || undefined,
                 messageId: msg.message_id,
                 text: msg.text ?? msg.caption,
                 entities: storedEntities(msg.text !== undefined ? msg.entities : msg.caption_entities),

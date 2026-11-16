@@ -1,5 +1,5 @@
 import Draft, { IDraft, DraftStep } from "../models/Draft";
-import type { IMediaItem } from "../models/Post";
+import type { IMediaItem, StoredEntity } from "../models/Post";
 
 export type DraftFields = Partial<Pick<IDraft, "step" | "title" | "description" | "descriptionEntities" | "price" | "location" | "promptMessageId" | "fixing" | "meetup" | "caption" | "awaitText">>;
 
@@ -10,17 +10,19 @@ export function isDraftExpired(draft: Pick<IDraft, "updatedAt">, timeOutMinutes:
 
 const DRAFT_FIELDS = { title: 1, description: 1, descriptionEntities: 1, price: 1, location: 1, fixing: 1, captureId: 1, meetup: 1, quick: 1, collecting: 1, mediaGroupId: 1, caption: 1, awaitText: 1 };
 
-export type CaptureDraftInput = {
+export type PrefilledDraftInput = {
     userId: string;
     chatId: number;
     locale: string;
     step: DraftStep;
     promptMessageId: number;
-    captureId: string;
+    captureId?: string;
     title?: string;
     description?: string;
+    descriptionEntities?: StoredEntity[];
     price?: string;
     location?: string;
+    meetup?: boolean;
     media: IMediaItem[];
 };
 
@@ -68,8 +70,8 @@ class DraftRepository {
         ).exec();
     }
 
-    // Replaces any existing draft with one prefilled from a captured group message.
-    startFromCapture(input: CaptureDraftInput) {
+    // Replaces any existing draft with a prefilled one: a captured group message, or a rejected post to fix.
+    startPrefilled(input: PrefilledDraftInput) {
         const now = new Date();
         const { userId, ...rest } = input;
         const fields = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));

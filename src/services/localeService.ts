@@ -36,7 +36,8 @@ class LocaleServiceImpl implements LocaleService {
         return this._availableLocales.includes(base) ? base : '';
     }
 
-    resolveUserLocale(user: User | null): string {
+    /** `fallbacks` are Telegram language codes tried after the user row's own, before the default (a member with no row). */
+    resolveUserLocale(user: User | null, ...fallbacks: (string | undefined)[]): string {
         // const userIdentifier = user?.userName || user?.userId || 'unknown';
         // console.debug('[DEBUG - LocaleService] resolveUserLocale called', { user: userIdentifier, preferredLocale: user?.preferredLocale, languageCode: user?.languageCode });
         // user.preferredLocale > user.languageCode normalized > config default
@@ -55,6 +56,10 @@ class LocaleServiceImpl implements LocaleService {
                 return normalized;
             }
             console.warn(`[WARN - LocaleService] User ${user.userId} languageCode '${user.languageCode}' unsupported.`);
+        }
+        for (const code of fallbacks) {
+            const normalized = code ? this.normalizeLocale(code) : '';
+            if (normalized) return normalized;
         }
         console.warn(`[WARN - LocaleService] Falling back to default locale '${config.lang}' for user ${user?.userId || 'unknown'} as no preferredLocale or languageCode provided.`);
         return config.lang;
