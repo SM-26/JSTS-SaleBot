@@ -214,7 +214,9 @@ export class GroupListingService {
                 lines.push(`${i + 1}. <a href="${await this.groupLink(l.messageIds[0])}">${escapeHtml(l.title ?? "")}</a> · ${escapeHtml(l.price ?? "")}`);
             }
             if (active.length > shown.length) lines.push(`+${active.length - shown.length}`);
-            if (ended > 0) lines.push(t("myPostsGroupEnded", { n: ended }));
+            // Telegram buttons have no tooltips: the row's icons are spelled out once, from the card's own labels
+            if (shown.length) lines.push([t("listingSoldButton"), t("listingRefreshButton"), t("listingRemoveButton")].join(" · "));
+            if (ended > 0) lines.push(t(ended === 1 ? "myPostsGroupEndedOne" : "myPostsGroupEnded", { n: ended }));
         }
         const never = (await memberRepository.findByUserId(userId))?.askMode === "never";
         const text = [...lines, ...(lines.length ? [""] : []), t(never ? "myPostsAskOff" : "myPostsAskOn")].join("\n");

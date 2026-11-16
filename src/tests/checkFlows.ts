@@ -2848,7 +2848,8 @@ async function run() {
                 assert.strictEqual(lines[0], T("myPostsGroupTitle"));
                 assert.ok(/^1\. <a href="[^"]+">Alpha<\/a> · 100₪$/.test(lines[1]), lines[1]);
                 assert.ok(/^2\. <a href="[^"]+">Beta<\/a> · 100₪$/.test(lines[2]), lines[2]);
-                assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
+                assert.strictEqual(lines[3], [T("listingSoldButton"), T("listingRefreshButton"), T("listingRemoveButton")].join(" · "), "the legend under the list");
+                assert.ok(text(section).includes(localeService.t(cfg.lang, "myPostsGroupEndedOne")));
                 assert.ok(text(section).endsWith(T("myPostsAskOn")));
                 const [a, b] = [String(A._id), String(B._id)];
                 assert.deepStrictEqual(buttons(section), [[`ls_${a}_s_l`, `ls_${a}_f_l`, `ls_${a}_r_l`], [`ls_${b}_s_l`, `ls_${b}_f_l`, `ls_${b}_r_l`], ["mk_set_never"]]);
@@ -2870,7 +2871,7 @@ async function run() {
                 assert.strictEqual(Number(edit[0].params.message_id), 77);
                 assert.strictEqual(edit[0].params.parse_mode, "HTML");
                 assert.ok(!text(edit[0]).includes("Alpha") && text(edit[0]).includes("Beta"));
-                assert.ok(text(edit[0]).includes(localeService.t(cfg.lang, "myPostsGroupEnded", { n: 1 })));
+                assert.ok(text(edit[0]).includes(localeService.t(cfg.lang, "myPostsGroupEndedOne")));
                 assert.ok(!buttons(edit[0]).flat().some((d) => d?.startsWith(`ls_${A._id}`)));
                 console.log("  [OK] (z3) a section button acts and the message is re-rendered.");
             }
