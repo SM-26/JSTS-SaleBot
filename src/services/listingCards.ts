@@ -77,9 +77,10 @@ export function buildEndedCard(t: Translate, listing: Pick<IListing, "status" | 
 }
 
 // "/myposts" in the text is code, so a tap can't send it to the group; the button opens /myposts in the bot.
+// The left-to-right mark keeps the slash in front in a right-to-left line (else it reads "myposts/").
 export function buildNeverNote(t: Translate, botUsername: string): Card {
     return {
-        text: escapeHtml(t("captureNeverNote")).replace("/myposts", "<code>/myposts</code>"),
+        text: escapeHtml(t("captureNeverNote")).replace("/myposts", "<code>\u200E/myposts</code>"),
         html: true,
         keyboard: [[{ text: t("captureOpenBotButton"), url: deepLink(botUsername, MYPOSTS_PAYLOAD) }]],
     };

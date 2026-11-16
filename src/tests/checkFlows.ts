@@ -2201,8 +2201,8 @@ async function run() {
                 assert.strictEqual(e.length, 1);
                 // "/myposts" is code (a tap must not send it to the group), and the button opens /myposts in the bot
                 assert.strictEqual(e[0].params.parse_mode, "HTML");
-                assert.ok(String(e[0].params.text).includes("<code>/myposts</code>"), String(e[0].params.text));
-                assert.strictEqual(String(e[0].params.text).replace(/<\/?code>/g, ""), T6("captureNeverNote"));
+                assert.ok(String(e[0].params.text).includes("<code>\u200E/myposts</code>"), "code, and the slash stays in front in a right-to-left line");
+                assert.strictEqual(String(e[0].params.text).replace(/<\/?code>|\u200E/g, ""), T6("captureNeverNote"));
                 assert.deepStrictEqual(rows(e[0]).flat().map((b) => b.url), [`https://t.me/${BOT_USERNAME}?start=myposts`]);
                 h.calls.length = 0;
                 await h.sendText("/myposts", { userId: a });
