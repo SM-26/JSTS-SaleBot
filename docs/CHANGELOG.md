@@ -4,11 +4,19 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased
+Unreleased - Buyer matching precision (measured on an offline replay of the group, 80 labelled wanted posts), and the fixes from the Hebrew walkthrough on the test bot.
   - Notes:
+    - Matching: no config key, no data change, no new update type. Saved searches keep their stored terms. The match rules, round numbers, swap requests and bare two-digit numbers apply to them at once. Price, quantity, ceiling, trade-in and sale-as-wanted parsing apply only to searches saved from now on.
+    - The query shown to the buyer (`/alerts`, the alert hint) no longer includes a stated price, a quantity or a trade-in.
+    - Benchmark, at least one right item among buyers who get a note: dev 21/40 → 22/23 (53% → 96%), held-out 22/40 → 21/27 (55% → 78%). One held-out useful row is lost, none on dev. The target is 80% on both. Rules and numbers: [Rollout](Rollout.md).
     - Data change (additive): optional `captures.senderUsername` and `listings.sellerUsername` (the seller's @username, when they have one).
     - Data change (additive): optional `members.languageCode`, the Telegram app language of the member's latest sale-topic message (set only when Telegram sends one). No config key, no new collection, no new update type. Rollback: the field is ignored.
   - Changed:
+    - **Every model name and one model number must match.** A request for `גלוק 19` no longer gets a Glock 26 or a Glock 17. Model codes (`ssp18`, `v3`) must all match.
+    - **Part requests.** `מחסנית לגלוק 17` needs a listing line that sells a magazine. Other requests skip listings that start with a part (holster, magazine, sight, …). The model must be on one line, within a listing's first five lines.
+    - **Not search words:** a stated price (₪, ש״ח, `מחיר`), a round number such as `1400`, a quantity such as `14 מ״מ`, and anything after a trade-in cue (`מציע`, `להחלפה`, `תמורת`, `יש לי`). In a listing, what follows `החלפה על` or `מחפש` doesn't match.
+    - **Ceilings:** `תקציב 800`, `בתקציב של 1,500`, `1300-1400` (the top counts) and `בין 2000 ל 2800` are ceilings; `2300+` is not.
+    - **No note** for a swap request (`מחפש החלפה על…`), a sale posted as wanted (`למכירה` before any model), or a bare two-digit number (`מחפש 45`; `cz 75` is a model, and `cz` must match). A trade-only listing (`רק להחלפה`, or a swap word with no price) never matches.
     - **`/myposts` group section: a legend under the list.** Telegram buttons have no tooltips, so the row icons are spelled out once, from the card's own labels: "🤝 נמכר · 🔄 הקפצה · 🗑 הסרה". The legend is the last line, under the asking setting. `listingRefreshButton` is now "🔄 הקפצה", and the card and toast after it say "הוקפצה" (`listingRefreshedCard`, `listingRefreshedToast`; owner's wording). In English it's "Bump" / "Bumped" everywhere, in the strings and these docs (ru "Поднять" / "Поднято", drafts). One ended listing reads "מודעה אחת שהסתיימה לא מוצגת." (new `myPostsGroupEndedOne`; en/ru drafts).
     - **"Don't ask again" note: `/myposts` can't be tapped, and the button opens it.** In the note, `/myposts` is shown as code (a tap copies it, it no longer sends the command into the group), with a left-to-right mark so the slash stays in front in Hebrew. Its button now links to `start=myposts`, which opens `/myposts` in the bot (it used to open the bot only). The wording of `captureNeverNote` is unchanged.
     - **Titles drop "למכירה".** The word says nothing about the item, so it's removed wherever it stands in a parsed title ("למכירה hello kitty 1911 …" → "hello kitty 1911 …", "גלוק 17 למכירה" → "גלוק 17"), in capture notes, group listings and the one-message draft. Other openers (`לטרייד`, `להחלפה`) are still dropped only when a `:` or `-` follows them. Rows already logged keep their old title.

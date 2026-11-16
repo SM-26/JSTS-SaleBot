@@ -45,6 +45,7 @@ for (const name of pages) {
         if (wikiPage && wikiPage !== "Home" && !pages.includes(`${wikiPage}.md`)) errors.push(`${name}: wiki link ${target} is not a page in docs/`);
         if (/^([a-z]+:|#)/i.test(target!)) continue;
         const file = target!.split("#")[0]!;
+        if (/^images\/[^/]+$/.test(file) && fs.existsSync(path.join(DOCS, file))) continue; // the wiki copy keeps docs/images/
         if (file.includes("/") || !pages.includes(file)) errors.push(`${name}: link ${target} is not a page in docs/`);
     }
     // ponytail: the changelog describes history, so old paths are fine there.
