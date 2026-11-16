@@ -54,17 +54,56 @@ function checkPure() {
     assert.deepStrictEqual(matchListings(parseQuery("מחפש glock"), [far, bd]).sort(), ["bd", "far"], "no meetup filter without the phrase");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש כוונת 0501234567"), [L("p", "כוונת 050 במצב טוב")]), [], "a phone number is not matched on");
 
-    // a budget number is not a model name: a named term (glock, m4) decides, numbers only rank
+    // a budget number is not a model name: the model name and the model number decide
     const budget = parseQuery("מחפש גלוק 17, תקציב 800 שח");
+    assert.strictEqual(budget.maxPrice, 800, "תקציב is a ceiling");
     assert.deepStrictEqual(matchListings(budget, [L("v", "וסט טקטי 800"), L("s", "כוונת 17")]), [], "800 and 17 alone do not match when a model is named");
-    assert.deepStrictEqual(matchListings(budget, [L("g", "glock 19")]), ["g"]);
+    assert.deepStrictEqual(matchListings(budget, [L("g", "glock 17")]), ["g"]);
     assert.deepStrictEqual(matchListings(parseQuery("מחפש M4 בתקציב 1500"), [L("ak", "ak 1500")]), [], "a budget is not a model");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש 1911"), [L("c", "1911 מצוין")]), ["c"], "a number alone is still strong");
     // a category head (gbb, aeg, hpa) must not silence a model number
     assert.deepStrictEqual(matchListings(parseQuery("מחפש gbb 1911"), [L("c", "1911 מצוין")]), ["c"], "gbb alone does not decide");
     assert.deepStrictEqual(matchListings(parseQuery("מחפש aeg 416"), [L("h", "hk 416 מצוין")]), ["h"], "aeg alone does not decide");
-    assert.deepStrictEqual(matchListings(parseQuery("מחפש glock gbb 1911"), [L("g", "glock 19"), L("c", "1911 מצוין")]), ["g"], "glock still decides");
+    // was: glock alone decided, so a glock 19 matched "glock 1911"; now the number must match too (sibling models)
+    assert.deepStrictEqual(matchListings(parseQuery("מחפש glock gbb 19"), [L("g", "glock 19"), L("c", "1911 מצוין"), L("s", "glock 26")]), ["g"], "glock and 19 decide together");
+    checkPrecision();
     console.log("[OK] buyer query parsing and matching.");
+}
+
+// The precision rules (matcher benchmark, see Rollout): made-up texts only.
+function checkPrecision() {
+    const m = (query: string, ...ls: ReturnType<typeof L>[]) => matchListings(parseQuery(query), ls);
+    // prices, ceilings and quantities
+    assert.ok(!parseQuery("מחפש כוונת, מחיר 400").terms.includes("400") && !parseQuery("מחפש קת 300₪").terms.includes("300"), "a stated price is not a term");
+    assert.deepStrictEqual(m("מחפש וסט 2500", L("x", "m4 2500")), [], "a round number is a price, not a model");
+    assert.ok(!parseQuery("מחפש סטרשף 14 מ\"מ").terms.includes("14") && !parseQuery("מחפש קפיץ 1.3j").terms.includes("3j"), "a quantity is not a term");
+    assert.ok(parseQuery("מחפש גלוק 19 שחור").terms.includes("19"), "שחור is not שח");
+    assert.strictEqual(parseQuery("מחפש glock בתקציב של 1,500").maxPrice, 1500);
+    assert.strictEqual(parseQuery("מחפש glock עד 1300-1400").maxPrice, 1400, "a range: its top");
+    assert.strictEqual(parseQuery("מחפש m4 בין 2000 ל 2800").maxPrice, 2800);
+    assert.strictEqual(parseQuery("מחפש ak תקציב 2300+").maxPrice, undefined, "N+ is a floor");
+    assert.strictEqual(parseQuery("מחפש ak תקציב 2300₪+").maxPrice, undefined);
+    // part requests need a line that sells the part; other requests skip listings that lead with a part
+    assert.deepStrictEqual(m("מחפש מחסנית ארוכה לגלוק 17", L("gun", "גלוק 17 we\nמגיע עם מחסנית"), L("mag", "מחסנית ארוכה גלוק 17"), L("list", "ציוד\nמחסנית גלוק 17 חדשה")).sort(), ["list", "mag"]);
+    assert.deepStrictEqual(m("מחפש גלוק 45", L("h", "נרתיק לאקדחי glock 45"), L("g", "glock 45")), ["g"], "a holster is not a glock");
+    assert.deepStrictEqual(m("מחפש גלוק 19", L("g", "גלוק 19 מוכר כי מחסנית לא עובדת")), ["g"], "a part named after the model is a detail");
+    assert.deepStrictEqual(m("מחפש גלוק 19 על גז", L("g", "glock 19")), ["g"], "an item word after the model is a detail");
+    assert.deepStrictEqual(m("מחפש glock 19", L("x", "ציוד\nglock 17\nנרתיק glock 19")), [], "the model must be on a line that sells it");
+    assert.deepStrictEqual(m("מחפש glock", L("x", "תיק\nפאוץ\nוסט\nקסדה\nכפפות\nglock 17 כמו חדש")), [], "a long listing names what it sells near the top");
+    // sibling models and codes
+    assert.deepStrictEqual(m("מחפש glock 17 או 19", L("a", "glock 17"), L("b", "glock 19"), L("c", "glock 26")).sort(), ["a", "b"], "any of the model numbers");
+    assert.deepStrictEqual(m("מחפש ak v3", L("a", "ak 74")), [], "every model code");
+    assert.deepStrictEqual(m("מחפש 45", L("g", "glock 45")), [], "a bare two-digit number decides nothing");
+    assert.ok(!isSearchable(parseQuery("מחפש 45")));
+    assert.deepStrictEqual(m("מחפש cz 75", L("c", "cz 75 shadow"), L("a", "ak 75")), ["c"], "a Latin word before the number names the model");
+    // trade-ins, swaps and sales posted as wanted
+    const cut = parseQuery("מחפש glock 17, מציע m4 בהחלפה");
+    assert.ok(cut.terms.includes("glock") && !cut.terms.includes("m4"), "the trade-in is not wanted");
+    assert.ok(!isSearchable(parseQuery("מחפש החלפה על glock 17")), "a swap request is not a buy");
+    assert.ok(!isSearchable(parseQuery("שוב למכירה glock 17, 1900 לא גמיש")), "a sale posted as wanted");
+    assert.deepStrictEqual(m("מחפש m4", L("t", "m4 למכירה, יש אפשרות החלפה על גלוק"), L("w", "aeg מצוין\nאפשר החלפה על m4")), ["t"], "what the seller wants in trade is not for sale");
+    const swap = { ...L("s", "glock 17 להחלפה"), priceValue: undefined } as ReturnType<typeof L>;
+    assert.deepStrictEqual(m("מחפש glock 17", swap, L("o", "glock 17 רק להחלפה"), L("p", "glock 17")), ["p"], "trade-only listings never match");
 }
 
 const U = `bm-${Date.now()}`;
