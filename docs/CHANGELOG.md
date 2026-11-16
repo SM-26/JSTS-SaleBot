@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
-Unreleased - Buyer matching precision (measured on an offline replay of the group, 80 labelled wanted posts), and the fixes from the Hebrew walkthrough on the test bot.
+3.5.0 - Buyer matching precision (measured on an offline replay of the group, 80 labelled wanted posts), and the fixes from the Hebrew walkthrough on the test bot.
   - Notes:
+    - Rollback: `BOT_TAG=3.4.1`. Every data change below is additive, so 3.4.1 runs on the same database and ignores the new fields. Links added in 3.5.0 (`f_`, `myposts`, `draft_loc_meetup_`) then get a plain `/start` greeting or the stale-button answer.
+    - `captureMode` and `buyerMatches` are unchanged, so nothing new reaches members until an admin switches them. English and Russian strings marked as drafts reach members whose Telegram app is in those languages once `optin` is on.
     - Matching: no config key, no data change, no new update type. Saved searches keep their stored terms. The match rules, round numbers, swap requests and bare two-digit numbers apply to them at once. Price, quantity, ceiling, trade-in and sale-as-wanted parsing apply only to searches saved from now on.
     - The query shown to the buyer (`/alerts`, the alert hint) no longer includes a stated price, a quantity or a trade-in.
     - Benchmark, at least one right item among buyers who get a note: dev 21/40 → 22/23 (53% → 96%), held-out 22/40 → 21/27 (55% → 78%). One held-out useful row is lost, none on dev. The target is 80% on both. Rules and numbers: [Rollout](Rollout.md).
@@ -27,6 +29,8 @@ Unreleased - Buyer matching precision (measured on an offline replay of the grou
     - **The catch-up note goes once nothing is left.** After the member adds the last offered item in the bot, the group note is deleted, as "No thanks" already did. Before, it stayed up with buttons that led nowhere. One item reads "ראינו שפרסמת כאן לאחרונה פריט אחד. להוסיף אותו לשוק של הבוט?" (new `catchupOfferNoteOne`; en/ru drafts).
     - **Fix and resend reopens the rejected post.** The button on a reject notice now links to `start=f_<postId>` (pinned in `checkCallbackData`). With `quickListing` on, it opens that post as a draft straight on the preview, with the edit buttons and the Beit Dagan toggle, so the seller fixes what was wrong and sends it again. Sending makes a new post, which goes through the usual review; the rejected post stays rejected. A blocked word in it is asked for again first, a live draft is never overwritten (`captureDraftBusy`), and someone else's link answers `captureExpired`. Reject notices sent before this still link to `start=sell`: that now opens the seller's newest rejected post the same way, and gives the one-message hint only when there is none. With `quickListing` off, both start an empty wizard, as before. No new string, no config key, no data change. After a rollback, an `f_` link is a plain `/start` greeting.
     - **Beit Dagan alone in the wizard.** With `quickListing` on, ticking 📍 בית דגן on the location step adds a ▶️ Continue button (`draft_loc_meetup_<userId>`, the existing `draftContinueButton` label), so a seller can pick the meeting point without typing a location. The location stays empty and the post shows just the meeting point. It also works from ✏️ Location on the preview. Untick it and the button goes. No new string, no config key, no data change. After a rollback, a press on that button gets the stale-button answer.
+  - Docs:
+    - Selling: a section on 🏅 top and ✅ verified sellers, with an example image of the four post layouts (`docs/images/`). `check-docs` accepts links to files there.
   - Dependencies:
     - Removed the `node-telegram-bot-api@2.4.0` `minimumReleaseAgeExclude` from `pnpm-workspace.yaml`: the release is now well over 24 hours old, so pnpm's minimum release age applies to every package again. The lockfile is unchanged.
 
