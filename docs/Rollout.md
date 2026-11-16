@@ -28,6 +28,17 @@ To measure first: `/label` and `/stats` show the classifier's precision. A sale 
 
 Buyer notes need `captureMode` `shadow` or `optin`, because they hang off captured "wanted" messages; saved-search alerts don't.
 
+What matches a "wanted" message (`src/services/matchService.ts`), the same for notes, alerts and the one-message draft:
+
+- A listing must have every model name in the message (`glock`, `m4`, `ak`, or a code like `ssp18`) and one of its model numbers (`17 או 19`). They must be on one line, within the listing's first five lines, and that line must not start with a part. `gbb`, `aeg` and `hpa` decide only when nothing else does.
+- A part request, one that names the part before any model (`מחסנית`, `קפיץ`, `נרתיק`, `כוונת`, `קת`, `בלון`, …), needs a listing line that sells that part. Any other request skips listings that start with a part. A part word after the model (`גלוק 19 על גז`) is only a detail.
+- These are not search words: a price the buyer names (`400₪`, `מחיר 300`), a round number (`1400`), a quantity (`14 מ״מ`, `1.3j`), a phone number, and anything after a trade-in cue (`מציע`, `להחלפה`, `תמורת`, `יש לי`, …). In a listing, whatever follows `החלפה על` or `מחפש` is what the seller wants, so it doesn't match either.
+- `עד 800`, `תקציב 800` and a range (`1300-1400`, `בין 2000 ל 2800`, whose top counts) set a ceiling; `2300+` does not.
+- These get no note: a swap request (`מחפש החלפה על…`), a sale posted as wanted (`למכירה` before any model), and a bare two-digit number (`מחפש 45`). A Latin word right before the number makes it a model (`cz 75`), and that word must match too.
+- A trade-only listing never matches: `רק להחלפה`, or a swap word with no price.
+
+Before `on`: the matcher was benchmarked offline on a 30-day replay of the group, with 80 wanted posts blind-labelled. The target is 80% of noted buyers getting at least one right item. It now scores 22 of 23 on the dev set and 21 of 27 on the held-out set (78%). Turning it on is the owner's call.
+
 Kill switch: `/config buyerMatches shadow`. Notes and alerts stop at once. Saved searches stay and resume, except that a 403 (the buyer blocked the bot) deletes that buyer's searches, and the 60-day TTL still applies.
 
 ## One-message listing: `quickListing`

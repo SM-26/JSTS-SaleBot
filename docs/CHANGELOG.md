@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 
 ## Version History
+Unreleased - Buyer matching precision, measured on an offline replay of the group (80 labelled wanted posts).
+  - Notes:
+    - No config key, no data change, no new update type. Saved searches keep their stored terms. The match rules, round numbers, swap requests and bare two-digit numbers apply to them at once. Price, quantity, ceiling, trade-in and sale-as-wanted parsing apply only to searches saved from now on.
+    - The query shown to the buyer (`/alerts`, the alert hint) no longer includes a stated price, a quantity or a trade-in.
+    - Benchmark, at least one right item among buyers who get a note: dev 21/40 → 22/23 (53% → 96%), held-out 22/40 → 21/27 (55% → 78%). One held-out useful row is lost, none on dev. The target is 80% on both. Rules and numbers: [Rollout](Rollout.md).
+  - Changed:
+    - **Every model name and one model number must match.** A request for `גלוק 19` no longer gets a Glock 26 or a Glock 17. Model codes (`ssp18`, `v3`) must all match.
+    - **Part requests.** `מחסנית לגלוק 17` needs a listing line that sells a magazine. Other requests skip listings that start with a part (holster, magazine, sight, …). The model must be on one line, within a listing's first five lines.
+    - **Not search words:** a stated price (₪, ש״ח, `מחיר`), a round number such as `1400`, a quantity such as `14 מ״מ`, and anything after a trade-in cue (`מציע`, `להחלפה`, `תמורת`, `יש לי`). In a listing, what follows `החלפה על` or `מחפש` doesn't match.
+    - **Ceilings:** `תקציב 800`, `בתקציב של 1,500`, `1300-1400` (the top counts) and `בין 2000 ל 2800` are ceilings; `2300+` is not.
+    - **No note** for a swap request (`מחפש החלפה על…`), a sale posted as wanted (`למכירה` before any model), or a bare two-digit number (`מחפש 45`; `cz 75` is a model, and `cz` must match). A trade-only listing (`רק להחלפה`, or a swap word with no price) never matches.
+
 3.4.1 - Classifier price fixes and a dead-link label, from the first 28 prod labels (24 sale, 4 not sale: all 4 were sales with a wrong price).
   - Notes:
     - Data change (additive): `shadow_log.label` can be `gone`. No config key, no new collection, no new update type. Rollback: `BOT_TAG=3.4.0`. Gone rows stay out of `/label` (they have a label), and 3.4.0's `/stats` counts them in its labeled n but in neither sale nor not sale, so its precision is unchanged.
