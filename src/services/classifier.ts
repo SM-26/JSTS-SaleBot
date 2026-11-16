@@ -85,10 +85,13 @@ const FOLD_BACK: Record<string, string> = { כ: "[כך]", מ: "[מם]", נ: "[נ
 // the city as written in the raw text (final letters either way), with its prefix letter and a leading "אזור"
 const cityTitleRes = new Map(data.cities.map(c => [c, new RegExp("(?:אזור\\s+)?(?<![\\p{L}\\p{N}])[בלמה]?" + normalize(c).split("").map(ch => FOLD_BACK[ch] ?? (ch === " " ? "\\s+" : escapeRe(ch))).join("") + "(?![\\p{L}\\p{N}])", "u")]));
 
-/** The title line without its price: location (with its ה/אזור), stray punctuation and a leading opener gone. Not cut yet. */
+// "למכירה" says nothing about the item: never part of a title, wherever it stands
+const SALE_WORD = /(?<![\p{L}\p{N}])למכירה(?![\p{L}\p{N}])\s*[:\-–]?/gu;
+
+/** The title line without its price: location (with its ה/אזור), "למכירה", stray punctuation and a leading opener gone. Not cut yet. */
 export function cleanTitleLine(line: string, location?: string): string {
     const re = location ? cityTitleRes.get(location) : undefined;
-    return (re ? line.replace(re, " ") : line).replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/([,.;:])(?:\s*[,;:])+/g, "$1")
+    return (re ? line.replace(re, " ") : line).replace(SALE_WORD, " ").replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/([,.;:])(?:\s*[,;:])+/g, "$1")
         .replace(/^[\s,.\-–:;]+|[\s,.\-–:;]+$/g, "").replace(LEAD, "");
 }
 
