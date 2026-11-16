@@ -96,7 +96,7 @@ export function parseCatchupArg(arg: string): { memberId: string; action: "x" } 
 
 export function buildCatchupNote(t: Translate, o: { memberId: string; count: number }, botUsername: string): Card {
     return {
-        text: t("catchupOfferNote", { n: o.count }),
+        text: t(o.count === 1 ? "catchupOfferNoteOne" : "catchupOfferNote", { n: o.count }),
         keyboard: [
             [{ text: t("catchupPickButton"), url: deepLink(botUsername, `k_${o.memberId}`), style: "success" }],
             [{ text: t("catchupNoThanksButton"), callback_data: catchupActionData(o.memberId, "x") }],

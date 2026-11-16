@@ -213,6 +213,7 @@
     "captureDraftBusy": "יש לכם פוסט בתהליך. סיימו אותו או שלחו /cancel, ואז פתחו את הקישור שוב.",
     "capturePublished": "נוסף לשוק.",
     "catchupOfferNote": "ראינו שפרסמת כאן לאחרונה {n} פריטים. להוסיף אותם לשוק של הבוט?",
+    "catchupOfferNoteOne": "ראינו שפרסמת כאן לאחרונה פריט אחד. להוסיף אותו לשוק של הבוט?",
     "catchupPickButton": "✅ בחר פריטים בבוט",
     "catchupNoThanksButton": "לא תודה",
     "catchupListTitle": "לחצו על פריט כדי להוסיף אותו לשוק:",

@@ -216,11 +216,14 @@ export class CatchupService {
             // atomic: a double press has one winner; the item stays gone on every refusal below
             const item = await memberRepository.takeCatchupItem(parsed.memberId, parsed.messageId);
             if (!item) return await answer("captureAlreadyAdded");
-            // the item was taken: every ending below re-renders the DM list, so no dead button stays
+            // the item was taken: every ending below re-renders the DM list, so no dead button stays,
+            // and once nothing is left to offer the group note goes too
             const rerender = async (): Promise<void> => {
-                if (query.message?.chat.type !== "private") return;
                 const fresh = await memberRepository.findById(parsed.memberId);
                 const remaining = fresh ? await this.offerable(fresh, fresh.pendingCatchup ?? [], now) : [];
+                const noteId = member.catchup?.note?.ephemeralMessageId;
+                if (!remaining.length && noteId !== undefined) await deleteNote(this.api, this.config.approvedGroupId, Number(from), noteId);
+                if (query.message?.chat.type !== "private") return;
                 const card = buildCatchupList(await this.translatorFor(from), { memberId: parsed.memberId, items: remaining });
                 await this.api.editMessageText({ chat_id: query.message.chat.id, message_id: query.message.message_id, text: card.text, reply_markup: { inline_keyboard: card.keyboard } });
             };

@@ -3122,6 +3122,9 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     assert.deepStrictEqual(answers(h), [T("captureAddedToast")]);
                     const edit = h.calls.find((c) => c.method === "editMessageText")!;
                     assert.deepStrictEqual(keyboard(edit).map((b) => b.callback_data), [`ck_${id}_22`, `ck_${id}_23`], "the DM lists what is left");
+                    const groupNoteId = (await memberOf(u))!.catchup!.note!.ephemeralMessageId;
+                    const noteDeletes = () => h.calls.filter((c) => c.method === "deleteEphemeralMessage");
+                    assert.strictEqual(noteDeletes().length, 0, "items are left: the group note stays");
                     const cards = () => h.calls.filter((c) => c.method === "sendMessage" && Number(c.params.chat_id) === MOD_GROUP);
                     assert.strictEqual(cards().length, 1, "a td_ card for the first listing");
                     assert.ok(keyboard(cards()[0])[0].callback_data.startsWith("td_"));
@@ -3133,6 +3136,8 @@ assert.strictEqual(text(sends(h)[0]), T("notAdmin"));
                     await Promise.all([h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 }), h.pressButton(`ck_${id}_23`, { userId: u, messageId: 55 })]);
                     await settle();
                     assert.strictEqual(await Listing.countDocuments({ sellerId: String(u), messageIds: 23 }), 1, "a double press makes one listing");
+                    assert.deepStrictEqual(noteDeletes().map((c) => [Number(c.params.chat_id), Number(c.params.receiver_user_id), Number(c.params.ephemeral_message_id)]),
+                        [[APPROVED_GROUP, u, groupNoteId]], "the last item added: the group note is deleted, once");
                     h.calls.length = 0;
                     await h.pressButton(`ck_${id}_23`, { userId: user(), messageId: 55 });
                     await settle();

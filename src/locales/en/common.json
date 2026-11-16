@@ -213,6 +213,7 @@
     "captureDraftBusy": "You have a post in progress. Finish it or send /cancel, then open the link again.",
     "capturePublished": "Added to the market.",
     "catchupOfferNote": "We saw you recently posted {n} items here. Add them to the bot's market?",
+    "catchupOfferNoteOne": "We saw you recently posted 1 item here. Add it to the bot's market?",
     "catchupPickButton": "✅ Pick items in the bot",
     "catchupNoThanksButton": "No thanks",
     "catchupListTitle": "Tap an item to add it to the market:",
