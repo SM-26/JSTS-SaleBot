@@ -15,8 +15,8 @@ importers:
         specifier: ^18.0.10
         version: 18.0.10
       mongoose:
-        specifier: ^9.12.1
-        version: 9.12.1
+        specifier: ^9.12.2
+        version: 9.12.2
       node-telegram-bot-api:
         specifier: 2.4.0
         version: 2.4.0
@@ -510,8 +510,8 @@ packages:
     resolution: {integrity: sha512-nFQuYSTVrGvysVBps5Ih+0BdnYFN/Cj3C816r6+p7yK+FHrVLGE4O4N9AFwykrlNlvM2HYt+Rad1Uiro6h88Ig==}
     engines: {node: 20 || >=22}
 
-  mongodb-connection-string-url@7.0.2:
-    resolution: {integrity: sha512-ZoS07RoFqpKYQwAk59qmrx8+jJHNHU30UjlU96QktiGn1ltvDr+vCznLX5DiUBLEpMAHatHNWV1nM/74ul66kA==}
+  mongodb-connection-string-url@7.0.3:
+    resolution: {integrity: sha512-5I/pX3C2gPEz1EDdYMdZwBx1b/jE/f+J+KItSUJ02uQZ66bbe7kHKjv2uqCHJWaMCagem3dyfWqoAcv+XYZ6aw==}
     engines: {node: '>=20.19.0'}
 
   mongodb@7.8.0:
@@ -541,8 +541,8 @@ packages:
       socks:
         optional: true
 
-  mongoose@9.12.1:
-    resolution: {integrity: sha512-wPw1NKurTDShT+kr/JJvhdwPKIJkxFJv5GEbv++QahN8snPR9Fp/BFg6nQbbCyUHBB8DexwwlCQW6SfBD99QCg==}
+  mongoose@9.12.2:
+    resolution: {integrity: sha512-SoWBAJGaC7UJ8SCmsVd34kDmiq/lvyeENVTHTjR1ez+vyfY/cu/K5/uCgIoXA6pYV5yMAHM72sWVe6XuYYEqeA==}
     engines: {node: '>=20.19.0'}
 
   mpath@0.9.0:
@@ -663,9 +663,9 @@ packages:
     resolution: {integrity: sha512-r0eojU4bI8MnHr8c5bNo7lJDdI2qXlWWJk6a9EAFG7vbhTjElYhBVS3/miuE0uOuoLdb8Mc/rVfsmm6eo5o9GA==}
     hasBin: true
 
-  tr46@5.1.1:
-    resolution: {integrity: sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==}
-    engines: {node: '>=18'}
+  tr46@6.0.0:
+    resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
+    engines: {node: '>=20'}
 
   ts-api-utils@2.5.0:
     resolution: {integrity: sha512-OJ/ibxhPlqrMM0UiNHJ/0CKQkoKF243/AEmplt3qpRgkW8VG7IfOS41h7V8TjITqdByHzrjcS/2si+y4lIh8NA==}
@@ -715,13 +715,13 @@ packages:
   v8-compile-cache-lib@3.0.1:
     resolution: {integrity: sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg==}
 
-  webidl-conversions@7.0.0:
-    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
-    engines: {node: '>=12'}
+  webidl-conversions@8.0.1:
+    resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
+    engines: {node: '>=20'}
 
-  whatwg-url@14.2.0:
-    resolution: {integrity: sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw==}
-    engines: {node: '>=18'}
+  whatwg-url@15.1.0:
+    resolution: {integrity: sha512-2ytDk0kiEj/yu90JOAp44PVPUkO9+jVhyf+SybKlRHSDlvOOZhdPIrr7xTH64l4WixO2cP+wQIcgujkGBPPz6g==}
+    engines: {node: '>=20'}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -1211,18 +1211,18 @@ snapshots:
       '@isaacs/nonrecursive-glob-match': 1.1.0
       brace-expansion: 5.0.13
 
-  mongodb-connection-string-url@7.0.2:
+  mongodb-connection-string-url@7.0.3:
     dependencies:
       '@types/whatwg-url': 13.0.0
-      whatwg-url: 14.2.0
+      whatwg-url: 15.1.0
 
   mongodb@7.8.0:
     dependencies:
       '@mongodb-js/saslprep': 1.6.3
       bson: 7.3.4
-      mongodb-connection-string-url: 7.0.2
+      mongodb-connection-string-url: 7.0.3
 
-  mongoose@9.12.1:
+  mongoose@9.12.2:
     dependencies:
       '@standard-schema/spec': 1.1.0
       kareem: 3.4.1
@@ -1339,7 +1339,7 @@ snapshots:
 
   touch@3.1.1: {}
 
-  tr46@5.1.1:
+  tr46@6.0.0:
     dependencies:
       punycode: 2.3.1
 
@@ -1392,12 +1392,12 @@ snapshots:
 
   v8-compile-cache-lib@3.0.1: {}
 
-  webidl-conversions@7.0.0: {}
+  webidl-conversions@8.0.1: {}
 
-  whatwg-url@14.2.0:
+  whatwg-url@15.1.0:
     dependencies:
-      tr46: 5.1.1
-      webidl-conversions: 7.0.0
+      tr46: 6.0.0
+      webidl-conversions: 8.0.1
 
   which@2.0.2:
     dependencies:
